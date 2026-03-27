@@ -411,6 +411,9 @@ async function startServer() {
   });
 }
 
+// Export the app for Vercel serverless functions
+export default app;
+
 // Only start the server if we're not running in Vercel's serverless environment
 if (process.env.VERCEL !== '1') {
   startServer();
