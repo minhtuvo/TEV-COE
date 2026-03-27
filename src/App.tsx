@@ -2432,7 +2432,7 @@ export default function App() {
           <div className="flex justify-center mb-6">
             <img src="https://static.wixstatic.com/media/dea24c_6207cba10c9e4e15939adcc4dbd42524~mv2.jpg" alt="TEV Logo" className="w-20 h-20 rounded-full object-contain border border-slate-200 p-1" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-2">Hệ thống Quản lý DGA</h1>
+          <h1 className="text-2xl font-bold text-slate-900 mb-2">Welcome to TEV COE</h1>
           <p className="text-slate-500 mb-8">Vui lòng đăng nhập để tiếp tục sử dụng hệ thống.</p>
           <button 
             onClick={handleLogin}
