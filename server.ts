@@ -9,7 +9,7 @@ import { Readable } from 'stream';
 
 dotenv.config();
 
-const app = express();
+export const app = express();
 const PORT = 3000;
 
 app.use(cors());
