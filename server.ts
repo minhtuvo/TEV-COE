@@ -411,4 +411,7 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start the server if we're not running in Vercel's serverless environment
+if (process.env.VERCEL !== '1') {
+  startServer();
+}
