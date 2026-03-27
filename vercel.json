@@ -1,8 +1,12 @@
 {
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api/index.cjs"
+    },
+    {
       "source": "/auth/callback(.*)",
-      "destination": "/api/auth/callback"
+      "destination": "/api/index.cjs"
     },
     {
       "source": "/(.*)",
