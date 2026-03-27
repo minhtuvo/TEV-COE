@@ -1,0 +1,176 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a user of the application, either an admin/staff or a customer.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User's email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User's full name"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "customer"],
+          "description": "Role of the user. Admins can see everything, customers can only see their own data."
+        },
+        "customerId": {
+          "type": "string",
+          "description": "Reference to the Customer entity if the user is a customer. Empty for admins."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "role", "createdAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Represents a customer company/factory.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the customer company"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["name", "createdAt"]
+    },
+    "Equipment": {
+      "title": "Equipment",
+      "description": "Represents a transformer asset.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the transformer"
+        },
+        "customerId": {
+          "type": "string",
+          "description": "ID of the customer who owns this equipment"
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Name of the customer (denormalized for easy display)"
+        },
+        "location": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["healthy", "warning", "critical"]
+        },
+        "lastInspection": {
+          "type": "string"
+        },
+        "nextInspection": {
+          "type": "string"
+        },
+        "manufacturer": {
+          "type": "string"
+        },
+        "year": {
+          "type": "number"
+        },
+        "power": {
+          "type": "string"
+        },
+        "voltage": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["name", "customerId", "createdAt"]
+    },
+    "DgaReport": {
+      "title": "DgaReport",
+      "description": "Represents a DGA analysis report for a specific equipment.",
+      "type": "object",
+      "properties": {
+        "equipmentId": {
+          "type": "string"
+        },
+        "customerId": {
+          "type": "string",
+          "description": "ID of the customer who owns the equipment (for security rules)"
+        },
+        "date": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "inspector": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["healthy", "warning", "critical"]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "h2": { "type": "number" },
+        "ch4": { "type": "number" },
+        "c2h6": { "type": "number" },
+        "c2h4": { "type": "number" },
+        "c2h2": { "type": "number" },
+        "co": { "type": "number" },
+        "co2": { "type": "number" },
+        "moisture": { "type": "number" },
+        "acidity": { "type": "number" },
+        "bdStrength": { "type": "number" },
+        "ffa": { "type": "number" },
+        "estDp": { "type": "number" },
+        "age": { "type": "number" },
+        "loadFactor": { "type": "number" },
+        "currentHealthScore": { "type": "number" },
+        "futureHealthScore": { "type": "number" },
+        "currentHI": { "type": "string" },
+        "futureHI": { "type": "string" },
+        "tdcgCondition": { "type": "string" },
+        "recommendations": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["equipmentId", "customerId", "date", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles and roles."
+    },
+    "customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Stores customer companies."
+    },
+    "equipment/{equipmentId}": {
+      "schema": { "$ref": "#/entities/Equipment" },
+      "description": "Stores transformer assets."
+    },
+    "dgaReports/{reportId}": {
+      "schema": { "$ref": "#/entities/DgaReport" },
+      "description": "Stores DGA analysis reports."
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "TEV Service Flatform",
+  "description": "",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

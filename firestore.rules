@@ -1,0 +1,200 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - email: string (required)
+    //   - displayName: string (optional)
+    //   - role: string (required, 'admin' or 'customer')
+    //   - customerId: string (optional)
+    //   - createdAt: string (required)
+    //
+    // Collection: customers
+    // Document ID: {customerId}
+    // Fields:
+    //   - name: string (required)
+    //   - createdAt: string (required)
+    //
+    // Collection: equipment
+    // Document ID: {equipmentId}
+    // Fields:
+    //   - name: string (required)
+    //   - customerId: string (required)
+    //   - customerName: string (optional)
+    //   - location: string (optional)
+    //   - status: string (optional)
+    //   - lastInspection: string (optional)
+    //   - nextInspection: string (optional)
+    //   - manufacturer: string (optional)
+    //   - year: number (optional)
+    //   - power: string (optional)
+    //   - voltage: string (optional)
+    //   - type: string (optional)
+    //   - createdAt: string (required)
+    //
+    // Collection: dgaReports
+    // Document ID: {reportId}
+    // Fields:
+    //   - equipmentId: string (required)
+    //   - customerId: string (required)
+    //   - date: string (required)
+    //   - inspector: string (optional)
+    //   - status: string (optional)
+    //   - notes: string (optional)
+    //   - h2, ch4, c2h6, c2h4, c2h2, co, co2, moisture, acidity, bdStrength, ffa, estDp, age, loadFactor, currentHealthScore, futureHealthScore: number (optional)
+    //   - currentHI, futureHI, tdcgCondition: string (optional)
+    //   - recommendations: list (optional)
+    //   - createdAt: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (request.auth.token.email == "sgm1707@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function getUserCustomerId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.customerId;
+    }
+
+    function isCustomerOwner(customerId) {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        getUserCustomerId() == customerId
+      );
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['email', 'role', 'createdAt']) &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.role in ['admin', 'customer'] &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('customerId' in data) || (data.customerId is string && data.customerId.size() < 100)) &&
+             data.createdAt is string;
+    }
+
+    function isValidCustomer(data) {
+      return hasRequiredFields(['name', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.createdAt is string;
+    }
+
+    function isValidEquipment(data) {
+      return hasRequiredFields(['name', 'customerId', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.customerId is string && data.customerId.size() > 0 && data.customerId.size() < 100 &&
+             (!('customerName' in data) || (data.customerName is string && data.customerName.size() < 200)) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 500)) &&
+             (!('status' in data) || (data.status in ['healthy', 'warning', 'critical'])) &&
+             (!('lastInspection' in data) || (data.lastInspection is string && data.lastInspection.size() < 100)) &&
+             (!('nextInspection' in data) || (data.nextInspection is string && data.nextInspection.size() < 100)) &&
+             (!('manufacturer' in data) || (data.manufacturer is string && data.manufacturer.size() < 200)) &&
+             (!('year' in data) || data.year is number) &&
+             (!('power' in data) || (data.power is string && data.power.size() < 100)) &&
+             (!('voltage' in data) || (data.voltage is string && data.voltage.size() < 100)) &&
+             (!('type' in data) || (data.type is string && data.type.size() < 100)) &&
+             data.createdAt is string;
+    }
+
+    function isValidDgaReport(data) {
+      return hasRequiredFields(['equipmentId', 'customerId', 'date', 'createdAt']) &&
+             data.equipmentId is string && data.equipmentId.size() > 0 && data.equipmentId.size() < 100 &&
+             data.customerId is string && data.customerId.size() > 0 && data.customerId.size() < 100 &&
+             data.date is string && data.date.size() > 0 && data.date.size() < 100 &&
+             (!('inspector' in data) || (data.inspector is string && data.inspector.size() < 100)) &&
+             (!('status' in data) || (data.status in ['healthy', 'warning', 'critical'])) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 2000)) &&
+             (!('h2' in data) || data.h2 is number) &&
+             (!('ch4' in data) || data.ch4 is number) &&
+             (!('c2h6' in data) || data.c2h6 is number) &&
+             (!('c2h4' in data) || data.c2h4 is number) &&
+             (!('c2h2' in data) || data.c2h2 is number) &&
+             (!('co' in data) || data.co is number) &&
+             (!('co2' in data) || data.co2 is number) &&
+             (!('moisture' in data) || data.moisture is number) &&
+             (!('acidity' in data) || data.acidity is number) &&
+             (!('bdStrength' in data) || data.bdStrength is number) &&
+             (!('ffa' in data) || data.ffa is number) &&
+             (!('estDp' in data) || data.estDp is number) &&
+             (!('age' in data) || data.age is number) &&
+             (!('loadFactor' in data) || data.loadFactor is number) &&
+             (!('currentHealthScore' in data) || data.currentHealthScore is number) &&
+             (!('futureHealthScore' in data) || data.futureHealthScore is number) &&
+             (!('currentHI' in data) || (data.currentHI is string && data.currentHI.size() < 10)) &&
+             (!('futureHI' in data) || (data.futureHI is string && data.futureHI.size() < 10)) &&
+             (!('tdcgCondition' in data) || (data.tdcgCondition is string && data.tdcgCondition.size() < 100)) &&
+             (!('recommendations' in data) || (data.recommendations is list && data.recommendations.size() < 20)) &&
+             data.createdAt is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (
+        isAdmin() || (isOwner(userId) && request.resource.data.role == 'customer')
+      );
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
+        isAdmin() || (isOwner(userId) && areImmutableFieldsUnchanged(['role', 'customerId', 'createdAt']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow read: if isAdmin() || isCustomerOwner(customerId);
+      allow create: if isAdmin() && isValidCustomer(request.resource.data);
+      allow update: if isAdmin() && isValidCustomer(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow delete: if isAdmin();
+    }
+
+    match /equipment/{equipmentId} {
+      allow read: if isAdmin() || isCustomerOwner(resource.data.customerId);
+      allow create: if isAdmin() && isValidEquipment(request.resource.data);
+      allow update: if isAdmin() && isValidEquipment(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow delete: if isAdmin();
+    }
+
+    match /dgaReports/{reportId} {
+      allow read: if isAdmin() || isCustomerOwner(resource.data.customerId);
+      allow create: if isAdmin() && isValidDgaReport(request.resource.data);
+      allow update: if isAdmin() && isValidDgaReport(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'equipmentId', 'customerId']);
+      allow delete: if isAdmin();
+    }
+  }
+}
