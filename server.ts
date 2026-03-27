@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import multer from 'multer';
 import { Readable } from 'stream';
@@ -71,7 +70,7 @@ app.get('/api/auth/google/url', (req, res) => {
 });
 
 // 2. Handle OAuth Callback
-app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
+app.get(['/auth/callback', '/auth/callback/', '/api/auth/callback', '/api/auth/callback/'], async (req, res) => {
   const { code, state } = req.query;
   
   try {
@@ -393,6 +392,7 @@ app.post('/api/drive/upload', upload.array('files'), async (req, res) => {
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
