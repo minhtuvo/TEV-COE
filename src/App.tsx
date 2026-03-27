@@ -70,11 +70,261 @@ import {
 import { MapContainer, TileLayer, Marker, Popup, Tooltip as LeafletTooltip } from 'react-leaflet';
 import L from 'leaflet';
 import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import * as htmlToImage from 'html-to-image';
 import { auth, db, signInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Html5QrcodeScanner } from 'html5-qrcode';
+
+// --- PDF Helper ---
+let robotoRegularBase64: string | null = null;
+let robotoBoldBase64: string | null = null;
+
+const getConfiguredJsPDF = async (orientation: 'p' | 'l' = 'p') => {
+  const pdf = new jsPDF(orientation, 'mm', 'a4');
+  
+  if (!robotoRegularBase64) {
+    const resReg = await fetch('https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Me5WZLCzYlKw.ttf');
+    const bufReg = await resReg.arrayBuffer();
+    robotoRegularBase64 = btoa(new Uint8Array(bufReg).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+  }
+  
+  if (!robotoBoldBase64) {
+    const resBold = await fetch('https://fonts.gstatic.com/s/roboto/v30/KFOlCnqEu92Fr1MmWUlfBBc4AMP6lQ.ttf');
+    const bufBold = await resBold.arrayBuffer();
+    robotoBoldBase64 = btoa(new Uint8Array(bufBold).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+  }
+  
+  pdf.addFileToVFS('Roboto-Regular.ttf', robotoRegularBase64);
+  pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+  
+  pdf.addFileToVFS('Roboto-Bold.ttf', robotoBoldBase64);
+  pdf.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
+  
+  pdf.setFont('Roboto');
+  return pdf;
+};
+
+const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) => {
+  const pdf = await getConfiguredJsPDF();
+  
+  // Header
+  pdf.setFont('Roboto', 'bold');
+  pdf.setFontSize(24);
+  pdf.setTextColor(30, 58, 138); // blue-900
+  pdf.text('TEV', 20, 25);
+  
+  pdf.setFont('Roboto', 'normal');
+  pdf.setFontSize(10);
+  pdf.setTextColor(29, 78, 216); // blue-700
+  pdf.text('ASSET INSPECTION', 20, 32);
+  
+  pdf.setFont('Roboto', 'bold');
+  pdf.setFontSize(18);
+  pdf.setTextColor(30, 41, 59); // slate-800
+  pdf.text('BÁO CÁO KIỂM TRA', 190, 25, { align: 'right' });
+  
+  pdf.setFont('Roboto', 'normal');
+  pdf.setFontSize(12);
+  pdf.setTextColor(100, 116, 139); // slate-500
+  pdf.text('INSPECTION REPORT', 190, 32, { align: 'right' });
+  
+  // Line separator
+  pdf.setDrawColor(30, 58, 138);
+  pdf.setLineWidth(0.5);
+  pdf.line(20, 38, 190, 38);
+  
+  // Info Grid
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFont('Roboto', 'bold');
+  
+  pdf.text('Mã báo cáo / Report ID', 20, 50);
+  pdf.text('Ngày / Date', 105, 50);
+  
+  pdf.text('Thiết bị / Equipment', 20, 65);
+  pdf.text('Nhà máy / Site', 105, 65);
+  
+  pdf.text('Người thực hiện / Inspector', 20, 80);
+  pdf.text('Đánh giá / Condition', 105, 80);
+  
+  pdf.setFont('Roboto', 'normal');
+  pdf.setFontSize(12);
+  pdf.setTextColor(15, 23, 42); // slate-900
+  
+  pdf.text(reportData.id || '', 20, 55);
+  pdf.text(reportData.date || '', 105, 55);
+  
+  pdf.text(`${reportData.equipmentName || ''} (${reportData.equipmentId || ''})`, 20, 70);
+  pdf.text(reportData.factory || '', 105, 70);
+  
+  pdf.text(reportData.inspector || '', 20, 85);
+  
+  // Status Badge
+  const status = reportData.status;
+  let statusText = 'Bình thường / Normal';
+  let statusColor = [16, 185, 129]; // emerald-500
+  
+  if (status === 'warning') {
+    statusText = 'Cảnh báo / Warning';
+    statusColor = [245, 158, 11]; // amber-500
+  } else if (status === 'critical' || status === 'danger') {
+    statusText = 'Nguy hiểm / Severe';
+    statusColor = [225, 29, 72]; // rose-600
+  }
+  
+  pdf.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+  pdf.setFont('Roboto', 'bold');
+  pdf.text(statusText, 105, 85);
+  
+  // Notes
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139);
+  pdf.text('Ghi chú / Notes', 20, 100);
+  
+  pdf.setFont('Roboto', 'normal');
+  pdf.setFontSize(11);
+  pdf.setTextColor(15, 23, 42);
+  
+  const notes = reportData.notes || '';
+  const splitNotes = pdf.splitTextToSize(notes, 170);
+  pdf.text(splitNotes, 20, 107);
+  
+  let yPos = 107 + (splitNotes.length * 5) + 10;
+  
+  // Measurements
+  if (reportData.measurements && Object.keys(reportData.measurements).length > 0) {
+    pdf.setFontSize(10);
+    pdf.setTextColor(100, 116, 139);
+    pdf.setFont('Roboto', 'bold');
+    pdf.text('Thông số đo lường / Measurements', 20, yPos);
+    yPos += 8;
+    
+    const tableData = Object.entries(reportData.measurements)
+      .filter(([_, v]) => v !== '' && v !== undefined && v !== null)
+      .map(([k, v]) => [k, v]);
+      
+    if (tableData.length > 0) {
+      autoTable(pdf, {
+        startY: yPos,
+        head: [['Thông số / Parameter', 'Giá trị / Value']],
+        body: tableData,
+        theme: 'grid',
+        styles: { font: 'Roboto', fontSize: 10 },
+        headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold' },
+        margin: { left: 20, right: 20 }
+      });
+      yPos = (pdf as any).lastAutoTable.finalY + 15;
+    }
+  }
+  
+  // Footer
+  pdf.setFontSize(9);
+  pdf.setTextColor(148, 163, 184);
+  pdf.text('Được tạo tự động bởi hệ thống TEV Asset Management', 105, 285, { align: 'center' });
+  pdf.text('Automatically generated by TEV Asset Management System', 105, 290, { align: 'center' });
+  
+  if (saveAsFile) {
+    pdf.save(`${reportData.id}.pdf`);
+    return null;
+  } else {
+    return pdf.output('blob');
+  }
+};
+
+const generateListReportPDF = async (reports: any[], user: any) => {
+  const pdf = await getConfiguredJsPDF('l'); // Landscape for list
+  
+  // Header
+  pdf.setFont('Roboto', 'bold');
+  pdf.setFontSize(24);
+  pdf.setTextColor(15, 23, 42); // slate-900
+  pdf.text('Asset Inventory Report', 14, 20);
+  
+  pdf.setFont('Roboto', 'normal');
+  pdf.setFontSize(14);
+  pdf.setTextColor(71, 85, 105); // slate-600
+  pdf.text('Báo cáo danh sách thiết bị', 14, 28);
+  
+  // Info
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139); // slate-500
+  pdf.text('Submitted By:', 14, 40);
+  pdf.text('Date:', 200, 40);
+  
+  pdf.setTextColor(15, 23, 42);
+  pdf.text(user?.displayName || 'System', 40, 40);
+  pdf.text(new Date().toLocaleDateString('vi-VN'), 210, 40);
+  
+  // Line separator
+  pdf.setDrawColor(15, 23, 42);
+  pdf.setLineWidth(1);
+  pdf.line(14, 45, 283, 45);
+  
+  // Group reports by factory
+  const groupedReports = reports.reduce((acc, report) => {
+    if (!acc[report.factory]) acc[report.factory] = [];
+    acc[report.factory].push(report);
+    return acc;
+  }, {} as Record<string, any[]>);
+  
+  let yPos = 55;
+  
+  Object.entries(groupedReports).forEach(([factory, factoryReports]) => {
+    // Factory Header
+    pdf.setFont('Roboto', 'bold');
+    pdf.setFontSize(11);
+    pdf.setTextColor(15, 23, 42);
+    pdf.text(`Location Name / Nhà máy: ${factory}`, 14, yPos);
+    yPos += 5;
+    
+    const tableData = factoryReports.map(r => {
+      let statusText = 'Normal';
+      if (r.status === 'warning') statusText = 'Caution';
+      else if (r.status === 'critical' || r.status === 'danger') statusText = 'Severe';
+      
+      return [
+        r.equipmentId,
+        r.equipmentName,
+        r.type,
+        statusText,
+        r.date,
+        r.inspector
+      ];
+    });
+    
+    autoTable(pdf, {
+      startY: yPos,
+      head: [['Asset ID / Mã TB', 'Equipment Name / Tên TB', 'Type / Loại', 'Condition / Đánh giá', 'Last Inspected / Ngày KT', 'Inspector / Người KT']],
+      body: tableData,
+      theme: 'plain',
+      styles: { font: 'Roboto', fontSize: 9, cellPadding: 3 },
+      headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], lineWidth: { bottom: 0.5 }, lineColor: [15, 23, 42] },
+      bodyStyles: { lineWidth: { bottom: 0.1 }, lineColor: [203, 213, 225] },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.column.index === 3) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.textColor = [255, 255, 255];
+          data.cell.styles.halign = 'center';
+          
+          if (data.cell.raw === 'Normal') {
+            data.cell.styles.fillColor = [34, 197, 94]; // green-500
+          } else if (data.cell.raw === 'Caution') {
+            data.cell.styles.fillColor = [250, 204, 21]; // yellow-400
+            data.cell.styles.textColor = [15, 23, 42]; // dark text for yellow
+          } else if (data.cell.raw === 'Severe') {
+            data.cell.styles.fillColor = [220, 38, 38]; // red-600
+          }
+        }
+      }
+    });
+    
+    yPos = (pdf as any).lastAutoTable.finalY + 15;
+  });
+  
+  pdf.save(`Asset_Inventory_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+};
 
 // --- MOCK DATA ---
 const kpiData = {
@@ -321,7 +571,49 @@ const generateMockData = () => {
   return equipment;
 };
 
+const generateMockReports = (equipmentList: any[]) => {
+  const reports: any[] = [];
+  const inspectors = ['Nguyễn Văn A', 'Trần Văn B', 'Lê Thị C', 'Phạm Văn D'];
+  
+  equipmentList.forEach(eq => {
+    // Generate 1-3 reports per equipment
+    const numReports = Math.floor(Math.random() * 3) + 1;
+    for (let i = 0; i < numReports; i++) {
+      const year = 2024 + Math.floor(Math.random() * 3);
+      const month = Math.floor(Math.random() * 12) + 1;
+      const day = Math.floor(Math.random() * 28) + 1;
+      const dateStr = `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
+      
+      const status = Math.random() > 0.8 ? 'warning' : (Math.random() > 0.9 ? 'critical' : 'healthy');
+      let notes = 'Thiết bị hoạt động bình thường.';
+      if (status === 'warning') notes = 'Cần theo dõi thêm một số thông số.';
+      if (status === 'critical') notes = 'Phát hiện bất thường nghiêm trọng, cần xử lý ngay.';
+
+      reports.push({
+        id: `REP-${year}-${month.toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
+        date: dateStr,
+        equipmentId: eq.id,
+        equipmentName: eq.name,
+        factory: eq.factory,
+        type: eq.type,
+        inspector: inspectors[Math.floor(Math.random() * inspectors.length)],
+        status: status,
+        notes: notes,
+        fileUrl: '#' // Placeholder for actual file download
+      });
+    }
+  });
+  
+  // Sort by date descending (simple string sort works for YYYY-MM-DD, but we have DD/MM/YYYY, so let's just sort randomly or keep as is for mock)
+  return reports.sort((a, b) => {
+    const [d1, m1, y1] = a.date.split('/');
+    const [d2, m2, y2] = b.date.split('/');
+    return new Date(`${y2}-${m2}-${d2}`).getTime() - new Date(`${y1}-${m1}-${d1}`).getTime();
+  });
+};
+
 const initialAllEquipment = generateMockData();
+const initialAllReports = generateMockReports(initialAllEquipment);
 
 const pastReports = [
   { id: 'REP-2026-02', date: '10/02/2026', inspector: 'Nguyễn Văn A', status: 'warning', notes: 'Nhiệt độ dầu hơi cao, cần theo dõi.' },
@@ -1003,6 +1295,17 @@ export default function App() {
   const [trendingEquipment, setTrendingEquipment] = useState('TRF-01');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(false);
+  
+  // Reports State
+  const [allReports, setAllReports] = useState(initialAllReports);
+  const [reportFilterSearch, setReportFilterSearch] = useState('');
+  const [reportFilterFactory, setReportFilterFactory] = useState('all');
+  const [reportFilterType, setReportFilterType] = useState('all');
+  const [reportFilterStatus, setReportFilterStatus] = useState('all');
+  const [reportFilterStartDate, setReportFilterStartDate] = useState('');
+  const [reportFilterEndDate, setReportFilterEndDate] = useState('');
+  const [reportCurrentPage, setReportCurrentPage] = useState(1);
+  const reportsPerPage = 15;
 
   // Deep Analysis State
   const [dgaData, setDgaData] = useState({
@@ -1153,7 +1456,67 @@ export default function App() {
       };
     });
 
-    return { temp: tempTrend, tev: tevTrend, dga: dgaTrend };
+    const windingTempTrend = Array.from({ length: 9 }).map((_, i) => ({
+      time: `${(i + 8).toString().padStart(2, '0')}:00`,
+      temp: Math.round((baseTemp + 10) + random(i + 1000) * 12 + (isCritical ? i * 1.8 : isWarning ? i * 0.6 : 0))
+    }));
+
+    const irTrend = Array.from({ length: 6 }).map((_, i) => {
+      const month = (i * 3 + 1) % 12 || 12;
+      const year = 25 + Math.floor((i * 3 + 1) / 12);
+      const baseIr = isCritical ? 500 : isWarning ? 1500 : 5000;
+      return {
+        time: `T${month}/${year}`,
+        ir: Math.round(baseIr + random(i + 1100) * (baseIr * 0.1) - (isCritical ? i * 50 : isWarning ? i * 100 : 0))
+      };
+    });
+
+    const windingResTrend = Array.from({ length: 6 }).map((_, i) => {
+      const month = (i * 3 + 1) % 12 || 12;
+      const year = 25 + Math.floor((i * 3 + 1) / 12);
+      const baseRes = 0.5;
+      return {
+        time: `T${month}/${year}`,
+        res: Number((baseRes + random(i + 1200) * 0.05 + (isCritical ? i * 0.02 : isWarning ? i * 0.01 : 0)).toFixed(3))
+      };
+    });
+
+    const pdTrend = Array.from({ length: 9 }).map((_, i) => ({
+      time: `${(i + 8).toString().padStart(2, '0')}:00`,
+      pd: Math.round((isCritical ? 50 : isWarning ? 25 : 5) + random(i + 1300) * 10 + (isCritical ? i * 3 : isWarning ? i * 1 : 0))
+    }));
+
+    const elcidTrend = Array.from({ length: 6 }).map((_, i) => {
+      const month = (i * 3 + 1) % 12 || 12;
+      const year = 25 + Math.floor((i * 3 + 1) / 12);
+      const baseElcid = isCritical ? 150 : isWarning ? 80 : 20;
+      return {
+        time: `T${month}/${year}`,
+        elcid: Math.round(baseElcid + random(i + 1400) * 15 + (isCritical ? i * 10 : isWarning ? i * 5 : 0))
+      };
+    });
+
+    const piTrend = Array.from({ length: 6 }).map((_, i) => {
+      const month = (i * 3 + 1) % 12 || 12;
+      const year = 25 + Math.floor((i * 3 + 1) / 12);
+      const basePi = isCritical ? 1.2 : isWarning ? 1.8 : 3.5;
+      return {
+        time: `T${month}/${year}`,
+        pi: Number((basePi + random(i + 1500) * 0.2 - (isCritical ? i * 0.05 : isWarning ? i * 0.1 : 0)).toFixed(2))
+      };
+    });
+
+    return { 
+      temp: tempTrend, 
+      tev: tevTrend, 
+      dga: dgaTrend,
+      winding_temp: windingTempTrend,
+      ir: irTrend,
+      winding_res: windingResTrend,
+      pd: pdTrend,
+      elcid: elcidTrend,
+      pi: piTrend
+    };
   }, [trendingEquipment, allEquipment]);
 
   const selectedFactoryName = selectedFactory === 'all' 
@@ -1168,13 +1531,43 @@ export default function App() {
 
   const displayedEquipment = filteredEquipment.filter(eq => {
     const matchStatus = statusFilter === 'all' || eq.status === statusFilter;
-    const matchName = filterName === '' || eq.name.toLowerCase().includes(filterName.toLowerCase());
+    const matchName = filterName === '' || eq.name.toLowerCase().includes(filterName.toLowerCase()) || eq.id.toLowerCase().includes(filterName.toLowerCase());
     const matchLocation = filterLocation === '' || eq.factory.toLowerCase().includes(filterLocation.toLowerCase()) || eq.location.toLowerCase().includes(filterLocation.toLowerCase());
     const matchType = filterType === 'all' || eq.type === filterType;
     const matchHealthMin = filterHealthMin === '' || eq.health >= parseInt(filterHealthMin);
     const matchHealthMax = filterHealthMax === '' || eq.health <= parseInt(filterHealthMax);
     return matchStatus && matchName && matchLocation && matchType && matchHealthMin && matchHealthMax;
   });
+
+  const displayedReports = allReports.filter(report => {
+    const matchSearch = reportFilterSearch === '' || 
+      report.id.toLowerCase().includes(reportFilterSearch.toLowerCase()) || 
+      report.equipmentId.toLowerCase().includes(reportFilterSearch.toLowerCase()) ||
+      report.equipmentName.toLowerCase().includes(reportFilterSearch.toLowerCase());
+    const matchFactory = reportFilterFactory === 'all' || report.factory === reportFilterFactory;
+    const matchType = reportFilterType === 'all' || report.type === reportFilterType;
+    const matchStatus = reportFilterStatus === 'all' || report.status === reportFilterStatus;
+    
+    let matchDate = true;
+    if (reportFilterStartDate || reportFilterEndDate) {
+      const [d, m, y] = report.date.split('/');
+      const reportDate = new Date(`${y}-${m}-${d}`);
+      if (reportFilterStartDate) {
+        matchDate = matchDate && reportDate >= new Date(reportFilterStartDate);
+      }
+      if (reportFilterEndDate) {
+        matchDate = matchDate && reportDate <= new Date(reportFilterEndDate);
+      }
+    }
+    
+    return matchSearch && matchFactory && matchType && matchStatus && matchDate;
+  });
+
+  const totalReportPages = Math.ceil(displayedReports.length / reportsPerPage);
+  const currentReports = displayedReports.slice(
+    (reportCurrentPage - 1) * reportsPerPage,
+    reportCurrentPage * reportsPerPage
+  );
 
   // Pagination
   const itemsPerPage = 20;
@@ -1879,28 +2272,54 @@ export default function App() {
     setSaveSuccess(false);
 
     try {
-      // 1. Upload files to Drive if any
+      // 0. Generate Report ID and Date
+      const newReportId = `REP-${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+      const reportDate = new Date().toLocaleDateString('vi-VN');
+
+      // 1. Generate PDF Report
+      const reportData = {
+        id: newReportId,
+        date: reportDate,
+        equipmentId: equipmentCode,
+        equipmentName: equipmentName,
+        factory: siteName,
+        type: selectedEqType,
+        inspector: user?.displayName || 'FSE',
+        status: healthResult?.status || 'healthy',
+        notes: `Báo cáo kiểm tra định kỳ. ${attachedFiles.length > 0 ? 'Có file đính kèm.' : ''}`,
+        measurements: formData
+      };
+      
+      const pdfBlob = await generateIndividualReportPDF(reportData, false) as Blob;
+      const pdfFile = new File([pdfBlob], `${newReportId}.pdf`, { type: 'application/pdf' });
+
+      // 2. Upload files to Drive (including the generated PDF)
       let attachmentLinks = '';
+      const uploadFormData = new FormData();
+      
+      // Append user attached files
       if (attachedFiles.length > 0) {
-        const uploadFormData = new FormData();
         attachedFiles.forEach(file => {
           uploadFormData.append('files', file);
         });
+      }
+      
+      // Append auto-generated PDF
+      uploadFormData.append('files', pdfFile);
 
-        const uploadRes = await fetch('/api/drive/upload', {
-          method: 'POST',
-          body: uploadFormData
-        });
+      const uploadRes = await fetch('/api/drive/upload', {
+        method: 'POST',
+        body: uploadFormData
+      });
 
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          if (uploadData.success && uploadData.links) {
-            attachmentLinks = uploadData.links.join('\n');
-          }
-        } else {
-          console.error('Failed to upload files');
-          alert('Có lỗi khi upload file đính kèm, nhưng dữ liệu vẫn sẽ được lưu.');
+      if (uploadRes.ok) {
+        const uploadData = await uploadRes.json();
+        if (uploadData.success && uploadData.links) {
+          attachmentLinks = uploadData.links.join('\n');
         }
+      } else {
+        console.error('Failed to upload files');
+        alert('Có lỗi khi upload file đính kèm, nhưng dữ liệu vẫn sẽ được lưu.');
       }
 
       // Prepare data row based on equipment type
@@ -1977,6 +2396,22 @@ export default function App() {
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+      
+      // Add a new report to the reports list
+      const newReport = {
+        id: newReportId,
+        date: reportDate,
+        equipmentId: equipmentCode,
+        equipmentName: equipmentName,
+        factory: siteName,
+        type: selectedEqType,
+        inspector: user?.displayName || 'FSE',
+        status: healthResult?.status || 'healthy',
+        notes: `Báo cáo kiểm tra định kỳ. ${attachmentLinks ? 'Có file đính kèm.' : ''}`,
+        fileUrl: attachmentLinks || '#'
+      };
+      setAllReports(prev => [newReport, ...prev]);
+
       setAttachedFiles([]);
       setFormData({});
       setHealthResult(null);
@@ -2803,7 +3238,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {pastReports.map((report, idx) => (
+                        {allReports.filter(r => r.equipmentId === selectedEquipment.id).map((report, idx) => (
                           <tr key={idx} className="hover:bg-slate-50">
                             <td className="px-4 py-3 text-slate-700">{report.date}</td>
                             <td className="px-4 py-3 text-slate-700">{report.inspector}</td>
@@ -3138,7 +3573,21 @@ export default function App() {
                       <div className="flex items-center gap-3 mt-2">
                         <select 
                           value={trendingEquipment} 
-                          onChange={(e) => setTrendingEquipment(e.target.value)}
+                          onChange={(e) => {
+                            setTrendingEquipment(e.target.value);
+                            const eq = allEquipment.find(item => item.id === e.target.value);
+                            if (eq) {
+                              if (eq.type === 'Máy biến áp') {
+                                setTrendingChartType('temp');
+                              } else if (eq.type === 'Động cơ') {
+                                setTrendingChartType('ir');
+                              } else if (eq.type === 'Tủ điện') {
+                                setTrendingChartType('tev');
+                              } else {
+                                setTrendingChartType('temp');
+                              }
+                            }
+                          }}
                           className="text-xs border-slate-200 rounded-md text-slate-600 bg-slate-50 px-2 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                         >
                           {allEquipment.map(eq => (
@@ -3150,9 +3599,30 @@ export default function App() {
                           onChange={(e) => setTrendingChartType(e.target.value)}
                           className="text-xs border-slate-200 rounded-md text-slate-600 bg-slate-50 px-2 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                         >
-                          <option value="temp">Nhiệt độ dầu</option>
-                          <option value="tev">TEV & Siêu âm (PD)</option>
-                          <option value="dga">Khí hòa tan (DGA)</option>
+                          {allEquipment.find(eq => eq.id === trendingEquipment)?.type === 'Máy biến áp' && (
+                            <>
+                              <option value="temp">Nhiệt độ dầu</option>
+                              <option value="winding_temp">Nhiệt độ cuộn dây</option>
+                              <option value="dga">Phân tích khí (DGA)</option>
+                            </>
+                          )}
+                          {allEquipment.find(eq => eq.id === trendingEquipment)?.type === 'Động cơ' && (
+                            <>
+                              <option value="ir">Điện trở cách điện</option>
+                              <option value="winding_res">Điện trở cuộn dây</option>
+                              <option value="pd">PD</option>
+                              <option value="elcid">ELCID</option>
+                              <option value="pi">PI</option>
+                            </>
+                          )}
+                          {allEquipment.find(eq => eq.id === trendingEquipment)?.type === 'Tủ điện' && (
+                            <>
+                              <option value="tev">PD (TEV)</option>
+                            </>
+                          )}
+                          {!['Máy biến áp', 'Động cơ', 'Tủ điện'].includes(allEquipment.find(eq => eq.id === trendingEquipment)?.type || '') && (
+                             <option value="temp">Nhiệt độ</option>
+                          )}
                         </select>
                       </div>
                     </div>
@@ -3165,8 +3635,8 @@ export default function App() {
                   </div>
                   <div className="p-5 flex-1 min-h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      {trendingChartType === 'temp' ? (
-                        <AreaChart data={dynamicTrendData.temp} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                      {trendingChartType === 'temp' || trendingChartType === 'winding_temp' ? (
+                        <AreaChart data={trendingChartType === 'temp' ? dynamicTrendData.temp : dynamicTrendData.winding_temp} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
@@ -3181,7 +3651,7 @@ export default function App() {
                             labelStyle={{ color: '#64748b', marginBottom: '4px' }}
                           />
                           <ReferenceLine y={90} label={{ position: 'top', value: 'Ngưỡng cảnh báo (90°C)', fill: '#ef4444', fontSize: 12 }} stroke="#ef4444" strokeDasharray="3 3" />
-                          <Area type="monotone" dataKey="temp" name="Nhiệt độ dầu (°C)" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorTemp)" activeDot={{ r: 6, strokeWidth: 0, fill: '#3b82f6' }} />
+                          <Area type="monotone" dataKey="temp" name={trendingChartType === 'temp' ? "Nhiệt độ dầu (°C)" : "Nhiệt độ cuộn dây (°C)"} stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorTemp)" activeDot={{ r: 6, strokeWidth: 0, fill: '#3b82f6' }} />
                         </AreaChart>
                       ) : trendingChartType === 'tev' ? (
                         <AreaChart data={dynamicTrendData.tev} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
@@ -3209,7 +3679,7 @@ export default function App() {
                           <Area yAxisId="left" type="monotone" dataKey="tev" name="TEV (dBmV)" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorTev)" activeDot={{ r: 6, strokeWidth: 0, fill: '#6366f1' }} />
                           <Area yAxisId="right" type="monotone" dataKey="ultrasonic" name="Siêu âm (dBµV)" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorUltra)" activeDot={{ r: 6, strokeWidth: 0, fill: '#10b981' }} />
                         </AreaChart>
-                      ) : (
+                      ) : trendingChartType === 'dga' ? (
                         <LineChart data={dynamicTrendData.dga} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                           <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
@@ -3225,6 +3695,95 @@ export default function App() {
                           <Line type="monotone" dataKey="c2h4" name="C2H4 (ppm)" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                           <Line type="monotone" dataKey="c2h2" name="C2H2 (ppm)" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                         </LineChart>
+                      ) : trendingChartType === 'ir' ? (
+                        <AreaChart data={dynamicTrendData.ir} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorIr" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dx={-10} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                            labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                          />
+                          <ReferenceLine y={100} label={{ position: 'top', value: 'Ngưỡng cảnh báo (100 MΩ)', fill: '#ef4444', fontSize: 12 }} stroke="#ef4444" strokeDasharray="3 3" />
+                          <Area type="monotone" dataKey="ir" name="Điện trở cách điện (MΩ)" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorIr)" activeDot={{ r: 6, strokeWidth: 0, fill: '#10b981' }} />
+                        </AreaChart>
+                      ) : trendingChartType === 'winding_res' ? (
+                        <AreaChart data={dynamicTrendData.winding_res} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorRes" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dx={-10} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                            labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                          />
+                          <Area type="monotone" dataKey="res" name="Điện trở cuộn dây (Ω)" stroke="#f59e0b" strokeWidth={3} fillOpacity={1} fill="url(#colorRes)" activeDot={{ r: 6, strokeWidth: 0, fill: '#f59e0b' }} />
+                        </AreaChart>
+                      ) : trendingChartType === 'pd' ? (
+                        <AreaChart data={dynamicTrendData.pd} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorPd" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dx={-10} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                            labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                          />
+                          <ReferenceLine y={40} label={{ position: 'top', value: 'Ngưỡng cảnh báo (40 pC)', fill: '#ef4444', fontSize: 12 }} stroke="#ef4444" strokeDasharray="3 3" />
+                          <Area type="monotone" dataKey="pd" name="PD (pC)" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorPd)" activeDot={{ r: 6, strokeWidth: 0, fill: '#8b5cf6' }} />
+                        </AreaChart>
+                      ) : trendingChartType === 'elcid' ? (
+                        <AreaChart data={dynamicTrendData.elcid} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorElcid" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#ec4899" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#ec4899" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dx={-10} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                            labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                          />
+                          <ReferenceLine y={100} label={{ position: 'top', value: 'Ngưỡng cảnh báo (100 mA)', fill: '#ef4444', fontSize: 12 }} stroke="#ef4444" strokeDasharray="3 3" />
+                          <Area type="monotone" dataKey="elcid" name="ELCID (mA)" stroke="#ec4899" strokeWidth={3} fillOpacity={1} fill="url(#colorElcid)" activeDot={{ r: 6, strokeWidth: 0, fill: '#ec4899' }} />
+                        </AreaChart>
+                      ) : (
+                        <AreaChart data={dynamicTrendData.pi} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorPi" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dx={-10} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                            labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                          />
+                          <ReferenceLine y={2.0} label={{ position: 'top', value: 'Ngưỡng an toàn (2.0)', fill: '#10b981', fontSize: 12 }} stroke="#10b981" strokeDasharray="3 3" />
+                          <Area type="monotone" dataKey="pi" name="Chỉ số phân cực (PI)" stroke="#06b6d4" strokeWidth={3} fillOpacity={1} fill="url(#colorPi)" activeDot={{ r: 6, strokeWidth: 0, fill: '#06b6d4' }} />
+                        </AreaChart>
                       )}
                     </ResponsiveContainer>
                   </div>
@@ -3513,6 +4072,8 @@ export default function App() {
                         type="text" 
                         placeholder="Tìm mã thiết bị, tên..." 
                         className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 rounded-lg text-sm w-full sm:w-64 transition-all outline-none"
+                        value={filterName}
+                        onChange={(e) => { setFilterName(e.target.value); setCurrentPage(1); }}
                       />
                     </div>
                     <button onClick={() => setShowAddEqModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm">
@@ -3526,23 +4087,38 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <span className="text-slate-500 font-medium">Lọc theo:</span>
                   </div>
-                  <select className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500">
-                    <option>Tất cả nhà máy</option>
-                    <option>Nhà máy Bắc Ninh</option>
-                    <option>Nhà máy Bình Dương</option>
-                    <option>Nhà máy Đồng Nai</option>
+                  <select 
+                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                    value={filterLocation}
+                    onChange={(e) => { setFilterLocation(e.target.value); setCurrentPage(1); }}
+                  >
+                    <option value="">Tất cả nhà máy</option>
+                    {dynamicSiteData
+                      .filter(site => selectedCustomer === 'all' || site.customer === selectedCustomer)
+                      .map(site => (
+                      <option key={site.id} value={site.name}>{site.name}</option>
+                    ))}
                   </select>
-                  <select className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500">
-                    <option>Tất cả loại thiết bị</option>
-                    <option>Máy biến áp</option>
-                    <option>Động cơ điện</option>
-                    <option>Tủ điện</option>
+                  <select 
+                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                    value={filterType}
+                    onChange={(e) => { setFilterType(e.target.value); setCurrentPage(1); }}
+                  >
+                    <option value="all">Tất cả loại thiết bị</option>
+                    <option value="Máy biến áp">Máy biến áp</option>
+                    <option value="Động cơ">Động cơ điện</option>
+                    <option value="Máy phát">Máy phát điện</option>
+                    <option value="Tủ điện">Tủ điện</option>
                   </select>
-                  <select className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500">
-                    <option>Tất cả trạng thái</option>
-                    <option>Khỏe mạnh</option>
-                    <option>Cảnh báo</option>
-                    <option>Nguy hiểm</option>
+                  <select 
+                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                    value={statusFilter}
+                    onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                  >
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="healthy">Khỏe mạnh</option>
+                    <option value="warning">Cảnh báo</option>
+                    <option value="critical">Nguy hiểm</option>
                   </select>
                 </div>
 
@@ -3636,23 +4212,17 @@ export default function App() {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                       <input 
                         type="text" 
+                        value={reportFilterSearch}
+                        onChange={(e) => {
+                          setReportFilterSearch(e.target.value);
+                          setReportCurrentPage(1);
+                        }}
                         placeholder="Tìm mã báo cáo, thiết bị..." 
                         className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 rounded-lg text-sm w-full sm:w-64 transition-all outline-none"
                       />
                     </div>
                     <button 
-                      onClick={() => {
-                        const headers = ['Mã TB', 'Tên thiết bị', 'Nhà máy', 'Loại', 'Trạng thái', 'Sức khỏe'];
-                        const csvContent = [
-                          headers.join(','),
-                          ...displayedEquipment.map(eq => `${eq.id},${eq.name},${eq.factory},${eq.type},${eq.status},${eq.health}`)
-                        ].join('\n');
-                        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(blob);
-                        link.download = 'danh_sach_thiet_bi.csv';
-                        link.click();
-                      }}
+                      onClick={() => generateListReportPDF(displayedReports, user)}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors"
                     >
                       <Download size={16} />
@@ -3666,29 +4236,66 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <span className="text-slate-500 font-medium">Lọc theo:</span>
                   </div>
-                  <select className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500">
-                    <option>Tất cả nhà máy</option>
-                    <option>Nhà máy Bắc Ninh</option>
-                    <option>Nhà máy Bình Dương</option>
-                    <option>Nhà máy Đồng Nai</option>
+                  <select 
+                    value={reportFilterFactory}
+                    onChange={(e) => {
+                      setReportFilterFactory(e.target.value);
+                      setReportCurrentPage(1);
+                    }}
+                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                  >
+                    <option value="all">Tất cả nhà máy</option>
+                    {[...new Set(allEquipment.map(eq => eq.factory))].map(factory => (
+                      <option key={factory} value={factory}>{factory}</option>
+                    ))}
                   </select>
-                  <select className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500">
-                    <option>Tất cả loại thiết bị</option>
-                    <option>Máy biến áp</option>
-                    <option>Động cơ điện</option>
-                    <option>Tủ điện</option>
+                  <select 
+                    value={reportFilterType}
+                    onChange={(e) => {
+                      setReportFilterType(e.target.value);
+                      setReportCurrentPage(1);
+                    }}
+                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                  >
+                    <option value="all">Tất cả loại thiết bị</option>
+                    <option value="Máy biến áp">Máy biến áp</option>
+                    <option value="Động cơ">Động cơ điện</option>
+                    <option value="Tủ điện">Tủ điện</option>
                   </select>
-                  <select className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500">
-                    <option>Tất cả trạng thái</option>
-                    <option>Khỏe mạnh</option>
-                    <option>Cảnh báo</option>
-                    <option>Nguy hiểm</option>
+                  <select 
+                    value={reportFilterStatus}
+                    onChange={(e) => {
+                      setReportFilterStatus(e.target.value);
+                      setReportCurrentPage(1);
+                    }}
+                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                  >
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="healthy">Khỏe mạnh</option>
+                    <option value="warning">Cảnh báo</option>
+                    <option value="critical">Nguy hiểm</option>
                   </select>
                   <div className="flex items-center gap-2 ml-auto">
                     <span className="text-slate-500">Thời gian:</span>
-                    <input type="date" className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500" />
+                    <input 
+                      type="date" 
+                      value={reportFilterStartDate}
+                      onChange={(e) => {
+                        setReportFilterStartDate(e.target.value);
+                        setReportCurrentPage(1);
+                      }}
+                      className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500" 
+                    />
                     <span className="text-slate-400">-</span>
-                    <input type="date" className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500" />
+                    <input 
+                      type="date" 
+                      value={reportFilterEndDate}
+                      onChange={(e) => {
+                        setReportFilterEndDate(e.target.value);
+                        setReportCurrentPage(1);
+                      }}
+                      className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500" 
+                    />
                   </div>
                 </div>
 
@@ -3707,13 +4314,13 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="text-sm divide-y divide-slate-100">
-                      {[...pastReports, ...pastReports, ...pastReports].map((report, index) => (
+                      {currentReports.length > 0 ? currentReports.map((report, index) => (
                         <tr key={`${report.id}-${index}`} className="hover:bg-slate-50 transition-colors">
                           <td className="p-4 font-medium text-blue-600">{report.id}</td>
                           <td className="p-4 flex items-center gap-2"><Calendar size={14} className="text-slate-400"/> {report.date}</td>
                           <td className="p-4">
-                            <div className="font-medium text-slate-900">Máy biến áp T1</div>
-                            <div className="text-xs text-slate-500 font-mono">TRF-01</div>
+                            <div className="font-medium text-slate-900">{report.equipmentName}</div>
+                            <div className="text-xs text-slate-500 font-mono">{report.equipmentId}</div>
                           </td>
                           <td className="p-4 text-slate-700">{report.inspector}</td>
                           <td className="p-4"><StatusBadge status={report.status} /></td>
@@ -3723,28 +4330,65 @@ export default function App() {
                               <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Xem chi tiết">
                                 <Eye size={16} />
                               </button>
-                              <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Tải PDF">
+                              <button 
+                                onClick={() => generateIndividualReportPDF(report, true)}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                                title="Tải PDF"
+                              >
                                 <Download size={16} />
                               </button>
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      )) : (
+                        <tr>
+                          <td colSpan={7} className="p-8 text-center text-slate-500">
+                            Không tìm thấy báo cáo nào phù hợp với bộ lọc.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
                 
                 {/* Pagination */}
                 <div className="p-4 border-t border-slate-100 flex items-center justify-between text-sm text-slate-500 bg-white">
-                  <span>Hiển thị 1-9 trong số 45 báo cáo</span>
+                  <span>
+                    {displayedReports.length > 0 
+                      ? `Hiển thị ${(reportCurrentPage - 1) * reportsPerPage + 1}-${Math.min(reportCurrentPage * reportsPerPage, displayedReports.length)} trong số ${displayedReports.length} báo cáo`
+                      : 'Không có báo cáo nào'}
+                  </span>
                   <div className="flex gap-1">
-                    <button className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50" disabled>Trước</button>
-                    <button className="px-3 py-1 border border-slate-200 rounded bg-blue-50 text-blue-600 font-medium">1</button>
-                    <button className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50">2</button>
-                    <button className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50">3</button>
-                    <button className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50">...</button>
-                    <button className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50">5</button>
-                    <button className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50">Sau</button>
+                    <button 
+                      onClick={() => setReportCurrentPage(prev => Math.max(prev - 1, 1))}
+                      disabled={reportCurrentPage === 1}
+                      className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Trước
+                    </button>
+                    {Array.from({ length: Math.min(5, totalReportPages) }, (_, i) => {
+                      let pageNum = i + 1;
+                      if (totalReportPages > 5 && reportCurrentPage > 3) {
+                        pageNum = reportCurrentPage - 2 + i;
+                        if (pageNum > totalReportPages) pageNum = totalReportPages - (4 - i);
+                      }
+                      return (
+                        <button 
+                          key={pageNum}
+                          onClick={() => setReportCurrentPage(pageNum)}
+                          className={`px-3 py-1 border rounded ${reportCurrentPage === pageNum ? 'bg-blue-50 text-blue-600 font-medium border-blue-200' : 'border-slate-200 hover:bg-slate-50'}`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                    <button 
+                      onClick={() => setReportCurrentPage(prev => Math.min(prev + 1, totalReportPages))}
+                      disabled={reportCurrentPage === totalReportPages || totalReportPages === 0}
+                      className="px-3 py-1 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Sau
+                    </button>
                   </div>
                 </div>
               </div>
@@ -4325,7 +4969,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="text-sm divide-y divide-slate-100">
-                      {pastReports.map((report) => (
+                      {allReports.filter(r => r.equipmentId === selectedEquipment.id).map((report) => (
                         <tr key={report.id} className="hover:bg-slate-50 transition-colors">
                           <td className="p-4 font-medium text-blue-600">{report.id}</td>
                           <td className="p-4 flex items-center gap-2"><Calendar size={14} className="text-slate-400"/> {report.date}</td>
@@ -4337,7 +4981,11 @@ export default function App() {
                               <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Xem chi tiết">
                                 <Eye size={16} />
                               </button>
-                              <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Tải PDF">
+                              <button 
+                                onClick={() => generateIndividualReportPDF(report, true)}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                                title="Tải PDF"
+                              >
                                 <Download size={16} />
                               </button>
                             </div>
