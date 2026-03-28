@@ -84,25 +84,41 @@ let robotoBoldBase64: string | null = null;
 const getConfiguredJsPDF = async (orientation: 'p' | 'l' = 'p') => {
   const pdf = new jsPDF(orientation, 'mm', 'a4');
   
-  if (!robotoRegularBase64) {
-    const resReg = await fetch('https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Me5WZLCzYlKw.ttf');
-    const bufReg = await resReg.arrayBuffer();
-    robotoRegularBase64 = btoa(new Uint8Array(bufReg).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+  try {
+    if (!robotoRegularBase64) {
+      const resReg = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
+      if (resReg.ok) {
+        const bufReg = await resReg.arrayBuffer();
+        robotoRegularBase64 = btoa(new Uint8Array(bufReg).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+      }
+    }
+    
+    if (!robotoBoldBase64) {
+      const resBold = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf');
+      if (resBold.ok) {
+        const bufBold = await resBold.arrayBuffer();
+        robotoBoldBase64 = btoa(new Uint8Array(bufBold).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+      }
+    }
+    
+    if (robotoRegularBase64) {
+      pdf.addFileToVFS('Roboto-Regular.ttf', robotoRegularBase64);
+      pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+    }
+    
+    if (robotoBoldBase64) {
+      pdf.addFileToVFS('Roboto-Bold.ttf', robotoBoldBase64);
+      pdf.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
+    }
+    
+    if (robotoRegularBase64 || robotoBoldBase64) {
+      pdf.setFont('Roboto');
+    }
+  } catch (error) {
+    console.error('Failed to load custom fonts:', error);
+    // Fallback to default font
   }
   
-  if (!robotoBoldBase64) {
-    const resBold = await fetch('https://fonts.gstatic.com/s/roboto/v30/KFOlCnqEu92Fr1MmWUlfBBc4AMP6lQ.ttf');
-    const bufBold = await resBold.arrayBuffer();
-    robotoBoldBase64 = btoa(new Uint8Array(bufBold).reduce((data, byte) => data + String.fromCharCode(byte), ''));
-  }
-  
-  pdf.addFileToVFS('Roboto-Regular.ttf', robotoRegularBase64);
-  pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
-  
-  pdf.addFileToVFS('Roboto-Bold.ttf', robotoBoldBase64);
-  pdf.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
-  
-  pdf.setFont('Roboto');
   return pdf;
 };
 
@@ -110,22 +126,22 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   const pdf = await getConfiguredJsPDF();
   
   // Header
-  pdf.setFont('Roboto', 'bold');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
   pdf.setFontSize(24);
   pdf.setTextColor(30, 58, 138); // blue-900
   pdf.text('TEV', 20, 25);
   
-  pdf.setFont('Roboto', 'normal');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(10);
   pdf.setTextColor(29, 78, 216); // blue-700
   pdf.text('ASSET INSPECTION', 20, 32);
   
-  pdf.setFont('Roboto', 'bold');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
   pdf.setFontSize(18);
   pdf.setTextColor(30, 41, 59); // slate-800
   pdf.text('BÁO CÁO KIỂM TRA', 190, 25, { align: 'right' });
   
-  pdf.setFont('Roboto', 'normal');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(12);
   pdf.setTextColor(100, 116, 139); // slate-500
   pdf.text('INSPECTION REPORT', 190, 32, { align: 'right' });
@@ -138,7 +154,7 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   // Info Grid
   pdf.setFontSize(10);
   pdf.setTextColor(100, 116, 139);
-  pdf.setFont('Roboto', 'bold');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
   
   pdf.text('Mã báo cáo / Report ID', 20, 50);
   pdf.text('Ngày / Date', 105, 50);
@@ -149,7 +165,7 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   pdf.text('Người thực hiện / Inspector', 20, 80);
   pdf.text('Đánh giá / Condition', 105, 80);
   
-  pdf.setFont('Roboto', 'normal');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(12);
   pdf.setTextColor(15, 23, 42); // slate-900
   
@@ -175,7 +191,7 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   }
   
   pdf.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
-  pdf.setFont('Roboto', 'bold');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
   pdf.text(statusText, 105, 85);
   
   // Notes
@@ -183,7 +199,7 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   pdf.setTextColor(100, 116, 139);
   pdf.text('Ghi chú / Notes', 20, 100);
   
-  pdf.setFont('Roboto', 'normal');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(11);
   pdf.setTextColor(15, 23, 42);
   
@@ -197,13 +213,13 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   if (reportData.measurements && Object.keys(reportData.measurements).length > 0) {
     pdf.setFontSize(10);
     pdf.setTextColor(100, 116, 139);
-    pdf.setFont('Roboto', 'bold');
+    pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
     pdf.text('Thông số đo lường / Measurements', 20, yPos);
     yPos += 8;
     
     const tableData = Object.entries(reportData.measurements)
       .filter(([_, v]) => v !== '' && v !== undefined && v !== null)
-      .map(([k, v]) => [k, v]);
+      .map(([k, v]) => [String(k), String(v)]);
       
     if (tableData.length > 0) {
       autoTable(pdf, {
@@ -211,7 +227,7 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
         head: [['Thông số / Parameter', 'Giá trị / Value']],
         body: tableData,
         theme: 'grid',
-        styles: { font: 'Roboto', fontSize: 10 },
+        styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10 },
         headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold' },
         margin: { left: 20, right: 20 }
       });
@@ -234,33 +250,31 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
 };
 
 const generateListReportPDF = async (reports: any[], user: any) => {
+  if (!reports || reports.length === 0) {
+    alert('Không có dữ liệu để xuất báo cáo.');
+    return;
+  }
+  
   const pdf = await getConfiguredJsPDF('l'); // Landscape for list
   
   // Header
-  pdf.setFont('Roboto', 'bold');
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
   pdf.setFontSize(24);
   pdf.setTextColor(15, 23, 42); // slate-900
   pdf.text('Asset Inventory Report', 14, 20);
   
-  pdf.setFont('Roboto', 'normal');
-  pdf.setFontSize(14);
-  pdf.setTextColor(71, 85, 105); // slate-600
-  pdf.text('Báo cáo danh sách thiết bị', 14, 28);
-  
   // Info
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(10);
-  pdf.setTextColor(100, 116, 139); // slate-500
-  pdf.text('Submitted By:', 14, 40);
-  pdf.text('Date:', 200, 40);
+  pdf.setTextColor(15, 23, 42); // slate-900
+  pdf.text('Submitted By:', 14, 35);
+  pdf.text(user?.displayName || 'System', 40, 35);
   
-  pdf.setTextColor(15, 23, 42);
-  pdf.text(user?.displayName || 'System', 40, 40);
-  pdf.text(new Date().toLocaleDateString('vi-VN'), 210, 40);
+  pdf.text('Description:', 100, 35);
+  pdf.text('Báo cáo danh sách thiết bị', 125, 35);
   
-  // Line separator
-  pdf.setDrawColor(15, 23, 42);
-  pdf.setLineWidth(1);
-  pdf.line(14, 45, 283, 45);
+  pdf.text('Date:', 200, 35);
+  pdf.text(new Date().toLocaleDateString('vi-VN'), 215, 35);
   
   // Group reports by factory
   const groupedReports = reports.reduce((acc, report) => {
@@ -269,58 +283,77 @@ const generateListReportPDF = async (reports: any[], user: any) => {
     return acc;
   }, {} as Record<string, any[]>);
   
-  let yPos = 55;
+  const tableBody: any[] = [];
   
   Object.entries(groupedReports).forEach(([factory, factoryReports]) => {
-    // Factory Header
-    pdf.setFont('Roboto', 'bold');
-    pdf.setFontSize(11);
-    pdf.setTextColor(15, 23, 42);
-    pdf.text(`Location Name / Nhà máy: ${factory}`, 14, yPos);
-    yPos += 5;
+    // Add grouping row
+    tableBody.push([
+      {
+        content: `Location Name: ${factory}`,
+        colSpan: 6,
+        styles: { fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [15, 23, 42], lineWidth: 0 }
+      }
+    ]);
     
-    const tableData = factoryReports.map(r => {
+    // Add data rows
+    factoryReports.forEach(r => {
       let statusText = 'Normal';
       if (r.status === 'warning') statusText = 'Caution';
       else if (r.status === 'critical' || r.status === 'danger') statusText = 'Severe';
       
-      return [
-        r.equipmentId,
-        r.equipmentName,
-        r.type,
+      tableBody.push([
+        String(r.equipmentId || ''),
+        String(r.equipmentName || ''),
+        String(r.type || ''),
         statusText,
-        r.date,
-        r.inspector
-      ];
+        String(r.date || ''),
+        String(r.inspector || '')
+      ]);
     });
-    
-    autoTable(pdf, {
-      startY: yPos,
-      head: [['Asset ID / Mã TB', 'Equipment Name / Tên TB', 'Type / Loại', 'Condition / Đánh giá', 'Last Inspected / Ngày KT', 'Inspector / Người KT']],
-      body: tableData,
-      theme: 'plain',
-      styles: { font: 'Roboto', fontSize: 9, cellPadding: 3 },
-      headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], lineWidth: { bottom: 0.5 }, lineColor: [15, 23, 42] },
-      bodyStyles: { lineWidth: { bottom: 0.1 }, lineColor: [203, 213, 225] },
-      didParseCell: function(data) {
-        if (data.section === 'body' && data.column.index === 3) {
-          data.cell.styles.fontStyle = 'bold';
-          data.cell.styles.textColor = [255, 255, 255];
-          data.cell.styles.halign = 'center';
-          
-          if (data.cell.raw === 'Normal') {
-            data.cell.styles.fillColor = [34, 197, 94]; // green-500
-          } else if (data.cell.raw === 'Caution') {
-            data.cell.styles.fillColor = [250, 204, 21]; // yellow-400
-            data.cell.styles.textColor = [15, 23, 42]; // dark text for yellow
-          } else if (data.cell.raw === 'Severe') {
-            data.cell.styles.fillColor = [220, 38, 38]; // red-600
-          }
+  });
+  
+  autoTable(pdf, {
+    startY: 45,
+    head: [['Asset ID / Mã TB', 'Equipment Name / Tên TB', 'Type / Loại', 'Condition / Đánh giá', 'Last Inspected / Ngày KT', 'Inspector / Người KT']],
+    body: tableBody,
+    theme: 'plain',
+    styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10, cellPadding: 2 },
+    headStyles: { 
+      fontStyle: 'bold', 
+      textColor: [15, 23, 42], 
+      lineWidth: { top: 1, bottom: 1 }, 
+      lineColor: [15, 23, 42] 
+    },
+    bodyStyles: { 
+      lineWidth: { bottom: 0.1 }, 
+      lineColor: [203, 213, 225] 
+    },
+    didParseCell: function(data) {
+      // Style grouping rows
+      if (data.section === 'body' && data.row.raw[0] && data.row.raw[0].colSpan === 6) {
+        data.cell.styles.lineWidth = { bottom: 1 };
+        data.cell.styles.lineColor = [15, 23, 42];
+      }
+      
+      // Style Condition column
+      if (data.section === 'body' && data.column.index === 3 && !data.row.raw[0]?.colSpan) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.textColor = [255, 255, 255];
+        data.cell.styles.halign = 'center';
+        
+        if (data.cell.raw === 'Normal') {
+          data.cell.styles.fillColor = [0, 255, 0]; // Bright green like image
+          data.cell.styles.textColor = [15, 23, 42]; // Dark text
+        } else if (data.cell.raw === 'Caution') {
+          data.cell.styles.fillColor = [255, 255, 0]; // Bright yellow like image
+          data.cell.styles.textColor = [15, 23, 42]; // Dark text
+        } else if (data.cell.raw === 'Severe') {
+          data.cell.styles.fillColor = [255, 0, 0]; // Bright red like image
+        } else if (data.cell.raw === 'Observe') {
+          data.cell.styles.fillColor = [0, 112, 192]; // Blue like image
         }
       }
-    });
-    
-    yPos = (pdf as any).lastAutoTable.finalY + 15;
+    }
   });
   
   pdf.save(`Asset_Inventory_Report_${new Date().toISOString().split('T')[0]}.pdf`);
