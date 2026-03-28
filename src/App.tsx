@@ -41,8 +41,7 @@ import {
   RefreshCw,
   LogOut,
   User,
-  Paperclip,
-  X
+  Paperclip
 } from 'lucide-react';
 import {
   LineChart,
@@ -392,7 +391,7 @@ const generateListReportPDF = async (reports: any[], user: any) => {
     ]);
     
     // Add data rows
-    factoryReports.forEach(r => {
+    (factoryReports as any[]).forEach(r => {
       let statusText = 'Normal';
       if (r.status === 'warning') statusText = 'Caution';
       else if (r.status === 'critical' || r.status === 'danger') statusText = 'Severe';
@@ -3420,7 +3419,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {allReports.filter(r => r.equipmentId === selectedEquipment.id).map((report, idx) => (
+                        {allReports.filter(r => r.equipmentId === equipmentCode).map((report, idx) => (
                           <tr key={idx} className="hover:bg-slate-50">
                             <td className="px-4 py-3 text-slate-700">{report.date}</td>
                             <td className="px-4 py-3 text-slate-700">{report.inspector}</td>
@@ -5151,7 +5150,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="text-sm divide-y divide-slate-100">
-                      {allReports.filter(r => r.equipmentId === selectedEquipment.id).map((report) => (
+                      {allReports.filter(r => r.equipmentId === equipmentCode).map((report) => (
                         <tr key={report.id} className="hover:bg-slate-50 transition-colors">
                           <td className="p-4 font-medium text-blue-600">{report.id}</td>
                           <td className="p-4 flex items-center gap-2"><Calendar size={14} className="text-slate-400"/> {report.date}</td>
