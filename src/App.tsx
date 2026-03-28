@@ -122,6 +122,33 @@ const getConfiguredJsPDF = async (orientation: 'p' | 'l' = 'p') => {
   return pdf;
 };
 
+const paramLabels: Record<string, string> = {
+  oilTemp: 'Nhiệt độ dầu (°C)',
+  windingTemp: 'Nhiệt độ cuộn dây (°C)',
+  irHighLow: 'Điện trở cách điện Cao-Thấp (MΩ)',
+  irHighEarth: 'Điện trở cách điện Cao-Đất (MΩ)',
+  oilLeak: 'Rò rỉ dầu',
+  dga: 'Phân tích khí hòa tan (DGA)',
+  dielectricStrength: 'Độ bền điện môi (kV)',
+  furan: 'Hàm lượng Furan (ppm)',
+  oilMoisture: 'Độ ẩm trong dầu (ppm)',
+  thermography: 'Nhiệt độ tiếp xúc (°C)',
+  contactRes: 'Điện trở tiếp xúc (μΩ)',
+  tev: 'Phóng điện cục bộ TEV (dBmV)',
+  ultrasonic: 'Phóng điện cục bộ Siêu âm (dBμV)',
+  tevPulses: 'Số xung TEV/chu kỳ',
+  humidity: 'Độ ẩm môi trường (%)',
+  sf6Pressure: 'Áp suất khí SF6 (bar)',
+  vibration: 'Độ rung (mm/s)',
+  statorTemp: 'Nhiệt độ Stator (°C)',
+  ir: 'Điện trở cách điện (MΩ)',
+  pd: 'Phóng điện cục bộ (pC)',
+  voltageImbalance: 'Mất cân bằng điện áp (%)',
+  pi: 'Chỉ số phân cực (PI)',
+  bearingTemp: 'Nhiệt độ ổ trục (°C)',
+  tanDelta: 'Tổn hao điện môi (Tan Delta)'
+};
+
 const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) => {
   const pdf = await getConfiguredJsPDF();
   
@@ -152,30 +179,56 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   pdf.line(20, 38, 190, 38);
   
   // Info Grid
+  let yPos = 50;
   pdf.setFontSize(10);
   pdf.setTextColor(100, 116, 139);
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
   
-  pdf.text('Mã báo cáo / Report ID', 20, 50);
-  pdf.text('Ngày / Date', 105, 50);
-  
-  pdf.text('Thiết bị / Equipment', 20, 65);
-  pdf.text('Nhà máy / Site', 105, 65);
-  
-  pdf.text('Người thực hiện / Inspector', 20, 80);
-  pdf.text('Đánh giá / Condition', 105, 80);
+  pdf.text('Mã báo cáo / Report ID', 20, yPos);
+  pdf.text('Ngày / Date', 105, yPos);
+  yPos += 5;
   
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(12);
   pdf.setTextColor(15, 23, 42); // slate-900
   
-  pdf.text(reportData.id || '', 20, 55);
-  pdf.text(reportData.date || '', 105, 55);
+  pdf.text(reportData.id || '', 20, yPos);
+  pdf.text(reportData.date || '', 105, yPos);
+  yPos += 10;
   
-  pdf.text(`${reportData.equipmentName || ''} (${reportData.equipmentId || ''})`, 20, 70);
-  pdf.text(reportData.factory || '', 105, 70);
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+  pdf.text('Thiết bị / Equipment', 20, yPos);
+  pdf.text('Nhà máy / Site', 105, yPos);
+  yPos += 5;
   
-  pdf.text(reportData.inspector || '', 20, 85);
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
+  pdf.setFontSize(12);
+  pdf.setTextColor(15, 23, 42); // slate-900
+  
+  const equipmentText = `${reportData.equipmentName || ''} (${reportData.equipmentId || ''})`;
+  const splitEquipment = pdf.splitTextToSize(equipmentText, 80);
+  const factoryText = reportData.factory || '';
+  const splitFactory = pdf.splitTextToSize(factoryText, 80);
+  
+  pdf.text(splitEquipment, 20, yPos);
+  pdf.text(splitFactory, 105, yPos);
+  
+  const maxLines = Math.max(splitEquipment.length, splitFactory.length);
+  yPos += (maxLines * 5) + 5;
+  
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+  pdf.text('Người thực hiện / Inspector', 20, yPos);
+  pdf.text('Đánh giá / Condition', 105, yPos);
+  yPos += 5;
+  
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
+  pdf.setFontSize(12);
+  pdf.setTextColor(15, 23, 42); // slate-900
+  pdf.text(reportData.inspector || '', 20, yPos);
   
   // Status Badge
   const status = reportData.status;
@@ -192,12 +245,14 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   
   pdf.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
-  pdf.text(statusText, 105, 85);
+  pdf.text(statusText, 105, yPos);
+  yPos += 15;
   
   // Notes
   pdf.setFontSize(10);
   pdf.setTextColor(100, 116, 139);
-  pdf.text('Ghi chú / Notes', 20, 100);
+  pdf.text('Ghi chú / Notes', 20, yPos);
+  yPos += 7;
   
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(11);
@@ -205,9 +260,9 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
   
   const notes = reportData.notes || '';
   const splitNotes = pdf.splitTextToSize(notes, 170);
-  pdf.text(splitNotes, 20, 107);
+  pdf.text(splitNotes, 20, yPos);
   
-  let yPos = 107 + (splitNotes.length * 5) + 10;
+  yPos += (splitNotes.length * 5) + 10;
   
   // Measurements
   if (reportData.measurements && Object.keys(reportData.measurements).length > 0) {
@@ -219,7 +274,7 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
     
     const tableData = Object.entries(reportData.measurements)
       .filter(([_, v]) => v !== '' && v !== undefined && v !== null)
-      .map(([k, v]) => [String(k), String(v)]);
+      .map(([k, v]) => [paramLabels[k] || String(k), String(v)]);
       
     if (tableData.length > 0) {
       autoTable(pdf, {
@@ -234,6 +289,28 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
       yPos = (pdf as any).lastAutoTable.finalY + 15;
     }
   }
+
+  // Recommendations
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+  pdf.text('Khuyến cáo / Recommendations', 20, yPos);
+  yPos += 8;
+  
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
+  pdf.setFontSize(11);
+  pdf.setTextColor(15, 23, 42);
+  
+  let recommendationText = 'Tiếp tục vận hành bình thường. Thực hiện kiểm tra định kỳ theo kế hoạch.';
+  if (status === 'warning') {
+    recommendationText = 'Cần theo dõi chặt chẽ các thông số bất thường. Lên kế hoạch kiểm tra chuyên sâu trong vòng 1-3 tháng tới.';
+  } else if (status === 'critical' || status === 'danger') {
+    recommendationText = 'NGUY HIỂM: Cần tách thiết bị khỏi lưới điện để kiểm tra và sửa chữa ngay lập tức. Nguy cơ sự cố cao.';
+  }
+  
+  const splitRecs = pdf.splitTextToSize(recommendationText, 170);
+  pdf.text(splitRecs, 20, yPos);
+  yPos += (splitRecs.length * 5) + 10;
   
   // Footer
   pdf.setFontSize(9);
@@ -260,21 +337,40 @@ const generateListReportPDF = async (reports: any[], user: any) => {
   // Header
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
   pdf.setFontSize(24);
-  pdf.setTextColor(15, 23, 42); // slate-900
-  pdf.text('Asset Inventory Report', 14, 20);
+  pdf.setTextColor(30, 58, 138); // blue-900
+  pdf.text('TEV', 14, 20);
   
-  // Info
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(10);
+  pdf.setTextColor(29, 78, 216); // blue-700
+  pdf.text('ASSET MANAGEMENT', 14, 27);
+  
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+  pdf.setFontSize(18);
   pdf.setTextColor(15, 23, 42); // slate-900
-  pdf.text('Submitted By:', 14, 35);
-  pdf.text(user?.displayName || 'System', 40, 35);
+  pdf.text('BÁO CÁO DANH SÁCH THIẾT BỊ', 280, 20, { align: 'right' });
   
-  pdf.text('Description:', 100, 35);
-  pdf.text('Báo cáo danh sách thiết bị', 125, 35);
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
+  pdf.setFontSize(12);
+  pdf.setTextColor(100, 116, 139); // slate-500
+  pdf.text('ASSET INVENTORY REPORT', 280, 27, { align: 'right' });
   
-  pdf.text('Date:', 200, 35);
-  pdf.text(new Date().toLocaleDateString('vi-VN'), 215, 35);
+  // Line separator
+  pdf.setDrawColor(30, 58, 138);
+  pdf.setLineWidth(0.5);
+  pdf.line(14, 32, 280, 32);
+  
+  // Info
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139); // slate-500
+  pdf.text('Người xuất / Exported By:', 14, 42);
+  pdf.text('Ngày xuất / Export Date:', 200, 42);
+  
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
+  pdf.setTextColor(15, 23, 42); // slate-900
+  pdf.text(user?.displayName || 'System', 60, 42);
+  pdf.text(new Date().toLocaleDateString('vi-VN'), 245, 42);
   
   // Group reports by factory
   const groupedReports = reports.reduce((acc, report) => {
@@ -313,11 +409,11 @@ const generateListReportPDF = async (reports: any[], user: any) => {
   });
   
   autoTable(pdf, {
-    startY: 45,
+    startY: 50,
     head: [['Asset ID / Mã TB', 'Equipment Name / Tên TB', 'Type / Loại', 'Condition / Đánh giá', 'Last Inspected / Ngày KT', 'Inspector / Người KT']],
     body: tableBody,
     theme: 'plain',
-    styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10, cellPadding: 2 },
+    styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10, cellPadding: 3 },
     headStyles: { 
       fontStyle: 'bold', 
       textColor: [15, 23, 42], 
@@ -327,6 +423,14 @@ const generateListReportPDF = async (reports: any[], user: any) => {
     bodyStyles: { 
       lineWidth: { bottom: 0.1 }, 
       lineColor: [203, 213, 225] 
+    },
+    columnStyles: {
+      0: { cellWidth: 35 },
+      1: { cellWidth: 65 },
+      2: { cellWidth: 40 },
+      3: { cellWidth: 35 },
+      4: { cellWidth: 40 },
+      5: { cellWidth: 50 }
     },
     didParseCell: function(data) {
       // Style grouping rows
@@ -622,6 +726,28 @@ const generateMockReports = (equipmentList: any[]) => {
       if (status === 'warning') notes = 'Cần theo dõi thêm một số thông số.';
       if (status === 'critical') notes = 'Phát hiện bất thường nghiêm trọng, cần xử lý ngay.';
 
+      let measurements: any = {};
+      if (eq.type === 'transformer') {
+        measurements = {
+          oilTemp: Math.floor(Math.random() * 40) + 40,
+          windingTemp: Math.floor(Math.random() * 50) + 45,
+          irHighLow: Math.floor(Math.random() * 1000) + 500,
+          dga: status === 'critical' ? 'Bất thường' : 'Bình thường',
+        };
+      } else if (eq.type === 'switchgear') {
+        measurements = {
+          tev: Math.floor(Math.random() * 30),
+          ultrasonic: Math.floor(Math.random() * 20),
+          contactRes: Math.floor(Math.random() * 100) + 50,
+        };
+      } else if (eq.type === 'motor') {
+        measurements = {
+          vibration: (Math.random() * 5).toFixed(2),
+          statorTemp: Math.floor(Math.random() * 60) + 40,
+          ir: Math.floor(Math.random() * 500) + 100,
+        };
+      }
+
       reports.push({
         id: `REP-${year}-${month.toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
         date: dateStr,
@@ -632,6 +758,7 @@ const generateMockReports = (equipmentList: any[]) => {
         inspector: inspectors[Math.floor(Math.random() * inspectors.length)],
         status: status,
         notes: notes,
+        measurements: measurements,
         fileUrl: '#' // Placeholder for actual file download
       });
     }
@@ -649,9 +776,9 @@ const initialAllEquipment = generateMockData();
 const initialAllReports = generateMockReports(initialAllEquipment);
 
 const pastReports = [
-  { id: 'REP-2026-02', date: '10/02/2026', inspector: 'Nguyễn Văn A', status: 'warning', notes: 'Nhiệt độ dầu hơi cao, cần theo dõi.' },
-  { id: 'REP-2025-08', date: '15/08/2025', inspector: 'Trần Văn B', status: 'healthy', notes: 'Thiết bị hoạt động bình thường.' },
-  { id: 'REP-2025-02', date: '20/02/2025', inspector: 'Nguyễn Văn A', status: 'healthy', notes: 'Bảo dưỡng định kỳ.' },
+  { id: 'REP-2026-02', date: '10/02/2026', inspector: 'Nguyễn Văn A', status: 'warning', notes: 'Nhiệt độ dầu hơi cao, cần theo dõi.', measurements: { oilTemp: 85, windingTemp: 92, irHighLow: 1250 } },
+  { id: 'REP-2025-08', date: '15/08/2025', inspector: 'Trần Văn B', status: 'healthy', notes: 'Thiết bị hoạt động bình thường.', measurements: { oilTemp: 80, windingTemp: 88, irHighLow: 1400 } },
+  { id: 'REP-2025-02', date: '20/02/2025', inspector: 'Nguyễn Văn A', status: 'healthy', notes: 'Bảo dưỡng định kỳ.', measurements: { oilTemp: 75, windingTemp: 85, irHighLow: 1500 } },
 ];
 
 const paramHistoryData = {
@@ -1655,7 +1782,9 @@ export default function App() {
   useEffect(() => {
     const checkAuthStatus = async () => {
       try {
-        const response = await fetch('/api/auth/status');
+        const response = await fetch('/api/auth/status', {
+          headers: getAuthHeaders(false)
+        });
         if (response.ok) {
           const data = await response.json();
           setIsGoogleConnected(data.isAuthenticated);
@@ -1672,12 +1801,27 @@ export default function App() {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        if (event.data.tokens) {
+          localStorage.setItem('google_tokens', JSON.stringify(event.data.tokens));
+        }
         setIsGoogleConnected(true);
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  const getAuthHeaders = (isJson = true) => {
+    const tokens = localStorage.getItem('google_tokens');
+    const headers: Record<string, string> = {};
+    if (tokens) {
+      headers['Authorization'] = `Bearer ${tokens}`;
+    }
+    if (isJson) {
+      headers['Content-Type'] = 'application/json';
+    }
+    return headers;
+  };
 
   const handleConnectGoogle = async () => {
     try {
@@ -2130,7 +2274,7 @@ export default function App() {
 
       const response = await fetch('/api/sheets/sync-export', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           transformers,
           switchgears,
@@ -2176,7 +2320,9 @@ export default function App() {
 
     setIsSyncing(true);
     try {
-      const response = await fetch('/api/sheets/get');
+      const response = await fetch('/api/sheets/get', {
+        headers: getAuthHeaders(false)
+      });
       if (!response.ok) {
         const err = await response.json();
         if (response.status === 401) {
@@ -2276,7 +2422,9 @@ export default function App() {
   useEffect(() => {
     const checkAuthStatus = async () => {
       try {
-        const response = await fetch('/api/auth/status');
+        const response = await fetch('/api/auth/status', {
+          headers: getAuthHeaders(false)
+        });
         const data = await response.json();
         if (data.isAuthenticated) {
           setIsGoogleConnected(true);
@@ -2342,6 +2490,7 @@ export default function App() {
 
       const uploadRes = await fetch('/api/drive/upload', {
         method: 'POST',
+        headers: getAuthHeaders(false),
         body: uploadFormData
       });
 
@@ -2405,7 +2554,7 @@ export default function App() {
 
       const response = await fetch('/api/sheets/append', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           range,
           values

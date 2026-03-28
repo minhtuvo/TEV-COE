@@ -95,7 +95,7 @@ app.get(['/auth/callback', '/auth/callback/', '/api/auth/callback', '/api/auth/c
         <body>
           <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', tokens: ${JSON.stringify(tokens)} }, '*');
               window.close();
             } else {
               window.location.href = '/';
@@ -113,12 +113,30 @@ app.get(['/auth/callback', '/auth/callback/', '/api/auth/callback', '/api/auth/c
 
 // 3. Check Auth Status
 app.get('/api/auth/status', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return res.json({ isAuthenticated: true });
+  }
   res.json({ isAuthenticated: !!globalTokens });
 });
 
+// Helper to get tokens from request
+const getTokensFromRequest = (req: express.Request) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      return JSON.parse(authHeader.split(' ')[1]);
+    } catch (e) {
+      return null;
+    }
+  }
+  return globalTokens;
+};
+
 // 4. Save Data to Google Sheets
 app.post('/api/sheets/append', async (req, res) => {
-  if (!globalTokens) {
+  const tokens = getTokensFromRequest(req);
+  if (!tokens) {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
@@ -134,7 +152,7 @@ app.post('/api/sheets/append', async (req, res) => {
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET
     );
-    oauth2Client.setCredentials(globalTokens);
+    oauth2Client.setCredentials(tokens);
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
@@ -176,7 +194,8 @@ app.post('/api/sheets/append', async (req, res) => {
 
 // 5. Get Data from Google Sheets
 app.get('/api/sheets/get', async (req, res) => {
-  if (!globalTokens) {
+  const tokens = getTokensFromRequest(req);
+  if (!tokens) {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
@@ -190,7 +209,7 @@ app.get('/api/sheets/get', async (req, res) => {
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET
     );
-    oauth2Client.setCredentials(globalTokens);
+    oauth2Client.setCredentials(tokens);
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
@@ -225,7 +244,8 @@ app.get('/api/sheets/get', async (req, res) => {
 
 // 6. Sync/Export Mock Data to Google Sheets
 app.post('/api/sheets/sync-export', async (req, res) => {
-  if (!globalTokens) {
+  const tokens = getTokensFromRequest(req);
+  if (!tokens) {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
@@ -241,7 +261,7 @@ app.post('/api/sheets/sync-export', async (req, res) => {
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET
     );
-    oauth2Client.setCredentials(globalTokens);
+    oauth2Client.setCredentials(tokens);
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
@@ -311,7 +331,8 @@ app.post('/api/sheets/sync-export', async (req, res) => {
 
 // 7. Upload files to Google Drive
 app.post('/api/drive/upload', upload.array('files'), async (req, res) => {
-  if (!globalTokens) {
+  const tokens = getTokensFromRequest(req);
+  if (!tokens) {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
@@ -320,7 +341,7 @@ app.post('/api/drive/upload', upload.array('files'), async (req, res) => {
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET
     );
-    oauth2Client.setCredentials(globalTokens);
+    oauth2Client.setCredentials(tokens);
 
     const drive = google.drive({ version: 'v3', auth: oauth2Client });
     const folderName = 'TEV_Equipment_Reports';
