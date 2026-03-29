@@ -23,11 +23,11 @@ let globalTokens: any = null;
 
 // Helper to get redirect URI based on the request origin
 const getRedirectUri = (req: express.Request) => {
+  if (process.env.APP_URL) {
+    return `${process.env.APP_URL}/auth/callback`;
+  }
   const host = req.get('host');
-  const protocol = req.protocol;
-  // In AI Studio, the app runs behind a proxy, so we use the origin header if available,
-  // or construct it. The prompt says to use the APP_URL env var if possible,
-  // but the client will send the origin.
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
   const origin = req.get('origin') || `${protocol}://${host}`;
   return `${origin}/auth/callback`;
 };

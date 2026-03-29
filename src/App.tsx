@@ -148,7 +148,57 @@ const paramLabels: Record<string, string> = {
   tanDelta: 'Tổn hao điện môi (Tan Delta)'
 };
 
-const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) => {
+const paramStandards: Record<string, string> = {
+  oilTemp: '< 85 °C',
+  windingTemp: '< 95 °C',
+  irHighLow: '> 1000 MΩ',
+  irHighEarth: '> 1000 MΩ',
+  dielectricStrength: '> 30 kV',
+  furan: '< 1.0 ppm',
+  oilMoisture: '< 20 ppm',
+  thermography: '< 70 °C',
+  contactRes: '< 100 μΩ',
+  tev: '< 20 dBmV',
+  ultrasonic: '< 10 dBμV',
+  vibration: '< 2.8 mm/s',
+  statorTemp: '< 120 °C',
+  ir: '> 100 MΩ',
+  pd: '< 500 pC',
+  voltageImbalance: '< 2.0 %',
+  pi: '> 2.0',
+  bearingTemp: '< 80 °C',
+  tanDelta: '< 0.5 %'
+};
+
+const evaluateParam = (key: string, value: any): string => {
+  const numVal = parseFloat(value);
+  if (isNaN(numVal)) return 'N/A';
+  
+  switch (key) {
+    case 'oilTemp': return numVal >= 85 ? (numVal >= 95 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
+    case 'windingTemp': return numVal >= 95 ? (numVal >= 105 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
+    case 'irHighLow':
+    case 'irHighEarth':
+    case 'ir': return numVal <= 1000 ? (numVal <= 500 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
+    case 'dielectricStrength': return numVal <= 30 ? 'Cảnh báo' : 'Bình thường';
+    case 'furan': return numVal >= 1.0 ? 'Cảnh báo' : 'Bình thường';
+    case 'oilMoisture': return numVal >= 20 ? 'Cảnh báo' : 'Bình thường';
+    case 'thermography': return numVal >= 70 ? 'Cảnh báo' : 'Bình thường';
+    case 'contactRes': return numVal >= 100 ? 'Cảnh báo' : 'Bình thường';
+    case 'tev': return numVal >= 20 ? (numVal >= 29 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
+    case 'ultrasonic': return numVal >= 10 ? 'Cảnh báo' : 'Bình thường';
+    case 'vibration': return numVal >= 2.8 ? (numVal >= 4.5 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
+    case 'statorTemp': return numVal >= 120 ? 'Cảnh báo' : 'Bình thường';
+    case 'pd': return numVal >= 500 ? 'Cảnh báo' : 'Bình thường';
+    case 'voltageImbalance': return numVal >= 2.0 ? 'Cảnh báo' : 'Bình thường';
+    case 'pi': return numVal <= 2.0 ? 'Cảnh báo' : 'Bình thường';
+    case 'bearingTemp': return numVal >= 80 ? 'Cảnh báo' : 'Bình thường';
+    case 'tanDelta': return numVal >= 0.5 ? 'Cảnh báo' : 'Bình thường';
+    default: return 'N/A';
+  }
+};
+
+const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, historicalReports: any[] = []) => {
   const pdf = await getConfiguredJsPDF();
   
   // Header
@@ -273,19 +323,106 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false) 
     
     const tableData = Object.entries(reportData.measurements)
       .filter(([_, v]) => v !== '' && v !== undefined && v !== null)
-      .map(([k, v]) => [paramLabels[k] || String(k), String(v)]);
+      .map(([k, v]) => {
+        const standard = paramStandards[k] || 'N/A';
+        const evalResult = evaluateParam(k, v);
+        return [paramLabels[k] || String(k), String(v), standard, evalResult];
+      });
       
     if (tableData.length > 0) {
       autoTable(pdf, {
         startY: yPos,
-        head: [['Thông số / Parameter', 'Giá trị / Value']],
+        head: [['Thông số / Parameter', 'Giá trị / Value', 'Tiêu chuẩn / Standard', 'Đánh giá / Evaluation']],
         body: tableData,
         theme: 'grid',
         styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10 },
         headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold' },
+        columnStyles: {
+          3: { fontStyle: 'bold' } // Make evaluation column bold
+        },
+        didParseCell: function(data) {
+          if (data.section === 'body' && data.column.index === 3) {
+            if (data.cell.raw === 'Nguy hiểm') {
+              data.cell.styles.textColor = [220, 38, 38]; // red-600
+            } else if (data.cell.raw === 'Cảnh báo') {
+              data.cell.styles.textColor = [217, 119, 6]; // amber-600
+            } else if (data.cell.raw === 'Bình thường') {
+              data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+            }
+          }
+        },
         margin: { left: 20, right: 20 }
       });
       yPos = (pdf as any).lastAutoTable.finalY + 15;
+    }
+  }
+
+  // Trending Section
+  if (historicalReports && historicalReports.length > 0 && reportData.measurements) {
+    // Filter out the current report and any newer reports
+    const currentReportDate = reportData.date ? new Date(reportData.date.split('/').reverse().join('-')).getTime() : Date.now();
+    const pastReports = historicalReports.filter(hr => {
+      if (hr.id === reportData.id) return false;
+      const hrDate = hr.date ? new Date(hr.date.split('/').reverse().join('-')).getTime() : 0;
+      return hrDate <= currentReportDate;
+    });
+    
+    const paramsWithHistory = Object.keys(reportData.measurements).filter(k => 
+      pastReports.some(hr => hr.measurements && hr.measurements[k] !== undefined)
+    );
+
+    if (paramsWithHistory.length > 0) {
+      pdf.setFontSize(10);
+      pdf.setTextColor(100, 116, 139);
+      pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+      pdf.text('Xu hướng thông số / Parameter Trends', 20, yPos);
+      yPos += 8;
+
+      const trendData = paramsWithHistory.map(k => {
+        const currentVal = parseFloat(reportData.measurements[k]);
+        
+        // Sort historical reports by date (oldest to newest)
+        const sortedHistory = [...pastReports].sort((a, b) => {
+          const [d1, m1, y1] = a.date.split('/');
+          const [d2, m2, y2] = b.date.split('/');
+          return new Date(`${y1}-${m1}-${d1}`).getTime() - new Date(`${y2}-${m2}-${d2}`).getTime();
+        });
+
+        // Get the most recent previous value
+        let prevVal = 'N/A';
+        let trend = '-';
+        
+        for (let i = sortedHistory.length - 1; i >= 0; i--) {
+          if (sortedHistory[i].measurements && sortedHistory[i].measurements[k] !== undefined) {
+            const val = parseFloat(sortedHistory[i].measurements[k]);
+            if (!isNaN(val)) {
+              prevVal = String(val);
+              if (!isNaN(currentVal)) {
+                const diff = currentVal - val;
+                const percentChange = (diff / val) * 100;
+                trend = diff > 0 ? `Tăng ${diff.toFixed(2)} (+${percentChange.toFixed(1)}%)` : 
+                        diff < 0 ? `Giảm ${Math.abs(diff).toFixed(2)} (${percentChange.toFixed(1)}%)` : 'Không đổi';
+              }
+              break;
+            }
+          }
+        }
+
+        return [paramLabels[k] || String(k), prevVal, String(reportData.measurements[k]), trend];
+      });
+
+      if (trendData.length > 0) {
+        autoTable(pdf, {
+          startY: yPos,
+          head: [['Thông số / Parameter', 'Lần trước / Previous', 'Hiện tại / Current', 'Xu hướng / Trend']],
+          body: trendData,
+          theme: 'grid',
+          styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10 },
+          headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold' },
+          margin: { left: 20, right: 20 }
+        });
+        yPos = (pdf as any).lastAutoTable.finalY + 15;
+      }
     }
   }
 
@@ -1795,8 +1932,7 @@ export default function App() {
     checkAuthStatus();
 
     const handleMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+      if (event.origin !== window.location.origin) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
@@ -2470,7 +2606,8 @@ export default function App() {
         measurements: formData
       };
       
-      const pdfBlob = await generateIndividualReportPDF(reportData, false) as Blob;
+      const historicalReports = allReports.filter(r => r.equipmentId === equipmentCode);
+      const pdfBlob = await generateIndividualReportPDF(reportData, false, historicalReports) as Blob;
       const pdfFile = new File([pdfBlob], `${newReportId}.pdf`, { type: 'application/pdf' });
 
       // 2. Upload files to Drive (including the generated PDF)
@@ -4512,7 +4649,7 @@ export default function App() {
                                 <Eye size={16} />
                               </button>
                               <button 
-                                onClick={() => generateIndividualReportPDF(report, true)}
+                                onClick={() => generateIndividualReportPDF(report, true, allReports.filter(r => r.equipmentId === report.equipmentId))}
                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
                                 title="Tải PDF"
                               >
@@ -5163,7 +5300,7 @@ export default function App() {
                                 <Eye size={16} />
                               </button>
                               <button 
-                                onClick={() => generateIndividualReportPDF(report, true)}
+                                onClick={() => generateIndividualReportPDF(report, true, allReports.filter(r => r.equipmentId === report.equipmentId))}
                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
                                 title="Tải PDF"
                               >
