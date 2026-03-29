@@ -125,8 +125,9 @@ const getTokensFromRequest = (req: express.Request) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     try {
-      return JSON.parse(authHeader.split(' ')[1]);
+      return JSON.parse(authHeader.substring(7));
     } catch (e) {
+      console.error('Failed to parse tokens from auth header:', e);
       return null;
     }
   }
@@ -188,6 +189,9 @@ app.post('/api/sheets/append', async (req, res) => {
     res.json({ success: true, data: response.data });
   } catch (error: any) {
     console.error('Error appending to sheet:', error);
+    if (error.code === 401 || error.status === 401) {
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
+    }
     res.status(500).json({ error: error.message || 'Failed to save to Google Sheets' });
   }
 });
@@ -213,8 +217,21 @@ app.get('/api/sheets/get', async (req, res) => {
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
-    // Fetch data from all 3 sheets
-    const ranges = ['Máy biến áp!A:Z', 'Tủ điện trung thế!A:Z', 'Động cơ!A:Z'];
+    // Fetch spreadsheet metadata to get actual sheet names
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+    const sheetNames = spreadsheet.data.sheets?.map(s => s.properties?.title) || [];
+    
+    // Find sheets by keywords to be more robust
+    const transformerSheet = sheetNames.find(n => n?.toLowerCase().includes('biến áp')) || sheetNames[0] || 'Máy biến áp';
+    const switchgearSheet = sheetNames.find(n => n?.toLowerCase().includes('tủ điện')) || sheetNames[1] || 'Tủ điện trung thế';
+    const motorSheet = sheetNames.find(n => n?.toLowerCase().includes('động cơ')) || sheetNames[2] || 'Động cơ';
+
+    const ranges = [
+      `${transformerSheet}!A:Z`,
+      `${switchgearSheet}!A:Z`,
+      `${motorSheet}!A:Z`
+    ];
+
     let response;
     try {
       response = await sheets.spreadsheets.values.batchGet({
@@ -223,6 +240,9 @@ app.get('/api/sheets/get', async (req, res) => {
       });
     } catch (e: any) {
       console.log('Error fetching sheets (might not exist yet):', e.message);
+      if (e.code === 401 || e.status === 401) {
+        throw e; // Rethrow auth errors to be handled by the outer catch block
+      }
       return res.json({
         success: true,
         data: { transformers: [], switchgears: [], motors: [] }
@@ -238,6 +258,9 @@ app.get('/api/sheets/get', async (req, res) => {
     res.json({ success: true, data });
   } catch (error: any) {
     console.error('Error getting data from sheet:', error);
+    if (error.code === 401 || error.status === 401) {
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
+    }
     res.status(500).json({ error: error.message || 'Failed to get data from Google Sheets' });
   }
 });
@@ -325,6 +348,9 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     res.json({ success: true, message: 'Data synced successfully' });
   } catch (error: any) {
     console.error('Error syncing to sheet:', error);
+    if (error.code === 401 || error.status === 401) {
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
+    }
     res.status(500).json({ error: error.message || 'Failed to sync to Google Sheets' });
   }
 });
@@ -406,6 +432,9 @@ app.post('/api/drive/upload', upload.array('files'), async (req, res) => {
     res.json({ success: true, links: uploadedLinks });
   } catch (error: any) {
     console.error('Drive upload error:', error);
+    if (error.code === 401 || error.status === 401) {
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
+    }
     res.status(500).json({ error: error.message || 'Failed to upload files to Google Drive' });
   }
 });

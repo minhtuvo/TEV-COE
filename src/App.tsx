@@ -41,7 +41,8 @@ import {
   RefreshCw,
   LogOut,
   User,
-  Paperclip
+  Paperclip,
+  Info
 } from 'lucide-react';
 import {
   LineChart,
@@ -75,6 +76,14 @@ import { auth, db, signInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Html5QrcodeScanner } from 'html5-qrcode';
+import { 
+  calculateSwitchgearHealth, 
+  calculateTransformerHealth, 
+  calculateMotorHealth,
+  SwitchgearParams,
+  TransformerParams,
+  MotorDiagnosticTests
+} from './lib/healthCalculator';
 
 // --- PDF Helper ---
 let robotoRegularBase64: string | null = null;
@@ -1279,6 +1288,43 @@ const DgaMatrix = ({ matrix }: { matrix: Record<string, string> }) => {
   );
 };
 
+const evaluateEquipmentParam = (type: string, param: string, value: any) => {
+  if (value === '' || value === undefined) return null;
+  const numVal = Number(value);
+  
+  if (type === 'Máy biến áp') {
+    if (param === 'oilTemp') return numVal <= 80 ? 'healthy' : numVal <= 90 ? 'warning' : 'critical';
+    if (param === 'windingTemp') return numVal <= 90 ? 'healthy' : numVal <= 105 ? 'warning' : 'critical';
+    if (param === 'irHighLow') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
+    if (param === 'irHighEarth') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
+    if (param === 'oilLeak') return value === 'normal' ? 'healthy' : value === 'light' ? 'warning' : 'critical';
+    if (param === 'dga') return numVal <= 1000 ? 'healthy' : numVal <= 2500 ? 'warning' : 'critical';
+    if (param === 'dielectricStrength') return numVal >= 50 ? 'healthy' : numVal >= 40 ? 'warning' : 'critical';
+    if (param === 'furan') return numVal <= 1 ? 'healthy' : numVal <= 5 ? 'warning' : 'critical';
+    if (param === 'oilMoisture') return numVal <= 15 ? 'healthy' : numVal <= 25 ? 'warning' : 'critical';
+  }
+  if (type === 'Động cơ') {
+    if (param === 'statorTemp') return numVal <= 110 ? 'healthy' : numVal <= 130 ? 'warning' : 'critical';
+    if (param === 'bearingTemp') return numVal <= 80 ? 'healthy' : numVal <= 95 ? 'warning' : 'critical';
+    if (param === 'vibration') return numVal <= 2.3 ? 'healthy' : numVal <= 4.5 ? 'warning' : 'critical';
+    if (param === 'tanDelta') return numVal <= 0.02 ? 'healthy' : numVal <= 0.05 ? 'warning' : 'critical';
+    if (param === 'pd') return numVal <= 1000 ? 'healthy' : numVal <= 5000 ? 'warning' : 'critical';
+    if (param === 'ir') return numVal >= 100 ? 'healthy' : numVal >= 50 ? 'warning' : 'critical';
+    if (param === 'pi') return numVal >= 2.0 ? 'healthy' : numVal >= 1.0 ? 'warning' : 'critical';
+    if (param === 'voltageImbalance') return numVal <= 3 ? 'healthy' : 'warning';
+  }
+  if (type === 'Tủ điện trung thế' || type === 'Tủ điện') {
+    if (param === 'thermography') return numVal <= 60 ? 'healthy' : numVal <= 75 ? 'warning' : 'critical';
+    if (param === 'contactRes') return numVal <= 30 ? 'healthy' : numVal <= 50 ? 'warning' : 'critical';
+    if (param === 'tev') return numVal < 20 ? 'healthy' : numVal <= 30 ? 'warning' : 'critical';
+    if (param === 'tevPulses') return numVal < 5 ? 'healthy' : numVal <= 20 ? 'warning' : 'critical';
+    if (param === 'ultrasonic') return numVal <= 5 ? 'healthy' : numVal <= 10 ? 'warning' : 'critical';
+    if (param === 'humidity') return numVal <= 60 ? 'healthy' : numVal <= 80 ? 'warning' : 'critical';
+    if (param === 'sf6Pressure') return numVal >= 5.5 ? 'healthy' : numVal >= 5.0 ? 'warning' : 'critical';
+  }
+  return null;
+};
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -1367,6 +1413,69 @@ export default function App() {
   const [selectedRiskDetail, setSelectedRiskDetail] = useState<string | null>(null);
   const [allEquipment, setAllEquipment] = useState(initialAllEquipment);
 
+  const populateFormData = (eq: any) => {
+    if (!eq || !eq.rawData) return;
+    
+    let linksStr = '';
+    if (eq.type === 'Máy biến áp') {
+      setFormData({
+        oilTemp: eq.rawData[9] || '',
+        windingTemp: eq.rawData[10] || '',
+        irHighLow: eq.rawData[11] || '',
+        irHighEarth: eq.rawData[12] || '',
+        oilLeak: eq.rawData[13] || '',
+        dga: eq.rawData[14] || '',
+        dielectricStrength: eq.rawData[15] || '',
+        furan: eq.rawData[16] || '',
+        oilMoisture: eq.rawData[17] || '',
+        age: eq.rawData[18] || '',
+        dutyFactor: eq.rawData[19] || ''
+      });
+      linksStr = eq.rawData[20] || '';
+    } else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') {
+      setFormData({
+        thermography: eq.rawData[9] || '',
+        contactRes: eq.rawData[10] || '',
+        tev: eq.rawData[11] || '',
+        ultrasonic: eq.rawData[12] || '',
+        tevPulses: eq.rawData[13] || '',
+        humidity: eq.rawData[14] || '',
+        sf6Pressure: eq.rawData[15] || '',
+        age: eq.rawData[16] || '',
+        dutyFactor: eq.rawData[17] || ''
+      });
+      linksStr = eq.rawData[18] || '';
+    } else if (eq.type === 'Động cơ') {
+      setFormData({
+        vibration: eq.rawData[9] || '',
+        statorTemp: eq.rawData[10] || '',
+        ir: eq.rawData[11] || '',
+        pd: eq.rawData[12] || '',
+        voltageImbalance: eq.rawData[13] || '',
+        pi: eq.rawData[14] || '',
+        bearingTemp: eq.rawData[15] || '',
+        tanDelta: eq.rawData[16] || '',
+        age: eq.rawData[17] || '',
+        dutyFactor: eq.rawData[18] || ''
+      });
+      linksStr = eq.rawData[19] || '';
+    }
+
+    if (linksStr) {
+      try {
+        const links = linksStr.split(',').map((l: string) => {
+          const parts = l.split('|');
+          return { name: parts[0].trim(), url: (parts[1] || parts[0]).trim() };
+        });
+        setAttachedFiles(links);
+      } catch (e) {
+        console.error("Error parsing links", e);
+      }
+    } else {
+      setAttachedFiles([]);
+    }
+  };
+
   const handleQRScan = (decodedText: string) => {
     // Stop the scanner
     setShowQRScanner(false);
@@ -1382,6 +1491,7 @@ export default function App() {
       setLocationName(foundEq.location);
       setSelectedEqType(foundEq.type === 'Tủ điện' ? 'Tủ điện trung thế' : foundEq.type);
       setIsNewEquipment(false);
+      populateFormData(foundEq);
       alert(`Đã tìm thấy thiết bị: ${foundEq.name} (${foundEq.id})`);
     } else {
       setEquipmentCode(decodedText);
@@ -2377,9 +2487,9 @@ export default function App() {
     }
   };
 
-  const handleSyncToSheets = async () => {
+  const handleSyncToSheets = async (equipmentListToSync?: any[], silent: boolean = false) => {
     if (!isGoogleConnected) {
-      alert('Vui lòng kết nối Google Drive trước khi đồng bộ.');
+      if (!silent) alert('Vui lòng kết nối Google Drive trước khi đồng bộ.');
       return;
     }
 
@@ -2391,19 +2501,40 @@ export default function App() {
       const motors: any[] = [];
       
       // Headers
-      transformers.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Nhiệt độ dầu (°C)', 'Nhiệt độ cuộn dây (°C)', 'IR Cao-Hạ (MΩ)', 'IR Cao-Vỏ (MΩ)', 'Tình trạng rò rỉ dầu', 'Khí hòa tan DGA (ppm)', 'Độ bền điện môi (kV)', 'Hàm lượng Furan (mg/kg)', 'Độ ẩm trong dầu (ppm)']);
-      switchgears.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Chụp ảnh nhiệt (°C)', 'Điện trở tiếp xúc (μΩ)', 'TEV (dBmV)', 'Siêu âm (dBμV)', 'Xung TEV (pps)', 'Độ ẩm (%)', 'Áp suất khí SF6 (bar)']);
-      motors.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Độ rung (mm/s)', 'Nhiệt độ Stator (°C)', 'Điện trở cách điện (GΩ)', 'Phóng điện cục bộ PD (pC)', 'Độ lệch điện áp (%)', 'Chỉ số phân cực PI', 'Nhiệt độ vòng bi (°C)', 'Tan Delta']);
+      transformers.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Nhiệt độ dầu (°C)', 'Nhiệt độ cuộn dây (°C)', 'IR Cao-Hạ (MΩ)', 'IR Cao-Vỏ (MΩ)', 'Tình trạng rò rỉ dầu', 'Khí hòa tan DGA (ppm)', 'Độ bền điện môi (kV)', 'Hàm lượng Furan (mg/kg)', 'Độ ẩm trong dầu (ppm)', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
+      switchgears.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Chụp ảnh nhiệt (°C)', 'Điện trở tiếp xúc (μΩ)', 'TEV (dBmV)', 'Siêu âm (dBμV)', 'Xung TEV (pps)', 'Độ ẩm (%)', 'Áp suất khí SF6 (bar)', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
+      motors.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Độ rung (mm/s)', 'Nhiệt độ Stator (°C)', 'Điện trở cách điện (GΩ)', 'Phóng điện cục bộ PD (pC)', 'Độ lệch điện áp (%)', 'Chỉ số phân cực PI', 'Nhiệt độ vòng bi (°C)', 'Tan Delta', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
 
       // Map existing data
-      allEquipment.forEach(eq => {
+      const listToSync = Array.isArray(equipmentListToSync) ? equipmentListToSync : allEquipment;
+      listToSync.forEach(eq => {
         const baseData = [eq.lastCheck || new Date().toLocaleString('vi-VN'), eq.customer, eq.factory, eq.location, eq.id, eq.name, eq.type, eq.health, eq.status];
+        const raw = eq.rawData || [];
+        
         if (eq.type === 'Máy biến áp') {
-          transformers.push([...baseData, '', '', '', '', '', '', '', '', '']);
+          // Transformers: 9 base + 9 params + 2 new + 1 link = 21 columns
+          const rowData = [...baseData];
+          for (let i = 9; i < 18; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
+          rowData.push(raw[18] !== undefined ? raw[18] : ''); // Age
+          rowData.push(raw[19] !== undefined ? raw[19] : ''); // Duty Factor
+          rowData.push(raw[20] !== undefined ? raw[20] : ''); // Links
+          transformers.push(rowData);
         } else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') {
-          switchgears.push([...baseData, '', '', '', '', '', '', '']);
+          // Switchgears: 9 base + 7 params + 2 new + 1 link = 19 columns
+          const rowData = [...baseData];
+          for (let i = 9; i < 16; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
+          rowData.push(raw[16] !== undefined ? raw[16] : ''); // Age
+          rowData.push(raw[17] !== undefined ? raw[17] : ''); // Duty Factor
+          rowData.push(raw[18] !== undefined ? raw[18] : ''); // Links
+          switchgears.push(rowData);
         } else if (eq.type === 'Động cơ') {
-          motors.push([...baseData, '', '', '', '', '', '', '', '']);
+          // Motors: 9 base + 8 params + 2 new + 1 link = 20 columns
+          const rowData = [...baseData];
+          for (let i = 9; i < 17; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
+          rowData.push(raw[17] !== undefined ? raw[17] : ''); // Age
+          rowData.push(raw[18] !== undefined ? raw[18] : ''); // Duty Factor
+          rowData.push(raw[19] !== undefined ? raw[19] : ''); // Links
+          motors.push(rowData);
         }
       });
 
@@ -2434,10 +2565,10 @@ export default function App() {
 
       setSyncSuccess(true);
       setTimeout(() => setSyncSuccess(false), 3000);
-      alert('Đồng bộ dữ liệu lên Google Sheets thành công!');
+      if (!silent) alert('Đồng bộ dữ liệu lên Google Sheets thành công!');
     } catch (error: any) {
       console.error('Sync error:', error);
-      alert('Lỗi khi đồng bộ dữ liệu: ' + error.message);
+      if (!silent) alert('Lỗi khi đồng bộ dữ liệu: ' + error.message);
     } finally {
       setIsSyncing(false);
     }
@@ -2479,10 +2610,102 @@ export default function App() {
       
       // Parse transformers
       if (data.transformers && data.transformers.length > 1) {
+        const header = data.transformers[0];
+        const ageIdx = header.indexOf('Tuổi thọ (Age)');
+        const dutyFactorIdx = header.indexOf('Hệ số làm việc (Duty Factor)');
+        const linksIdx = header.indexOf('File đính kèm (Links)');
+        
         const rows = data.transformers.slice(1); // Skip header
         rows.forEach((row: any[]) => {
           if (row[4] && row[5]) { // Must have ID and Name
-            const healthVal = parseInt(row[7]) || 0;
+            let healthVal = parseInt(row[7]) || 0;
+            let statusVal = row[8] || 'healthy';
+            
+            // Calculate using DNO methodology if age and duty factor are present
+            let age = ageIdx !== -1 ? parseFloat(row[ageIdx]) : NaN;
+            let dutyFactor = dutyFactorIdx !== -1 ? parseFloat(row[dutyFactorIdx]) : NaN;
+            
+            // If age or duty factor is missing, use defaults to calculate
+            if (isNaN(age)) age = 10;
+            if (isNaN(dutyFactor)) dutyFactor = 1.0;
+            
+            let hasCritical = false;
+            let hasWarning = false;
+            const paramsToCheck = [
+              { key: 'oilTemp', val: row[9] },
+              { key: 'windingTemp', val: row[10] },
+              { key: 'irHighLow', val: row[11] },
+              { key: 'irHighEarth', val: row[12] },
+              { key: 'oilLeak', val: row[13] },
+              { key: 'dga', val: row[14] },
+              { key: 'dielectricStrength', val: row[15] },
+              { key: 'furan', val: row[16] },
+              { key: 'oilMoisture', val: row[17] }
+            ];
+            paramsToCheck.forEach(p => {
+              const status = evaluateEquipmentParam('Máy biến áp', p.key, p.val);
+              if (status === 'critical') hasCritical = true;
+              if (status === 'warning') hasWarning = true;
+            });
+            const healthScoreFactor = hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0);
+            
+            const params: TransformerParams = {
+              mainTransformer: {
+                age,
+                normalExpectedLife: 40,
+                dutyFactor,
+                locationFactor: 1.0,
+                healthScoreFactor: healthScoreFactor,
+                reliabilityFactor: 1.0,
+                healthScoreCap: 10,
+                healthScoreCollar: 0.5,
+                reliabilityCollar: 0.5
+              },
+              tapchanger: {
+                age,
+                normalExpectedLife: 40,
+                dutyFactor,
+                locationFactor: 1.0,
+                healthScoreFactor: healthScoreFactor,
+                reliabilityFactor: 1.0,
+                healthScoreCap: 10,
+                healthScoreCollar: 0.5,
+                reliabilityCollar: 0.5
+              }
+            };
+            const result = calculateTransformerHealth(params);
+            healthVal = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+            statusVal = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+            
+            // Override with actual condition if it's worse than age-based score
+            if (hasCritical) {
+              statusVal = 'critical';
+              healthVal = Math.min(healthVal, 59);
+            } else if (hasWarning && statusVal === 'healthy') {
+              statusVal = 'warning';
+              healthVal = Math.min(healthVal, 79);
+            }
+            
+            // Create a normalized rawData array that matches the new structure
+            const normalizedRawData = [...row];
+            // Ensure array is long enough
+            while (normalizedRawData.length < 21) normalizedRawData.push('');
+            
+            // If the original row didn't have Age/DutyFactor, we need to shift the links
+            if (ageIdx === -1) {
+                // The old format had Links at index 18
+                const oldLinks = row[18] || '';
+                normalizedRawData[18] = age.toString();
+                normalizedRawData[19] = dutyFactor.toString();
+                normalizedRawData[20] = oldLinks;
+            } else {
+                normalizedRawData[18] = age.toString();
+                normalizedRawData[19] = dutyFactor.toString();
+                if (linksIdx !== -1) {
+                    normalizedRawData[20] = row[linksIdx] || '';
+                }
+            }
+
             newEquipmentList.push({
               lastCheck: row[0] || '',
               customer: row[1] || '',
@@ -2492,7 +2715,8 @@ export default function App() {
               name: row[5],
               type: row[6] || 'Máy biến áp',
               health: healthVal,
-              status: healthVal < 60 ? 'critical' : healthVal < 80 ? 'warning' : 'healthy'
+              status: statusVal,
+              rawData: normalizedRawData
             });
           }
         });
@@ -2500,10 +2724,74 @@ export default function App() {
 
       // Parse switchgears
       if (data.switchgears && data.switchgears.length > 1) {
+        const header = data.switchgears[0];
+        const ageIdx = header.indexOf('Tuổi thọ (Age)');
+        const dutyFactorIdx = header.indexOf('Hệ số làm việc (Duty Factor)');
+        const linksIdx = header.indexOf('File đính kèm (Links)');
+
         const rows = data.switchgears.slice(1);
         rows.forEach((row: any[]) => {
           if (row[4] && row[5]) {
-            const healthVal = parseInt(row[7]) || 0;
+            let healthVal = parseInt(row[7]) || 0;
+            let statusVal = row[8] || 'healthy';
+            
+            let age = ageIdx !== -1 ? parseFloat(row[ageIdx]) : NaN;
+            let dutyFactor = dutyFactorIdx !== -1 ? parseFloat(row[dutyFactorIdx]) : NaN;
+            
+            if (isNaN(age)) age = 10;
+            if (isNaN(dutyFactor)) dutyFactor = 1.0;
+            
+            let hasCritical = false;
+            let hasWarning = false;
+            const paramsToCheck = [
+              { key: 'thermography', val: row[9] },
+              { key: 'contactRes', val: row[10] },
+              { key: 'tev', val: row[11] },
+              { key: 'ultrasonic', val: row[12] },
+              { key: 'tevPulses', val: row[13] },
+              { key: 'humidity', val: row[14] },
+              { key: 'sf6Pressure', val: row[15] }
+            ];
+            paramsToCheck.forEach(p => {
+              const status = evaluateEquipmentParam('Tủ điện', p.key, p.val);
+              if (status === 'critical') hasCritical = true;
+              if (status === 'warning') hasWarning = true;
+            });
+            const measuredFactor = hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0);
+            
+            const params: SwitchgearParams = {
+              age,
+              normalExpectedLife: 40,
+              dutyFactor,
+              locationFactor: 1.0,
+              healthScoreFactor: 1.0,
+              reliabilityFactor: 1.0,
+              healthScoreCap: 10,
+              healthScoreCollar: 0.5,
+              reliabilityCollar: 0.5,
+              observedFactor: 1.0,
+              measuredFactor: measuredFactor
+            };
+            const result = calculateSwitchgearHealth(params);
+            healthVal = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+            statusVal = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+
+            const normalizedRawData = [...row];
+            while (normalizedRawData.length < 19) normalizedRawData.push('');
+            
+            if (ageIdx === -1) {
+                const oldLinks = row[16] || '';
+                normalizedRawData[16] = age.toString();
+                normalizedRawData[17] = dutyFactor.toString();
+                normalizedRawData[18] = oldLinks;
+            } else {
+                normalizedRawData[16] = age.toString();
+                normalizedRawData[17] = dutyFactor.toString();
+                if (linksIdx !== -1) {
+                    normalizedRawData[18] = row[linksIdx] || '';
+                }
+            }
+
             newEquipmentList.push({
               lastCheck: row[0] || '',
               customer: row[1] || '',
@@ -2513,7 +2801,8 @@ export default function App() {
               name: row[5],
               type: row[6] || 'Tủ điện',
               health: healthVal,
-              status: healthVal < 60 ? 'critical' : healthVal < 80 ? 'warning' : 'healthy'
+              status: statusVal,
+              rawData: normalizedRawData
             });
           }
         });
@@ -2521,10 +2810,61 @@ export default function App() {
 
       // Parse motors
       if (data.motors && data.motors.length > 1) {
+        const header = data.motors[0];
+        const ageIdx = header.indexOf('Tuổi thọ (Age)');
+        const dutyFactorIdx = header.indexOf('Hệ số làm việc (Duty Factor)');
+        const linksIdx = header.indexOf('File đính kèm (Links)');
+
         const rows = data.motors.slice(1);
         rows.forEach((row: any[]) => {
           if (row[4] && row[5]) {
-            const healthVal = parseInt(row[7]) || 0;
+            let healthVal = parseInt(row[7]) || 0;
+            let statusVal = row[8] || 'healthy';
+            
+            // For motors, we use the test values to calculate health
+            const ir = parseFloat(row[11]);
+            const pd = parseFloat(row[12]);
+            const pi = parseFloat(row[14]);
+            const tanDelta = parseFloat(row[16]);
+            
+            if (!isNaN(ir) || !isNaN(pd) || !isNaN(pi) || !isNaN(tanDelta)) {
+              const tests: MotorDiagnosticTests = {
+                ratedKV: 6600, // Default assumption if not provided
+                ir: isNaN(ir) ? undefined : { R: ir, Y: ir, B: ir },
+                pd: isNaN(pd) ? undefined : { R: pd, Y: pd, B: pd },
+                pi: isNaN(pi) ? undefined : { R: pi, Y: pi, B: pi },
+                tanDelta: isNaN(tanDelta) ? undefined : { R: tanDelta, Y: tanDelta, B: tanDelta }
+              };
+              const result = calculateMotorHealth(tests);
+              if (result.hiPercentage > 0) {
+                healthVal = Math.round(result.hiPercentage);
+                statusVal = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+              }
+            } else {
+              statusVal = healthVal < 60 ? 'critical' : healthVal < 80 ? 'warning' : 'healthy';
+            }
+
+            let age = ageIdx !== -1 ? parseFloat(row[ageIdx]) : NaN;
+            let dutyFactor = dutyFactorIdx !== -1 ? parseFloat(row[dutyFactorIdx]) : NaN;
+            if (isNaN(age)) age = 10;
+            if (isNaN(dutyFactor)) dutyFactor = 1.0;
+
+            const normalizedRawData = [...row];
+            while (normalizedRawData.length < 20) normalizedRawData.push('');
+            
+            if (ageIdx === -1) {
+                const oldLinks = row[17] || '';
+                normalizedRawData[17] = age.toString();
+                normalizedRawData[18] = dutyFactor.toString();
+                normalizedRawData[19] = oldLinks;
+            } else {
+                normalizedRawData[17] = age.toString();
+                normalizedRawData[18] = dutyFactor.toString();
+                if (linksIdx !== -1) {
+                    normalizedRawData[19] = row[linksIdx] || '';
+                }
+            }
+
             newEquipmentList.push({
               lastCheck: row[0] || '',
               customer: row[1] || '',
@@ -2534,7 +2874,8 @@ export default function App() {
               name: row[5],
               type: row[6] || 'Động cơ',
               health: healthVal,
-              status: healthVal < 60 ? 'critical' : healthVal < 80 ? 'warning' : 'healthy'
+              status: statusVal,
+              rawData: normalizedRawData
             });
           }
         });
@@ -2544,6 +2885,9 @@ export default function App() {
         setAllEquipment(newEquipmentList);
         setSyncSuccess(true);
         setTimeout(() => setSyncSuccess(false), 3000);
+        
+        // Automatically sync back to sheets to add missing columns and update health scores
+        await handleSyncToSheets(newEquipmentList, true);
       }
     } catch (error: any) {
       console.error('Fetch error:', error);
@@ -2642,7 +2986,7 @@ export default function App() {
 
       // Prepare data row based on equipment type
       const now = new Date().toLocaleString('vi-VN');
-      const baseData = [now, customerName, siteName, locationName, equipmentCode, equipmentName, selectedEqType, healthResult?.index || 'N/A', healthResult?.status || 'N/A', attachmentLinks];
+      const baseData = [now, customerName, siteName, locationName, equipmentCode, equipmentName, selectedEqType, healthResult?.index || 'N/A', healthResult?.status || 'N/A'];
       
       let values: any[] = [];
       let range = 'Sheet1!A:Z'; // Default
@@ -2658,7 +3002,10 @@ export default function App() {
           formData.dga || '',
           formData.dielectricStrength || '',
           formData.furan || '',
-          formData.oilMoisture || ''
+          formData.oilMoisture || '',
+          formData.age || '',
+          formData.dutyFactor || '',
+          attachmentLinks
         ];
         range = 'Máy biến áp!A:Z';
       } else if (selectedEqType === 'Tủ điện trung thế' || selectedEqType === 'Tủ điện') {
@@ -2670,7 +3017,10 @@ export default function App() {
           formData.ultrasonic || '', 
           formData.tevPulses || '',
           formData.humidity || '',
-          formData.sf6Pressure || ''
+          formData.sf6Pressure || '',
+          formData.age || '',
+          formData.dutyFactor || '',
+          attachmentLinks
         ];
         range = 'Tủ điện trung thế!A:Z';
       } else if (selectedEqType === 'Động cơ') {
@@ -2683,7 +3033,10 @@ export default function App() {
           formData.voltageImbalance || '', 
           formData.pi || '',
           formData.bearingTemp || '',
-          formData.tanDelta || ''
+          formData.tanDelta || '',
+          formData.age || '',
+          formData.dutyFactor || '',
+          attachmentLinks
         ];
         range = 'Động cơ!A:Z';
       }
@@ -2744,72 +3097,206 @@ export default function App() {
     }
   };
 
-  // Algorithm to evaluate single parameter against standards
-  const evaluateParam = (type: string, param: string, value: any) => {
-    if (value === '' || value === undefined) return null;
-    const numVal = Number(value);
-    
-    if (type === 'Máy biến áp') {
-      if (param === 'oilTemp') return numVal <= 80 ? 'healthy' : numVal <= 90 ? 'warning' : 'critical';
-      if (param === 'windingTemp') return numVal <= 90 ? 'healthy' : numVal <= 105 ? 'warning' : 'critical';
-      if (param === 'irHighLow') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
-      if (param === 'irHighEarth') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
-      if (param === 'oilLeak') return value === 'normal' ? 'healthy' : value === 'light' ? 'warning' : 'critical';
-      if (param === 'dga') return numVal <= 1000 ? 'healthy' : numVal <= 2500 ? 'warning' : 'critical';
-      if (param === 'dielectricStrength') return numVal >= 50 ? 'healthy' : numVal >= 40 ? 'warning' : 'critical';
-      if (param === 'furan') return numVal <= 1 ? 'healthy' : numVal <= 5 ? 'warning' : 'critical';
-      if (param === 'oilMoisture') return numVal <= 15 ? 'healthy' : numVal <= 25 ? 'warning' : 'critical';
-    }
-    if (type === 'Động cơ') {
-      if (param === 'statorTemp') return numVal <= 110 ? 'healthy' : numVal <= 130 ? 'warning' : 'critical';
-      if (param === 'bearingTemp') return numVal <= 80 ? 'healthy' : numVal <= 95 ? 'warning' : 'critical';
-      if (param === 'vibration') return numVal <= 2.3 ? 'healthy' : numVal <= 4.5 ? 'warning' : 'critical';
-      if (param === 'tanDelta') return numVal <= 0.02 ? 'healthy' : numVal <= 0.05 ? 'warning' : 'critical';
-      if (param === 'pd') return numVal <= 1000 ? 'healthy' : numVal <= 5000 ? 'warning' : 'critical';
-      if (param === 'ir') return numVal >= 100 ? 'healthy' : numVal >= 50 ? 'warning' : 'critical';
-      if (param === 'pi') return numVal >= 2.0 ? 'healthy' : numVal >= 1.0 ? 'warning' : 'critical';
-      if (param === 'voltageImbalance') return numVal <= 3 ? 'healthy' : 'warning';
-    }
-    if (type === 'Tủ điện trung thế' || type === 'Tủ điện') {
-      if (param === 'thermography') return numVal <= 60 ? 'healthy' : numVal <= 75 ? 'warning' : 'critical';
-      if (param === 'contactRes') return numVal <= 30 ? 'healthy' : numVal <= 50 ? 'warning' : 'critical';
-      if (param === 'tev') return numVal < 20 ? 'healthy' : numVal <= 30 ? 'warning' : 'critical';
-      if (param === 'tevPulses') return numVal < 5 ? 'healthy' : numVal <= 20 ? 'warning' : 'critical';
-      if (param === 'ultrasonic') return numVal <= 5 ? 'healthy' : numVal <= 10 ? 'warning' : 'critical';
-      if (param === 'humidity') return numVal <= 60 ? 'healthy' : numVal <= 80 ? 'warning' : 'critical';
-      if (param === 'sf6Pressure') return numVal >= 5.5 ? 'healthy' : numVal >= 5.0 ? 'warning' : 'critical';
-    }
-    return null;
-  };
-
   // Calculate overall Health Index
   useEffect(() => {
-    let totalScore = 0;
-    let count = 0;
-    let hasCritical = false;
-    let hasWarning = false;
-
-    Object.keys(formData).forEach(key => {
-      const status = evaluateParam(selectedEqType, key, formData[key]);
-      if (status) {
-        count++;
-        if (status === 'healthy') totalScore += 100;
-        if (status === 'warning') { totalScore += 60; hasWarning = true; }
-        if (status === 'critical') { totalScore += 20; hasCritical = true; }
-      }
-    });
-
-    if (count === 0) {
+    if (Object.keys(formData).length === 0) {
       setHealthResult(null);
       return;
     }
 
-    const avgScore = Math.round(totalScore / count);
+    let finalScore = 0;
     let finalStatus = 'healthy';
-    if (hasCritical || avgScore < 60) finalStatus = 'critical';
-    else if (hasWarning || avgScore < 80) finalStatus = 'warning';
 
-    setHealthResult({ index: avgScore, status: finalStatus });
+    if (selectedEqType === 'Máy biến áp') {
+      const age = parseFloat(formData.age);
+      const dutyFactor = parseFloat(formData.dutyFactor);
+      if (!isNaN(age) && !isNaN(dutyFactor)) {
+        let hasCritical = false;
+        let hasWarning = false;
+        Object.keys(formData).forEach(key => {
+          if (key !== 'age' && key !== 'dutyFactor') {
+            const status = evaluateEquipmentParam(selectedEqType, key, formData[key]);
+            if (status === 'critical') hasCritical = true;
+            if (status === 'warning') hasWarning = true;
+          }
+        });
+        const healthScoreFactor = hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0);
+        
+        const params: TransformerParams = {
+          mainTransformer: {
+            age,
+            normalExpectedLife: 40,
+            dutyFactor,
+            locationFactor: 1.0,
+            healthScoreFactor: healthScoreFactor,
+            reliabilityFactor: 1.0,
+            healthScoreCap: 10,
+            healthScoreCollar: 0.5,
+            reliabilityCollar: 0.5
+          },
+          tapchanger: {
+            age,
+            normalExpectedLife: 40,
+            dutyFactor,
+            locationFactor: 1.0,
+            healthScoreFactor: healthScoreFactor,
+            reliabilityFactor: 1.0,
+            healthScoreCap: 10,
+            healthScoreCollar: 0.5,
+            reliabilityCollar: 0.5
+          }
+        };
+        const result = calculateTransformerHealth(params);
+        finalScore = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+        finalStatus = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+      } else {
+        // Fallback to old logic if age/dutyFactor not provided
+        let totalScore = 0;
+        let count = 0;
+        let hasCritical = false;
+        let hasWarning = false;
+        Object.keys(formData).forEach(key => {
+          const status = evaluateParam(selectedEqType, key, formData[key]);
+          if (status) {
+            count++;
+            if (status === 'healthy') totalScore += 100;
+            if (status === 'warning') { totalScore += 60; hasWarning = true; }
+            if (status === 'critical') { totalScore += 20; hasCritical = true; }
+          }
+        });
+        if (count > 0) {
+          finalScore = Math.round(totalScore / count);
+          if (hasCritical || finalScore < 60) finalStatus = 'critical';
+          else if (hasWarning || finalScore < 80) finalStatus = 'warning';
+        } else {
+          setHealthResult(null);
+          return;
+        }
+      }
+    } else if (selectedEqType === 'Tủ điện trung thế' || selectedEqType === 'Tủ điện') {
+      const age = parseFloat(formData.age);
+      const dutyFactor = parseFloat(formData.dutyFactor);
+      if (!isNaN(age) && !isNaN(dutyFactor)) {
+        let hasCritical = false;
+        let hasWarning = false;
+        Object.keys(formData).forEach(key => {
+          if (key !== 'age' && key !== 'dutyFactor') {
+            const status = evaluateEquipmentParam(selectedEqType, key, formData[key]);
+            if (status === 'critical') hasCritical = true;
+            if (status === 'warning') hasWarning = true;
+          }
+        });
+        const measuredFactor = hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0);
+        
+        const params: SwitchgearParams = {
+          age,
+          normalExpectedLife: 40,
+          dutyFactor,
+          locationFactor: 1.0,
+          healthScoreFactor: 1.0,
+          reliabilityFactor: 1.0,
+          healthScoreCap: 10,
+          healthScoreCollar: 0.5,
+          reliabilityCollar: 0.5,
+          observedFactor: 1.0,
+          measuredFactor: measuredFactor
+        };
+        const result = calculateSwitchgearHealth(params);
+        finalScore = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+        finalStatus = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+      } else {
+        // Fallback
+        let totalScore = 0;
+        let count = 0;
+        let hasCritical = false;
+        let hasWarning = false;
+        Object.keys(formData).forEach(key => {
+          const status = evaluateParam(selectedEqType, key, formData[key]);
+          if (status) {
+            count++;
+            if (status === 'healthy') totalScore += 100;
+            if (status === 'warning') { totalScore += 60; hasWarning = true; }
+            if (status === 'critical') { totalScore += 20; hasCritical = true; }
+          }
+        });
+        if (count > 0) {
+          finalScore = Math.round(totalScore / count);
+          if (hasCritical || finalScore < 60) finalStatus = 'critical';
+          else if (hasWarning || finalScore < 80) finalStatus = 'warning';
+        } else {
+          setHealthResult(null);
+          return;
+        }
+      }
+    } else if (selectedEqType === 'Động cơ') {
+      const ir = parseFloat(formData.ir);
+      const pd = parseFloat(formData.pd);
+      const pi = parseFloat(formData.pi);
+      const tanDelta = parseFloat(formData.tanDelta);
+      
+      if (!isNaN(ir) || !isNaN(pd) || !isNaN(pi) || !isNaN(tanDelta)) {
+        const tests: MotorDiagnosticTests = {
+          ratedKV: 6600,
+          ir: isNaN(ir) ? undefined : { R: ir, Y: ir, B: ir },
+          pd: isNaN(pd) ? undefined : { R: pd, Y: pd, B: pd },
+          pi: isNaN(pi) ? undefined : { R: pi, Y: pi, B: pi },
+          tanDelta: isNaN(tanDelta) ? undefined : { R: tanDelta, Y: tanDelta, B: tanDelta }
+        };
+        const result = calculateMotorHealth(tests);
+        if (result.hiPercentage > 0) {
+          finalScore = Math.round(result.hiPercentage);
+          finalStatus = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+        } else {
+          // Fallback if no valid tests
+          let totalScore = 0;
+          let count = 0;
+          let hasCritical = false;
+          let hasWarning = false;
+          Object.keys(formData).forEach(key => {
+            const status = evaluateParam(selectedEqType, key, formData[key]);
+            if (status) {
+              count++;
+              if (status === 'healthy') totalScore += 100;
+              if (status === 'warning') { totalScore += 60; hasWarning = true; }
+              if (status === 'critical') { totalScore += 20; hasCritical = true; }
+            }
+          });
+          if (count > 0) {
+            finalScore = Math.round(totalScore / count);
+            if (hasCritical || finalScore < 60) finalStatus = 'critical';
+            else if (hasWarning || finalScore < 80) finalStatus = 'warning';
+          } else {
+            setHealthResult(null);
+            return;
+          }
+        }
+      } else {
+        // Fallback
+        let totalScore = 0;
+        let count = 0;
+        let hasCritical = false;
+        let hasWarning = false;
+        Object.keys(formData).forEach(key => {
+          const status = evaluateParam(selectedEqType, key, formData[key]);
+          if (status) {
+            count++;
+            if (status === 'healthy') totalScore += 100;
+            if (status === 'warning') { totalScore += 60; hasWarning = true; }
+            if (status === 'critical') { totalScore += 20; hasCritical = true; }
+          }
+        });
+        if (count > 0) {
+          finalScore = Math.round(totalScore / count);
+          if (hasCritical || finalScore < 60) finalStatus = 'critical';
+          else if (hasWarning || finalScore < 80) finalStatus = 'warning';
+        } else {
+          setHealthResult(null);
+          return;
+        }
+      }
+    }
+
+    setHealthResult({ index: finalScore, status: finalStatus });
   }, [formData, selectedEqType]);
 
   const ParamInput = ({ 
@@ -2884,6 +3371,28 @@ export default function App() {
 
   const renderTransformerParams = () => (
     <>
+      {/* Thông số cơ bản (Tuổi & Hệ số tải) */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Info size={16} className="text-slate-500" />
+          Thông số cơ bản
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ParamInput 
+            title="Tuổi thiết bị (Age)" unit="năm" standard="< 40 năm" prevValue="10 năm" prevTrend="stable"
+            value={formData.age} onChange={(val: any) => setFormData({...formData, age: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Tuổi thiết bị'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Hệ số tải (Duty Factor)" unit="" standard="1.0" prevValue="1.0" prevTrend="stable"
+            value={formData.dutyFactor} onChange={(val: any) => setFormData({...formData, dutyFactor: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Hệ số tải'); setShowHistoryModal(true); }}
+          />
+        </div>
+      </div>
+
       {/* Parameter Group 1 */}
       <div>
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
@@ -3024,6 +3533,27 @@ export default function App() {
 
   const renderMotorParams = () => (
     <>
+      {/* Thông số cơ bản (Tuổi & Hệ số tải) */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Info size={16} className="text-slate-500" />
+          Thông số cơ bản
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ParamInput 
+            title="Tuổi thiết bị (Age)" unit="năm" standard="< 40 năm" prevValue="10 năm" prevTrend="stable"
+            value={formData.age} onChange={(val: any) => setFormData({...formData, age: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Tuổi thiết bị'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Hệ số tải (Duty Factor)" unit="" standard="1.0" prevValue="1.0" prevTrend="stable"
+            value={formData.dutyFactor} onChange={(val: any) => setFormData({...formData, dutyFactor: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Hệ số tải'); setShowHistoryModal(true); }}
+          />
+        </div>
+      </div>
       <div>
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
           <Thermometer size={16} className="text-rose-500" />
@@ -3101,6 +3631,27 @@ export default function App() {
 
   const renderSwitchgearParams = () => (
     <>
+      {/* Thông số cơ bản (Tuổi & Hệ số tải) */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Info size={16} className="text-slate-500" />
+          Thông số cơ bản
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ParamInput 
+            title="Tuổi thiết bị (Age)" unit="năm" standard="< 40 năm" prevValue="10 năm" prevTrend="stable"
+            value={formData.age} onChange={(val: any) => setFormData({...formData, age: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Tuổi thiết bị'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Hệ số tải (Duty Factor)" unit="" standard="1.0" prevValue="1.0" prevTrend="stable"
+            value={formData.dutyFactor} onChange={(val: any) => setFormData({...formData, dutyFactor: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Hệ số tải'); setShowHistoryModal(true); }}
+          />
+        </div>
+      </div>
       <div>
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
           <Zap size={16} className="text-amber-500" />
@@ -3418,6 +3969,7 @@ export default function App() {
                                 setSelectedEqType(eq.type === 'Tủ điện' ? 'Tủ điện trung thế' : eq.type);
                                 setIsNewEquipment(false);
                                 setShowEqSuggestions(false);
+                                populateFormData(eq);
                               }}
                             >
                               <div className="font-medium text-slate-900">{eq.id} - {eq.name}</div>
@@ -4230,7 +4782,7 @@ export default function App() {
                         Tải từ Sheets
                       </button>
                       <button 
-                        onClick={handleSyncToSheets}
+                        onClick={() => handleSyncToSheets()}
                         disabled={!isGoogleConnected || isSyncing}
                         className="text-sm bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md font-medium hover:bg-blue-100 transition-colors disabled:opacity-50 flex items-center gap-2"
                       >
