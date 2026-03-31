@@ -44,7 +44,8 @@ import {
   Paperclip,
   Info,
   Database,
-  Menu
+  Menu,
+  Copy
 } from 'lucide-react';
 import {
   LineChart,
@@ -1102,11 +1103,15 @@ export default function App() {
           
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            setUserRole(userData.role);
+            // Normalize role: handle both 'customer' and 'Khách hàng'
+            const rawRole = userData.role?.toLowerCase() || 'customer';
+            const normalizedRole = (rawRole === 'admin' || rawRole === 'quản trị viên' || rawRole === 'quan tri vien') ? 'admin' : 'customer';
+            
+            setUserRole(normalizedRole);
             if (userData.assignedFactory) {
-              setUserFactory(userData.assignedFactory);
+              setUserFactory(userData.assignedFactory.trim());
             }
-            if (userData.role === 'customer' && userData.customerId) {
+            if (normalizedRole === 'customer' && userData.customerId) {
               // Fetch customer name
               const customerDoc = await getDoc(doc(db, 'customers', userData.customerId));
               if (customerDoc.exists()) {
@@ -1528,7 +1533,7 @@ export default function App() {
     
     // Filter allEquipment first if user is a customer with an assigned factory
     const equipmentToProcess = (userRole === 'customer' && userFactory)
-      ? allEquipment.filter(eq => eq.factory === userFactory)
+      ? allEquipment.filter(eq => eq.factory?.trim().toLowerCase() === userFactory.trim().toLowerCase())
       : allEquipment;
     
     // Known coordinates for nice map display
@@ -1596,7 +1601,7 @@ export default function App() {
     });
     
     return Array.from(siteMap.values());
-  }, [allEquipment]);
+  }, [allEquipment, userRole, userFactory]);
 
   const uniqueCustomers = Array.from(new Set(dynamicSiteData.map(site => site.customer)));
 
@@ -1686,7 +1691,7 @@ export default function App() {
       elcid: elcidTrend,
       pi: piTrend
     };
-  }, [trendingEquipment, allEquipment, allReports]);
+  }, [trendingEquipment, allEquipment, allReports, userRole, userFactory]);
 
   const dynamicParamHistoryData = useMemo(() => {
     if (!selectedRiskDetail || !selectedParamHistory || !allReports) return null;
@@ -1749,7 +1754,7 @@ export default function App() {
   const filteredEquipment = allEquipment.filter(eq => {
     // If user is a customer and has an assigned factory, restrict to that factory
     if (userRole === 'customer' && userFactory) {
-      return eq.factory === userFactory;
+      return eq.factory?.trim().toLowerCase() === userFactory.trim().toLowerCase();
     }
     
     const matchCustomer = selectedCustomer === 'all' || eq.customer === selectedCustomer;
@@ -1777,7 +1782,7 @@ export default function App() {
   const displayedReports = allReports.filter(report => {
     // If user is a customer and has an assigned factory, restrict to that factory
     if (userRole === 'customer' && userFactory) {
-      if (report.factory !== userFactory) return false;
+      if (report.factory?.trim().toLowerCase() !== userFactory.trim().toLowerCase()) return false;
     }
     
     const matchSearch = reportFilterSearch === '' || 
@@ -5765,7 +5770,40 @@ export default function App() {
                 <div className="p-6 space-y-8">
                   {/* User Profile Section */}
                   <section>
-                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Thông tin tài khoản</h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Thông tin tài khoản</h3>
+                      <button 
+                        onClick={async () => {
+                          if (user) {
+                            setIsAuthLoading(true);
+                            const userDocRef = doc(db, 'users', user.uid);
+                            const userDoc = await getDoc(userDocRef);
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              const rawRole = userData.role?.toLowerCase() || 'customer';
+              const normalizedRole = (rawRole === 'admin' || rawRole === 'quản trị viên' || rawRole === 'quan tri vien') ? 'admin' : 'customer';
+              
+              setUserRole(normalizedRole);
+              if (userData.assignedFactory) {
+                setUserFactory(userData.assignedFactory.trim());
+              }
+              if (normalizedRole === 'customer' && userData.customerId) {
+                const customerDoc = await getDoc(doc(db, 'customers', userData.customerId));
+                if (customerDoc.exists()) {
+                  setUserCustomerName(customerDoc.data().name);
+                }
+              }
+            }
+                            setIsAuthLoading(false);
+                            alert('Đã cập nhật thông tin tài khoản!');
+                          }
+                        }}
+                        className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                      >
+                        <RefreshCw size={14} />
+                        Làm mới dữ liệu
+                      </button>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-6 rounded-xl border border-slate-100">
                       <div>
                         <label className="block text-xs font-medium text-slate-500 mb-1">Email đăng nhập</label>
@@ -5787,7 +5825,23 @@ export default function App() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-500 mb-1">User ID (UID)</label>
-                        <p className="text-xs font-mono text-slate-500 truncate" title={user?.uid}>{user?.uid}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-mono text-slate-600 bg-white px-2 py-1 border border-slate-200 rounded select-all break-all">
+                            {user?.uid || 'Đang tải...'}
+                          </p>
+                          {user?.uid && (
+                            <button 
+                              onClick={() => {
+                                navigator.clipboard.writeText(user.uid);
+                                alert('Đã sao chép UID vào bộ nhớ tạm!');
+                              }}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              title="Sao chép UID"
+                            >
+                              <Copy size={14} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </section>
