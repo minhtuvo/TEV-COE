@@ -42,7 +42,9 @@ import {
   LogOut,
   User,
   Paperclip,
-  Info
+  Info,
+  Database,
+  Menu
 } from 'lucide-react';
 import {
   LineChart,
@@ -82,7 +84,8 @@ import {
   calculateMotorHealth,
   SwitchgearParams,
   TransformerParams,
-  MotorDiagnosticTests
+  MotorDiagnosticTests,
+  MotorPhaseData
 } from './lib/healthCalculator';
 
 // --- PDF Helper ---
@@ -179,32 +182,10 @@ const paramStandards: Record<string, string> = {
   tanDelta: '< 0.5 %'
 };
 
-const evaluateParam = (key: string, value: any): string => {
-  const numVal = parseFloat(value);
-  if (isNaN(numVal)) return 'N/A';
-  
-  switch (key) {
-    case 'oilTemp': return numVal >= 85 ? (numVal >= 95 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
-    case 'windingTemp': return numVal >= 95 ? (numVal >= 105 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
-    case 'irHighLow':
-    case 'irHighEarth':
-    case 'ir': return numVal <= 1000 ? (numVal <= 500 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
-    case 'dielectricStrength': return numVal <= 30 ? 'Cảnh báo' : 'Bình thường';
-    case 'furan': return numVal >= 1.0 ? 'Cảnh báo' : 'Bình thường';
-    case 'oilMoisture': return numVal >= 20 ? 'Cảnh báo' : 'Bình thường';
-    case 'thermography': return numVal >= 70 ? 'Cảnh báo' : 'Bình thường';
-    case 'contactRes': return numVal >= 100 ? 'Cảnh báo' : 'Bình thường';
-    case 'tev': return numVal >= 20 ? (numVal >= 29 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
-    case 'ultrasonic': return numVal >= 10 ? 'Cảnh báo' : 'Bình thường';
-    case 'vibration': return numVal >= 2.8 ? (numVal >= 4.5 ? 'Nguy hiểm' : 'Cảnh báo') : 'Bình thường';
-    case 'statorTemp': return numVal >= 120 ? 'Cảnh báo' : 'Bình thường';
-    case 'pd': return numVal >= 500 ? 'Cảnh báo' : 'Bình thường';
-    case 'voltageImbalance': return numVal >= 2.0 ? 'Cảnh báo' : 'Bình thường';
-    case 'pi': return numVal <= 2.0 ? 'Cảnh báo' : 'Bình thường';
-    case 'bearingTemp': return numVal >= 80 ? 'Cảnh báo' : 'Bình thường';
-    case 'tanDelta': return numVal >= 0.5 ? 'Cảnh báo' : 'Bình thường';
-    default: return 'N/A';
-  }
+const evaluateParam = (type: string, param: string, value: any): string => {
+  const status = evaluateEquipmentParam(type, param, value);
+  if (!status) return 'N/A';
+  return status === 'critical' ? 'Nguy hiểm' : status === 'warning' ? 'Cảnh báo' : 'Bình thường';
 };
 
 const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, historicalReports: any[] = []) => {
@@ -252,7 +233,12 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
   
   pdf.text(reportData.id || '', 20, yPos);
   pdf.text(reportData.date || '', 105, yPos);
-  yPos += 10;
+  yPos += 5;
+  
+  pdf.setFontSize(8);
+  pdf.setTextColor(148, 163, 184); // slate-400
+  pdf.text(`Thời gian tạo: ${new Date().toLocaleString('vi-VN')}`, 20, yPos);
+  yPos += 5;
   
   pdf.setFontSize(10);
   pdf.setTextColor(100, 116, 139);
@@ -321,6 +307,29 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
   pdf.text(splitNotes, 20, yPos);
   
   yPos += (splitNotes.length * 5) + 10;
+
+  // Health Index Section
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+  pdf.text('Chỉ số sức khỏe / Health Index', 20, yPos);
+  yPos += 8;
+  
+  const health = reportData.health || 0;
+  pdf.setDrawColor(226, 232, 240); // slate-200
+  pdf.setFillColor(248, 250, 252); // slate-50
+  pdf.roundedRect(20, yPos, 170, 20, 3, 3, 'FD');
+  
+  pdf.setFontSize(24);
+  pdf.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+  pdf.text(`${health}%`, 35, yPos + 14);
+  
+  pdf.setFontSize(10);
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
+  pdf.text('Tình trạng thiết bị dựa trên phân tích dữ liệu hiện tại và lịch sử vận hành.', 75, yPos + 12);
+  
+  yPos += 30;
   
   // Measurements
   if (reportData.measurements && Object.keys(reportData.measurements).length > 0) {
@@ -331,10 +340,11 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
     yPos += 8;
     
     const tableData = Object.entries(reportData.measurements)
-      .filter(([_, v]) => v !== '' && v !== undefined && v !== null)
+      .filter(([k, v]) => v !== '' && v !== undefined && v !== null && k !== 'age' && k !== 'dutyFactor')
       .map(([k, v]) => {
         const standard = paramStandards[k] || 'N/A';
-        const evalResult = evaluateParam(k, v);
+        const status = evaluateEquipmentParam(reportData.type, k, v);
+        const evalResult = status === 'critical' ? 'Nguy hiểm' : status === 'warning' ? 'Cảnh báo' : status === 'healthy' ? 'Bình thường' : 'N/A';
         return [paramLabels[k] || String(k), String(v), standard, evalResult];
       });
       
@@ -366,8 +376,8 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
     }
   }
 
-  // Trending Section
-  if (historicalReports && historicalReports.length > 0 && reportData.measurements) {
+  // Trending Section (Upgraded)
+  if (historicalReports && historicalReports.length > 1 && reportData.measurements) {
     // Filter out the current report and any newer reports
     const currentReportDate = reportData.date ? new Date(reportData.date.split('/').reverse().join('-')).getTime() : Date.now();
     const pastReports = historicalReports.filter(hr => {
@@ -377,17 +387,20 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
     });
     
     const paramsWithHistory = Object.keys(reportData.measurements).filter(k => 
+      k !== 'age' && k !== 'dutyFactor' &&
       pastReports.some(hr => hr.measurements && hr.measurements[k] !== undefined)
     );
 
     if (paramsWithHistory.length > 0) {
+      if (yPos > 240) { pdf.addPage(); yPos = 20; }
+      
       pdf.setFontSize(10);
       pdf.setTextColor(100, 116, 139);
       pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
-      pdf.text('Xu hướng thông số / Parameter Trends', 20, yPos);
+      pdf.text('Phân tích xu hướng / Trend Analysis', 20, yPos);
       yPos += 8;
 
-      const trendData = paramsWithHistory.map(k => {
+      const trendTableData = paramsWithHistory.map(k => {
         const currentVal = parseFloat(reportData.measurements[k]);
         
         // Sort historical reports by date (oldest to newest)
@@ -399,7 +412,8 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
 
         // Get the most recent previous value
         let prevVal = 'N/A';
-        let trend = '-';
+        let trend = 'Ổn định';
+        let trendIcon = '→';
         
         for (let i = sortedHistory.length - 1; i >= 0; i--) {
           if (sortedHistory[i].measurements && sortedHistory[i].measurements[k] !== undefined) {
@@ -408,30 +422,37 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
               prevVal = String(val);
               if (!isNaN(currentVal)) {
                 const diff = currentVal - val;
-                const percentChange = (diff / val) * 100;
-                trend = diff > 0 ? `Tăng ${diff.toFixed(2)} (+${percentChange.toFixed(1)}%)` : 
-                        diff < 0 ? `Giảm ${Math.abs(diff).toFixed(2)} (${percentChange.toFixed(1)}%)` : 'Không đổi';
+                if (diff > 0.05 * val) { trend = 'Tăng'; trendIcon = '↑'; }
+                else if (diff < -0.05 * val) { trend = 'Giảm'; trendIcon = '↓'; }
               }
               break;
             }
           }
         }
-
-        return [paramLabels[k] || String(k), prevVal, String(reportData.measurements[k]), trend];
+        
+        return [paramLabels[k] || String(k), prevVal, String(reportData.measurements[k]), `${trendIcon} ${trend}`];
       });
 
-      if (trendData.length > 0) {
-        autoTable(pdf, {
-          startY: yPos,
-          head: [['Thông số / Parameter', 'Lần trước / Previous', 'Hiện tại / Current', 'Xu hướng / Trend']],
-          body: trendData,
-          theme: 'grid',
-          styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10 },
-          headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold' },
-          margin: { left: 20, right: 20 }
-        });
-        yPos = (pdf as any).lastAutoTable.finalY + 15;
-      }
+      autoTable(pdf, {
+        startY: yPos,
+        head: [['Thông số / Parameter', 'Lần trước / Previous', 'Hiện tại / Current', 'Xu hướng / Trend']],
+        body: trendTableData,
+        theme: 'striped',
+        styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10 },
+        headStyles: { fillColor: [248, 250, 252], textColor: [71, 85, 105], fontStyle: 'bold' },
+        didParseCell: function(data) {
+          if (data.section === 'body' && data.column.index === 3) {
+            const rawValue = String(data.cell.raw || '');
+            if (rawValue.includes('↑')) {
+              data.cell.styles.textColor = [220, 38, 38]; // red-600
+            } else if (rawValue.includes('↓')) {
+              data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+            }
+          }
+        },
+        margin: { left: 20, right: 20 }
+      });
+      yPos = (pdf as any).lastAutoTable.finalY + 15;
     }
   }
 
@@ -609,163 +630,13 @@ const generateListReportPDF = async (reports: any[], user: any) => {
 };
 
 // --- MOCK DATA ---
-const kpiData = {
-  total: 124,
-  healthy: 105,
-  warning: 14,
-  critical: 5
-};
+// (Removed to use real data from Google Sheets)
 
-const topRiskEquipment = [
-  { id: 'TRF-01', name: 'Máy biến áp T1', factory: 'Nhà máy Bắc Ninh', location: 'Trạm biến áp 110kV', health: 45, status: 'critical', trend: 'down' },
-  { id: 'MTR-05', name: 'Động cơ bơm làm mát', factory: 'Nhà máy Bình Dương', location: 'Khu vực Bơm', health: 52, status: 'critical', trend: 'down' },
-  { id: 'GEN-02', name: 'Máy phát điện dự phòng', factory: 'Nhà máy Bắc Ninh', location: 'Phòng Máy Phát', health: 68, status: 'warning', trend: 'stable' },
-  { id: 'TRF-03', name: 'Máy biến áp T3', factory: 'Nhà máy Đồng Nai', location: 'Trạm biến áp 22kV', health: 71, status: 'warning', trend: 'down' },
-];
+const detailedRiskData: Record<string, any> = {};
 
-const detailedRiskData: Record<string, any> = {
-  'TRF-01': {
-    id: 'TRF-01',
-    name: 'Máy biến áp T1',
-    type: 'Máy biến áp',
-    health: 45,
-    status: 'critical',
-    factory: 'Nhà máy Bắc Ninh',
-    location: 'Trạm biến áp 110kV',
-    generalRecommendation: 'Cảnh báo mức độ 4. Cần tiến hành lọc dầu hoặc thay dầu ngay lập tức. Lên kế hoạch cắt điện để kiểm tra tổng thể phần ruột máy do hàm lượng khí cháy và Furan tăng cao đột biến.',
-    failureProfile: [
-      { subject: 'Mag Circuit', score: 20 },
-      { subject: 'Winding', score: 80 },
-      { subject: 'Main Tank', score: 40 },
-      { subject: 'Cooling', score: 10 },
-      { subject: 'Liquid', score: 90 },
-      { subject: 'Bushing', score: 30 },
-      { subject: 'LTC', score: 50 },
-    ],
-    defects: [
-      { name: 'Cooling Controls Failure', warnings: 25.0, risk: 75.0 },
-      { name: 'Liquid Insulation Arcing', warnings: 12.0, risk: 50.0 },
-      { name: 'Loose Connection', warnings: 10.0, risk: 42.0 },
-      { name: 'Loss Of Core Ground', warnings: 20.0, risk: 80.0 },
-      { name: 'Moisture Contamination', warnings: 10.0, risk: 42.0 },
-      { name: 'Overheating', warnings: 2.0, risk: 5.0 },
-    ],
-    tests: [
-      { name: 'Phân tích khí hòa tan (DGA - TDCG)', shortName: 'DGA', value: '5200', unit: 'ppm', score: 2, weight: 3, status: 'Critical', rec: 'Khí cháy hòa tan vượt ngưỡng nguy hiểm. Có hiện tượng phóng điện hoặc quá nhiệt cục bộ bên trong.' },
-      { name: 'Độ bền điện môi của dầu', shortName: 'Điện môi', value: '35', unit: 'kV', score: 3, weight: 2, status: 'Critical', rec: 'Dầu suy giảm chất lượng nghiêm trọng, cần lọc hoặc thay mới.' },
-      { name: 'Điện trở cách điện', shortName: 'Cách điện', value: '800', unit: 'MΩ', score: 5, weight: 1, status: 'Moderate', rec: 'Cách điện suy giảm, cần sấy lại.' },
-      { name: 'Điện trở cuộn dây', shortName: 'Điện trở', value: '4.2', unit: '% lệch', score: 5, weight: 1, status: 'Moderate', rec: 'Kiểm tra lại các đầu nối và bộ điều áp dưới tải (OLTC).' },
-      { name: 'Hàm lượng Furan', shortName: 'Furan', value: '6.5', unit: 'mg/kg', score: 2, weight: 2, status: 'Critical', rec: 'Giấy cách điện lão hóa nặng, tuổi thọ còn lại rất thấp.' },
-    ]
-  },
-  'MTR-05': {
-    id: 'MTR-05',
-    name: 'Động cơ bơm làm mát',
-    type: 'Động cơ',
-    health: 52,
-    status: 'critical',
-    factory: 'Nhà máy Bình Dương',
-    location: 'Khu vực Bơm',
-    generalRecommendation: 'Cần lên kế hoạch bảo dưỡng khẩn cấp. Theo dõi sát sao hiện tượng phóng điện cục bộ và lên phương án quấn lại cuộn dây hoặc thay thế stator nếu tình trạng xấu đi.',
-    failureProfile: [
-      { subject: 'Stator', score: 85 },
-      { subject: 'Rotor', score: 40 },
-      { subject: 'Bearings', score: 60 },
-      { subject: 'Cooling', score: 30 },
-      { subject: 'Insulation', score: 90 },
-      { subject: 'Vibration', score: 70 },
-      { subject: 'Alignment', score: 20 },
-    ],
-    defects: [
-      { name: 'Insulation Breakdown', warnings: 30.0, risk: 85.0 },
-      { name: 'Bearing Wear', warnings: 15.0, risk: 60.0 },
-      { name: 'Rotor Bar Damage', warnings: 5.0, risk: 40.0 },
-      { name: 'Overheating', warnings: 20.0, risk: 70.0 },
-      { name: 'Misalignment', warnings: 8.0, risk: 20.0 },
-    ],
-    tests: [
-      { name: 'Tan-delta', shortName: 'Tan-delta', value: '0.08', unit: '', score: 4, weight: 2, status: 'Moderate', rec: 'Theo dõi định kỳ, lớp cách điện có dấu hiệu lão hóa.' },
-      { name: 'Tan-delta Tip-up', shortName: 'Tip-up', value: '0.008', unit: '', score: 2, weight: 2, status: 'Critical', rec: 'Kiểm tra ngay, có lỗ hổng trong lớp cách điện.' },
-      { name: 'Partial Discharge (PD)', shortName: 'PD', value: '22000', unit: 'pC', score: 2, weight: 3, status: 'Critical', rec: 'Nguy hiểm! Phóng điện cục bộ rất cao, nguy cơ đánh thủng cách điện.' },
-      { name: 'Insulation Resistance', shortName: 'IR', value: '15', unit: 'GΩ', score: 6, weight: 1, status: 'Good', rec: 'Bình thường, tiếp tục theo dõi.' },
-      { name: 'Polarization Index (PI)', shortName: 'PI', value: '1.5', unit: '', score: 4, weight: 1, status: 'Moderate', rec: 'Vệ sinh và sấy khô cuộn dây.' },
-      { name: 'Dielectric Discharge', shortName: 'DD', value: '5', unit: '', score: 6, weight: 1, status: 'Good', rec: 'Bình thường.' },
-      { name: 'ELCID', shortName: 'ELCID', value: '150', unit: 'mA', score: 4, weight: 1, status: 'Moderate', rec: 'Kiểm tra lõi từ, có dấu hiệu ngắn mạch cục bộ.' },
-    ]
-  },
-  'GEN-02': {
-    id: 'GEN-02',
-    name: 'Máy phát điện dự phòng',
-    type: 'Máy phát',
-    health: 68,
-    status: 'warning',
-    factory: 'Nhà máy Bắc Ninh',
-    location: 'Phòng Máy Phát',
-    generalRecommendation: 'Thiết bị đang ở trạng thái cảnh báo. Cần bảo dưỡng hệ thống làm mát và kiểm tra lại độ rung của ổ trục.',
-    failureProfile: [
-      { subject: 'Exciter', score: 30 },
-      { subject: 'Stator', score: 40 },
-      { subject: 'Rotor', score: 50 },
-      { subject: 'Bearings', score: 70 },
-      { subject: 'Cooling', score: 60 },
-      { subject: 'Controls', score: 20 },
-    ],
-    defects: [
-      { name: 'High Vibration', warnings: 18.0, risk: 70.0 },
-      { name: 'Cooling Inefficiency', warnings: 12.0, risk: 60.0 },
-      { name: 'Rotor Imbalance', warnings: 10.0, risk: 50.0 },
-      { name: 'Stator Winding Issue', warnings: 5.0, risk: 40.0 },
-    ],
-    tests: [
-      { name: 'Độ rung (Vibration)', shortName: 'Độ rung', value: '5.2', unit: 'mm/s', score: 4, weight: 3, status: 'Moderate', rec: 'Độ rung cao, kiểm tra độ đồng tâm và vòng bi.' },
-      { name: 'Nhiệt độ Stator', shortName: 'Nhiệt độ', value: '115', unit: '°C', score: 5, weight: 2, status: 'Moderate', rec: 'Nhiệt độ hơi cao, vệ sinh hệ thống tản nhiệt.' },
-      { name: 'Điện trở cách điện', shortName: 'Cách điện', value: '50', unit: 'GΩ', score: 7, weight: 2, status: 'Good', rec: 'Cách điện tốt.' },
-    ]
-  },
-  'TRF-03': {
-    id: 'TRF-03',
-    name: 'Máy biến áp T3',
-    type: 'Máy biến áp',
-    health: 71,
-    status: 'warning',
-    factory: 'Nhà máy Đồng Nai',
-    location: 'Trạm biến áp 22kV',
-    generalRecommendation: 'Thiết bị hoạt động ổn định nhưng có dấu hiệu suy giảm nhẹ ở chất lượng dầu. Cần lấy mẫu dầu kiểm tra lại sau 3 tháng.',
-    failureProfile: [
-      { subject: 'Mag Circuit', score: 10 },
-      { subject: 'Winding', score: 20 },
-      { subject: 'Main Tank', score: 15 },
-      { subject: 'Cooling', score: 5 },
-      { subject: 'Liquid', score: 60 },
-      { subject: 'Bushing', score: 25 },
-      { subject: 'LTC', score: 30 },
-    ],
-    defects: [
-      { name: 'Moisture Contamination', warnings: 15.0, risk: 60.0 },
-      { name: 'LTC Wear', warnings: 8.0, risk: 30.0 },
-      { name: 'Bushing Degradation', warnings: 5.0, risk: 25.0 },
-      { name: 'Winding Deformation', warnings: 2.0, risk: 20.0 },
-    ],
-    tests: [
-      { name: 'Phân tích khí hòa tan (DGA)', shortName: 'DGA', value: '1500', unit: 'ppm', score: 6, weight: 3, status: 'Good', rec: 'Khí hòa tan trong giới hạn cho phép.' },
-      { name: 'Độ ẩm trong dầu', shortName: 'Độ ẩm', value: '25', unit: 'ppm', score: 4, weight: 2, status: 'Moderate', rec: 'Độ ẩm hơi cao, theo dõi thêm.' },
-      { name: 'Điện trở cách điện', shortName: 'Cách điện', value: '1200', unit: 'MΩ', score: 7, weight: 1, status: 'Good', rec: 'Cách điện tốt.' },
-    ]
-  }
-};
+const statusDistribution: any[] = [];
 
-const statusDistribution = [
-  { name: 'Khỏe mạnh', value: 105, color: '#10b981' },
-  { name: 'Cảnh báo', value: 14, color: '#f59e0b' },
-  { name: 'Nguy hiểm', value: 5, color: '#f43f5e' },
-];
-
-const healthDistribution = [
-  { range: '90-100%', count: 85 },
-  { range: '70-89%', count: 20 },
-  { range: '50-69%', count: 14 },
-  { range: '<50%', count: 5 },
-];
+const healthDistribution: any[] = [];
 
 
 const createCustomIcon = (status: string, count: number) => {
@@ -791,161 +662,8 @@ const createCustomIcon = (status: string, count: number) => {
   });
 };
 
-const generateMockData = () => {
-  const factories = [
-    { name: 'Nhà máy Nhiệt điện Phả Lại', customer: 'Tập đoàn Điện lực Việt Nam (EVN)' },
-    { name: 'Nhà máy Thủy điện Hòa Bình', customer: 'Tập đoàn Điện lực Việt Nam (EVN)' },
-    { name: 'Nhà máy Sữa Tiên Sơn', customer: 'Công ty CP Sữa Việt Nam (Vinamilk)' },
-    { name: 'Nhà máy Sữa Bình Dương', customer: 'Công ty CP Sữa Việt Nam (Vinamilk)' },
-    { name: 'Khu liên hợp Gang thép Hải Dương', customer: 'Tập đoàn Hòa Phát' },
-    { name: 'Khu liên hợp Gang thép Dung Quất', customer: 'Tập đoàn Hòa Phát' },
-    { name: 'Nhà máy Thaco Mazda', customer: 'Công ty CP Ô tô Trường Hải (Thaco)' },
-    { name: 'Nhà máy Thaco Kia', customer: 'Công ty CP Ô tô Trường Hải (Thaco)' },
-    { name: 'Nhà máy Xử lý Khí Dinh Cố', customer: 'Tổng Công ty Khí Việt Nam (PV Gas)' },
-    { name: 'Trung tâm Dữ liệu Viettel Hòa Lạc', customer: 'Tập đoàn Công nghiệp Viễn thông Quân đội (Viettel)' },
-    { name: 'Trung tâm Dữ liệu Viettel Bình Dương', customer: 'Tập đoàn Công nghiệp Viễn thông Quân đội (Viettel)' },
-    { name: 'Nhà máy Masan Nutri-Science', customer: 'Công ty CP Tập đoàn Masan' },
-    { name: 'Nhà máy Masan Consumer Bình Dương', customer: 'Công ty CP Tập đoàn Masan' },
-    { name: 'Nhà máy VinFast Hải Phòng', customer: 'Tập đoàn Vingroup' },
-    { name: 'FPT Tower', customer: 'Công ty CP FPT' },
-    { name: 'Sân bay Quốc tế Nội Bài', customer: 'Tổng Công ty Cảng hàng không Việt Nam (ACV)' },
-    { name: 'Sân bay Quốc tế Tân Sơn Nhất', customer: 'Tổng Công ty Cảng hàng không Việt Nam (ACV)' },
-    { name: 'Nhà máy Thủy điện Sơn La', customer: 'Tập đoàn Điện lực Việt Nam (EVN)' },
-    { name: 'Nhà máy Sữa Đà Nẵng', customer: 'Công ty CP Sữa Việt Nam (Vinamilk)' },
-    { name: 'Khu liên hợp Gang thép Hưng Yên', customer: 'Tập đoàn Hòa Phát' },
-  ];
-
-  const types = ['Máy biến áp', 'Động cơ', 'Tủ điện'];
-  const locations = ['Trạm biến áp chính', 'Phân xưởng 1', 'Phân xưởng 2', 'Trạm bơm', 'Phòng máy chủ', 'Khu vực làm mát'];
-  
-  const equipment = [];
-  let idCounter = 1;
-
-  factories.forEach(factory => {
-    for (let i = 0; i < 5; i++) {
-      const type = types[Math.floor(Math.random() * types.length)];
-      const location = locations[Math.floor(Math.random() * locations.length)];
-      const health = Math.floor(Math.random() * 60) + 40; // 40 to 100
-      let status = 'healthy';
-      if (health < 60) status = 'critical';
-      else if (health < 80) status = 'warning';
-
-      let prefix = 'EQ';
-      if (type === 'Máy biến áp') prefix = 'TRF';
-      if (type === 'Động cơ') prefix = 'MTR';
-      if (type === 'Tủ điện') prefix = 'SWG';
-
-      equipment.push({
-        id: `${prefix}-${idCounter.toString().padStart(3, '0')}`,
-        name: `${type} ${i + 1} - ${factory.name}`,
-        customer: factory.customer,
-        factory: factory.name,
-        location: location,
-        type: type,
-        health: health,
-        status: status,
-        lastCheck: `1${Math.floor(Math.random() * 9)}/03/2026`
-      });
-      idCounter++;
-    }
-  });
-
-  return equipment;
-};
-
-const generateMockReports = (equipmentList: any[]) => {
-  const reports: any[] = [];
-  const inspectors = ['Nguyễn Văn A', 'Trần Văn B', 'Lê Thị C', 'Phạm Văn D'];
-  
-  equipmentList.forEach(eq => {
-    // Generate 1-3 reports per equipment
-    const numReports = Math.floor(Math.random() * 3) + 1;
-    for (let i = 0; i < numReports; i++) {
-      const year = 2024 + Math.floor(Math.random() * 3);
-      const month = Math.floor(Math.random() * 12) + 1;
-      const day = Math.floor(Math.random() * 28) + 1;
-      const dateStr = `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
-      
-      const status = Math.random() > 0.8 ? 'warning' : (Math.random() > 0.9 ? 'critical' : 'healthy');
-      let notes = 'Thiết bị hoạt động bình thường.';
-      if (status === 'warning') notes = 'Cần theo dõi thêm một số thông số.';
-      if (status === 'critical') notes = 'Phát hiện bất thường nghiêm trọng, cần xử lý ngay.';
-
-      let measurements: any = {};
-      if (eq.type === 'transformer') {
-        measurements = {
-          oilTemp: Math.floor(Math.random() * 40) + 40,
-          windingTemp: Math.floor(Math.random() * 50) + 45,
-          irHighLow: Math.floor(Math.random() * 1000) + 500,
-          dga: status === 'critical' ? 'Bất thường' : 'Bình thường',
-        };
-      } else if (eq.type === 'switchgear') {
-        measurements = {
-          tev: Math.floor(Math.random() * 30),
-          ultrasonic: Math.floor(Math.random() * 20),
-          contactRes: Math.floor(Math.random() * 100) + 50,
-        };
-      } else if (eq.type === 'motor') {
-        measurements = {
-          vibration: (Math.random() * 5).toFixed(2),
-          statorTemp: Math.floor(Math.random() * 60) + 40,
-          ir: Math.floor(Math.random() * 500) + 100,
-        };
-      }
-
-      reports.push({
-        id: `REP-${year}-${month.toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-        date: dateStr,
-        equipmentId: eq.id,
-        equipmentName: eq.name,
-        factory: eq.factory,
-        type: eq.type,
-        inspector: inspectors[Math.floor(Math.random() * inspectors.length)],
-        status: status,
-        notes: notes,
-        measurements: measurements,
-        fileUrl: '#' // Placeholder for actual file download
-      });
-    }
-  });
-  
-  // Sort by date descending (simple string sort works for YYYY-MM-DD, but we have DD/MM/YYYY, so let's just sort randomly or keep as is for mock)
-  return reports.sort((a, b) => {
-    const [d1, m1, y1] = a.date.split('/');
-    const [d2, m2, y2] = b.date.split('/');
-    return new Date(`${y2}-${m2}-${d2}`).getTime() - new Date(`${y1}-${m1}-${d1}`).getTime();
-  });
-};
-
-const initialAllEquipment = generateMockData();
-const initialAllReports = generateMockReports(initialAllEquipment);
-
-const pastReports = [
-  { id: 'REP-2026-02', date: '10/02/2026', inspector: 'Nguyễn Văn A', status: 'warning', notes: 'Nhiệt độ dầu hơi cao, cần theo dõi.', measurements: { oilTemp: 85, windingTemp: 92, irHighLow: 1250 } },
-  { id: 'REP-2025-08', date: '15/08/2025', inspector: 'Trần Văn B', status: 'healthy', notes: 'Thiết bị hoạt động bình thường.', measurements: { oilTemp: 80, windingTemp: 88, irHighLow: 1400 } },
-  { id: 'REP-2025-02', date: '20/02/2025', inspector: 'Nguyễn Văn A', status: 'healthy', notes: 'Bảo dưỡng định kỳ.', measurements: { oilTemp: 75, windingTemp: 85, irHighLow: 1500 } },
-];
-
-const paramHistoryData = {
-  'Nhiệt độ dầu': [
-    { date: '20/02/2025', value: 75 },
-    { date: '15/08/2025', value: 80 },
-    { date: '10/02/2026', value: 85 },
-    { date: '17/03/2026', value: 92 },
-  ],
-  'Nhiệt độ cuộn dây': [
-    { date: '20/02/2025', value: 85 },
-    { date: '15/08/2025', value: 88 },
-    { date: '10/02/2026', value: 92 },
-    { date: '17/03/2026', value: 92 },
-  ],
-  'Điện trở cách điện (Cao-Hạ)': [
-    { date: '20/02/2025', value: 1500 },
-    { date: '15/08/2025', value: 1400 },
-    { date: '10/02/2026', value: 1250 },
-    { date: '17/03/2026', value: 1100 },
-  ],
-};
+const initialAllEquipment: any[] = [];
+const initialAllReports: any[] = [];
 
 // --- COMPONENTS ---
 
@@ -977,10 +695,15 @@ const TestStatusBadge = ({ status }: { status: string }) => {
   }
 };
 
-const HealthBar = ({ value }: { value: number }) => {
+const HealthBar = ({ value, status }: { value: number, status?: string }) => {
   let color = 'bg-emerald-500';
-  if (value < 60) color = 'bg-rose-500';
-  else if (value < 80) color = 'bg-amber-500';
+  if (status) {
+    if (status === 'critical') color = 'bg-rose-500';
+    else if (status === 'warning') color = 'bg-amber-500';
+  } else {
+    if (value < 60) color = 'bg-rose-500';
+    else if (value < 80) color = 'bg-amber-500';
+  }
 
   return (
     <div className="flex items-center gap-2">
@@ -1307,10 +1030,13 @@ const evaluateEquipmentParam = (type: string, param: string, value: any) => {
     if (param === 'statorTemp') return numVal <= 110 ? 'healthy' : numVal <= 130 ? 'warning' : 'critical';
     if (param === 'bearingTemp') return numVal <= 80 ? 'healthy' : numVal <= 95 ? 'warning' : 'critical';
     if (param === 'vibration') return numVal <= 2.3 ? 'healthy' : numVal <= 4.5 ? 'warning' : 'critical';
-    if (param === 'tanDelta') return numVal <= 0.02 ? 'healthy' : numVal <= 0.05 ? 'warning' : 'critical';
-    if (param === 'pd') return numVal <= 1000 ? 'healthy' : numVal <= 5000 ? 'warning' : 'critical';
-    if (param === 'ir') return numVal >= 100 ? 'healthy' : numVal >= 50 ? 'warning' : 'critical';
-    if (param === 'pi') return numVal >= 2.0 ? 'healthy' : numVal >= 1.0 ? 'warning' : 'critical';
+    if (param === 'tanDelta') return numVal < 0.04 ? 'healthy' : numVal <= 0.07 ? 'warning' : 'critical';
+    if (param === 'tipUp') return numVal < 0.004 ? 'healthy' : numVal <= 0.006 ? 'warning' : 'critical';
+    if (param === 'pd') return numVal < 10000 ? 'healthy' : numVal <= 15000 ? 'warning' : 'critical';
+    if (param === 'ir') return numVal >= 10 ? 'healthy' : numVal >= 1 ? 'warning' : 'critical';
+    if (param === 'pi') return numVal >= 1.5 ? 'healthy' : numVal >= 1.0 ? 'warning' : 'critical';
+    if (param === 'dd') return numVal < 4 ? 'healthy' : numVal <= 8 ? 'warning' : 'critical';
+    if (param === 'elcid') return numVal < 200 ? 'healthy' : numVal <= 300 ? 'warning' : 'critical';
     if (param === 'voltageImbalance') return numVal <= 3 ? 'healthy' : 'warning';
   }
   if (type === 'Tủ điện trung thế' || type === 'Tủ điện') {
@@ -1325,11 +1051,45 @@ const evaluateEquipmentParam = (type: string, param: string, value: any) => {
   return null;
 };
 
+const getColumnIndex = (header: string[], possibleNames: string[]) => {
+  if (!header) return -1;
+  return header.findIndex(col => {
+    if (col === undefined || col === null) return false;
+    const colStr = col.toString().toLowerCase();
+    return possibleNames.some(name => colStr.includes(name.toLowerCase()));
+  });
+};
+
+const findHeaderRow = (rows: any[][]) => {
+  if (!rows || rows.length === 0) return -1;
+  // Look for a row that contains common keywords like "Mã thiết bị" or "ID"
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const row = rows[i];
+    if (row && row.some(cell => {
+      const s = cell?.toString().toLowerCase() || '';
+      return s.includes('mã thiết bị') || s.includes('equipment id') || s.includes('id') || s.includes('tên thiết bị');
+    })) {
+      return i;
+    }
+  }
+  return 0; // Default to first row
+};
+
+const mapStatusFromSheet = (status: any) => {
+  const s = status?.toString().toLowerCase() || '';
+  if (s.includes('bình thường') || s.includes('healthy') || s.includes('tốt') || s.includes('normal')) return 'healthy';
+  if (s.includes('cảnh báo') || s.includes('warning') || s.includes('theo dõi')) return 'warning';
+  if (s.includes('nguy hiểm') || s.includes('critical') || s.includes('xấu') || s.includes('đang hỏng')) return 'critical';
+  return 'healthy'; // Default
+};
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userCustomerName, setUserCustomerName] = useState<string | null>(null);
+  const [userFactory, setUserFactory] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -1343,6 +1103,9 @@ export default function App() {
           if (userDoc.exists()) {
             const userData = userDoc.data();
             setUserRole(userData.role);
+            if (userData.assignedFactory) {
+              setUserFactory(userData.assignedFactory);
+            }
             if (userData.role === 'customer' && userData.customerId) {
               // Fetch customer name
               const customerDoc = await getDoc(doc(db, 'customers', userData.customerId));
@@ -1366,6 +1129,7 @@ export default function App() {
           setUser(null);
           setUserRole(null);
           setUserCustomerName(null);
+          setUserFactory(null);
         }
       } catch (error) {
         console.error('Error in auth state change:', error);
@@ -1392,6 +1156,7 @@ export default function App() {
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
+    setIsSidebarOpen(false); // Close sidebar on mobile when tab changes
     if (tab === 'dashboard' && isGoogleConnected) {
       handleFetchFromSheets();
     }
@@ -1409,56 +1174,77 @@ export default function App() {
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [isNewEquipment, setIsNewEquipment] = useState(false);
   const [formData, setFormData] = useState<Record<string, any>>({});
+  const updateThreePhase = (param: string, phase: string, val: any) => {
+    const current = formData[param] || { R: '', Y: '', B: '' };
+    setFormData({
+      ...formData,
+      [param]: { ...current, [phase]: val }
+    });
+  };
   const [healthResult, setHealthResult] = useState<{index: number, status: string} | null>(null);
   const [selectedRiskDetail, setSelectedRiskDetail] = useState<string | null>(null);
   const [allEquipment, setAllEquipment] = useState(initialAllEquipment);
 
   const populateFormData = (eq: any) => {
-    if (!eq || !eq.rawData) return;
+    if (!eq) return;
     
     let linksStr = '';
-    if (eq.type === 'Máy biến áp') {
-      setFormData({
-        oilTemp: eq.rawData[9] || '',
-        windingTemp: eq.rawData[10] || '',
-        irHighLow: eq.rawData[11] || '',
-        irHighEarth: eq.rawData[12] || '',
-        oilLeak: eq.rawData[13] || '',
-        dga: eq.rawData[14] || '',
-        dielectricStrength: eq.rawData[15] || '',
-        furan: eq.rawData[16] || '',
-        oilMoisture: eq.rawData[17] || '',
-        age: eq.rawData[18] || '',
-        dutyFactor: eq.rawData[19] || ''
-      });
-      linksStr = eq.rawData[20] || '';
-    } else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') {
-      setFormData({
-        thermography: eq.rawData[9] || '',
-        contactRes: eq.rawData[10] || '',
-        tev: eq.rawData[11] || '',
-        ultrasonic: eq.rawData[12] || '',
-        tevPulses: eq.rawData[13] || '',
-        humidity: eq.rawData[14] || '',
-        sf6Pressure: eq.rawData[15] || '',
-        age: eq.rawData[16] || '',
-        dutyFactor: eq.rawData[17] || ''
-      });
-      linksStr = eq.rawData[18] || '';
-    } else if (eq.type === 'Động cơ') {
-      setFormData({
-        vibration: eq.rawData[9] || '',
-        statorTemp: eq.rawData[10] || '',
-        ir: eq.rawData[11] || '',
-        pd: eq.rawData[12] || '',
-        voltageImbalance: eq.rawData[13] || '',
-        pi: eq.rawData[14] || '',
-        bearingTemp: eq.rawData[15] || '',
-        tanDelta: eq.rawData[16] || '',
-        age: eq.rawData[17] || '',
-        dutyFactor: eq.rawData[18] || ''
-      });
-      linksStr = eq.rawData[19] || '';
+    
+    if (eq.measurements) {
+      // Use pre-parsed measurements if available (most robust)
+      setFormData(eq.measurements);
+      
+      // Handle links separately as they are not in measurements
+      if (eq.rawData) {
+        if (eq.type === 'Máy biến áp') linksStr = eq.rawData[20] || '';
+        else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') linksStr = eq.rawData[18] || '';
+        else if (eq.type === 'Động cơ') linksStr = eq.rawData[19] || '';
+      }
+    } else if (eq.rawData) {
+      // Fallback to rawData (less robust, but kept for compatibility)
+      if (eq.type === 'Máy biến áp') {
+        setFormData({
+          oilTemp: eq.rawData[9] || '',
+          windingTemp: eq.rawData[10] || '',
+          irHighLow: eq.rawData[11] || '',
+          irHighEarth: eq.rawData[12] || '',
+          oilLeak: eq.rawData[13] || '',
+          dga: eq.rawData[14] || '',
+          dielectricStrength: eq.rawData[15] || '',
+          furan: eq.rawData[16] || '',
+          oilMoisture: eq.rawData[17] || '',
+          age: eq.rawData[18] || '',
+          dutyFactor: eq.rawData[19] || ''
+        });
+        linksStr = eq.rawData[20] || '';
+      } else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') {
+        setFormData({
+          thermography: eq.rawData[9] || '',
+          contactRes: eq.rawData[10] || '',
+          tev: eq.rawData[11] || '',
+          ultrasonic: eq.rawData[12] || '',
+          tevPulses: eq.rawData[13] || '',
+          humidity: eq.rawData[14] || '',
+          sf6Pressure: eq.rawData[15] || '',
+          age: eq.rawData[16] || '',
+          dutyFactor: eq.rawData[17] || ''
+        });
+        linksStr = eq.rawData[18] || '';
+      } else if (eq.type === 'Động cơ') {
+        setFormData({
+          vibration: eq.rawData[9] || '',
+          statorTemp: eq.rawData[10] || '',
+          ir: eq.rawData[11] || '',
+          pd: eq.rawData[12] || '',
+          voltageImbalance: eq.rawData[13] || '',
+          pi: eq.rawData[14] || '',
+          bearingTemp: eq.rawData[15] || '',
+          tanDelta: eq.rawData[16] || '',
+          age: eq.rawData[17] || '',
+          dutyFactor: eq.rawData[18] || ''
+        });
+        linksStr = eq.rawData[19] || '';
+      }
     }
 
     if (linksStr) {
@@ -1544,11 +1330,12 @@ export default function App() {
     let tests: any[] = [];
 
     if (eq.type === 'Máy biến áp') {
+      const raw = eq.rawData || [];
       // Generate realistic values based on DNO Common Network Asset Indices Methodology
-      const moisture = isCritical ? 35 + Math.random() * 15 : isWarning ? 20 + Math.random() * 15 : 5 + Math.random() * 10;
+      const moisture = raw[17] ? parseFloat(raw[17].toString().replace(',', '.')) : (isCritical ? 35 + Math.random() * 15 : isWarning ? 20 + Math.random() * 15 : 5 + Math.random() * 10);
       const acidity = isCritical ? 0.2 + Math.random() * 0.15 : isWarning ? 0.12 + Math.random() * 0.08 : 0.02 + Math.random() * 0.08;
-      const bdv = isCritical ? 25 + Math.random() * 10 : isWarning ? 35 + Math.random() * 10 : 55 + Math.random() * 15;
-      const ffa = isCritical ? 5.5 + Math.random() * 2 : isWarning ? 3.5 + Math.random() * 2 : 0.5 + Math.random() * 2;
+      const bdv = raw[15] ? parseFloat(raw[15].toString().replace(',', '.')) : (isCritical ? 25 + Math.random() * 10 : isWarning ? 35 + Math.random() * 10 : 55 + Math.random() * 15);
+      const ffa = raw[16] ? parseFloat(raw[16].toString().replace(',', '.')) : (isCritical ? 5.5 + Math.random() * 2 : isWarning ? 3.5 + Math.random() * 2 : 0.5 + Math.random() * 2);
       
       // Scoring based on PDF calibration tables
       const moistureScore = moisture > 45 ? 10 : moisture > 35 ? 8 : moisture > 25 ? 4 : moisture > 15 ? 2 : 0;
@@ -1579,7 +1366,7 @@ export default function App() {
       ].filter(d => d.risk > 0);
 
       tests = [
-        { name: 'Khí hòa tan (DGA)', shortName: 'DGA', value: isCritical ? 'Mức cao' : isWarning ? 'Cảnh báo' : 'Bình thường', unit: '', score: dgaScore, weight: 3, status: getStatus(dgaScore), rec: getRec(dgaScore, 'Lọc/thay dầu ngay', 'Theo dõi thêm') },
+        { name: 'Khí hòa tan (DGA)', shortName: 'DGA', value: raw[14] || (isCritical ? 'Mức cao' : isWarning ? 'Cảnh báo' : 'Bình thường'), unit: '', score: dgaScore, weight: 3, status: getStatus(dgaScore), rec: getRec(dgaScore, 'Lọc/thay dầu ngay', 'Theo dõi thêm') },
         { name: 'Hàm lượng Furan (FFA)', shortName: 'FFA', value: ffa.toFixed(2), unit: 'ppm', score: ffaScore, weight: 2, status: getStatus(ffaScore), rec: getRec(ffaScore, 'Kiểm tra cách điện giấy', 'Theo dõi xu hướng') },
         { name: 'Độ ẩm trong dầu', shortName: 'Moisture', value: moisture.toFixed(1), unit: 'ppm', score: moistureScore, weight: 2, status: getStatus(moistureScore), rec: getRec(moistureScore, 'Xử lý lọc dầu', 'Kiểm tra độ kín') },
         { name: 'Độ axit', shortName: 'Acidity', value: acidity.toFixed(3), unit: 'mg KOH/g', score: acidityScore, weight: 1, status: getStatus(acidityScore), rec: getRec(acidityScore, 'Thay dầu', 'Theo dõi') },
@@ -1587,9 +1374,10 @@ export default function App() {
         { name: 'Phóng điện cục bộ', shortName: 'PD', value: isCritical ? 'Cao' : isWarning ? 'Trung bình' : 'Thấp', unit: '', score: pdScore, weight: 3, status: getStatus(pdScore), rec: getRec(pdScore, 'Kiểm tra siêu âm/TEV', 'Theo dõi định kỳ') },
       ];
     } else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') {
-      const tevLevel = isCritical ? 30 + Math.random() * 20 : isWarning ? 20 + Math.random() * 9 : 5 + Math.random() * 14;
-      const pulses = isCritical ? Math.floor(1 + Math.random() * 28) : isWarning ? Math.floor(1 + Math.random() * 5) : 0;
-      const ultrasonic = isCritical ? 20 + Math.random() * 20 : isWarning ? 5 + Math.random() * 15 : Math.random() * 5;
+      const raw = eq.rawData || [];
+      const tevLevel = raw[11] ? parseFloat(raw[11].toString().replace(',', '.')) : (isCritical ? 30 + Math.random() * 20 : isWarning ? 20 + Math.random() * 9 : 5 + Math.random() * 14);
+      const pulses = raw[13] ? parseFloat(raw[13].toString().replace(',', '.')) : (isCritical ? Math.floor(1 + Math.random() * 28) : isWarning ? Math.floor(1 + Math.random() * 5) : 0);
+      const ultrasonic = raw[12] ? parseFloat(raw[12].toString().replace(',', '.')) : (isCritical ? 20 + Math.random() * 20 : isWarning ? 5 + Math.random() * 15 : Math.random() * 5);
 
       const tevScore = tevLevel > 29 ? 10 : tevLevel >= 20 ? 6 : 1;
       const pulsesScore = pulses >= 7 && pulses <= 29 ? 10 : pulses >= 1 && pulses <= 6 ? 8 : pulses >= 30 ? 4 : 1; // 30-50 is noise
@@ -1619,11 +1407,12 @@ export default function App() {
           { name: 'Siêu âm', shortName: 'Ultrasonic', value: ultrasonic.toFixed(1), unit: 'dBµV', score: ultrasonicScore, weight: 2, status: getStatus(ultrasonicScore), rec: getRec(ultrasonicScore, 'Kiểm tra phóng điện bề mặt', 'Theo dõi') },
       ];
     } else if (eq.type === 'Động cơ') {
-      const tanDelta = isCritical ? 0.08 + Math.random() * 0.05 : isWarning ? 0.04 + Math.random() * 0.03 : 0.01 + Math.random() * 0.02;
-      const pd = isCritical ? 18000 + Math.random() * 5000 : isWarning ? 8000 + Math.random() * 7000 : 2000 + Math.random() * 3000;
-      const ir = isCritical ? 0.5 + Math.random() * 0.5 : isWarning ? 5 + Math.random() * 5 : 60 + Math.random() * 50;
-      const pi = isCritical ? 0.8 + Math.random() * 0.2 : isWarning ? 1.2 + Math.random() * 0.8 : 2.5 + Math.random() * 1.5;
-      const elcid = isCritical ? 250 + Math.random() * 100 : isWarning ? 120 + Math.random() * 80 : 40 + Math.random() * 30;
+      const raw = eq.rawData || [];
+      const tanDelta = raw[13] ? parseFloat(raw[13].toString().replace(',', '.')) : (isCritical ? 0.08 + Math.random() * 0.05 : isWarning ? 0.04 + Math.random() * 0.03 : 0.01 + Math.random() * 0.02);
+      const pd = raw[19] ? parseFloat(raw[19].toString().replace(',', '.')) : (isCritical ? 18000 + Math.random() * 5000 : isWarning ? 8000 + Math.random() * 7000 : 2000 + Math.random() * 3000);
+      const ir = raw[22] ? parseFloat(raw[22].toString().replace(',', '.')) : (isCritical ? 0.5 + Math.random() * 0.5 : isWarning ? 5 + Math.random() * 5 : 60 + Math.random() * 50);
+      const pi = raw[25] ? parseFloat(raw[25].toString().replace(',', '.')) : (isCritical ? 0.8 + Math.random() * 0.2 : isWarning ? 1.2 + Math.random() * 0.8 : 2.5 + Math.random() * 1.5);
+      const elcid = raw[31] ? parseFloat(raw[31].toString().replace(',', '.')) : (isCritical ? 250 + Math.random() * 100 : isWarning ? 120 + Math.random() * 80 : 40 + Math.random() * 30);
 
       const tanDeltaScore = tanDelta >= 0.1 ? 10 : tanDelta >= 0.07 ? 8 : tanDelta >= 0.04 ? 4 : 1;
       const pdScore = pd >= 20000 ? 10 : pd >= 15000 ? 8 : pd >= 10000 ? 4 : 1;
@@ -1737,43 +1526,50 @@ export default function App() {
   const dynamicSiteData = useMemo(() => {
     const siteMap = new Map();
     
+    // Filter allEquipment first if user is a customer with an assigned factory
+    const equipmentToProcess = (userRole === 'customer' && userFactory)
+      ? allEquipment.filter(eq => eq.factory === userFactory)
+      : allEquipment;
+    
     // Known coordinates for nice map display
     const knownCoords: Record<string, {lat: number, lng: number}> = {
-      'Nhà máy Bắc Ninh': { lat: 21.1861, lng: 106.0763 },
-      'Nhà máy Bình Dương': { lat: 11.0648, lng: 106.6615 },
-      'Nhà máy Đồng Nai': { lat: 10.9487, lng: 106.8243 },
-      'Nhà máy Nhiệt điện Phả Lại': { lat: 21.111, lng: 106.315 },
-      'Nhà máy Thủy điện Hòa Bình': { lat: 20.808, lng: 105.328 },
-      'Nhà máy Sữa Tiên Sơn': { lat: 21.125, lng: 106.012 },
-      'Nhà máy Sữa Bình Dương': { lat: 11.064, lng: 106.661 },
-      'Khu liên hợp Gang thép Hải Dương': { lat: 21.000, lng: 106.500 },
-      'Khu liên hợp Gang thép Dung Quất': { lat: 15.385, lng: 108.794 },
-      'Nhà máy Thaco Mazda': { lat: 15.441, lng: 108.647 },
-      'Nhà máy Thaco Kia': { lat: 15.445, lng: 108.650 },
-      'Nhà máy Xử lý Khí Dinh Cố': { lat: 10.420, lng: 107.195 },
-      'Trung tâm Dữ liệu Viettel Hòa Lạc': { lat: 21.015, lng: 105.526 },
-      'Trung tâm Dữ liệu Viettel Bình Dương': { lat: 11.050, lng: 106.650 },
-      'Nhà máy Masan Nutri-Science': { lat: 20.550, lng: 105.950 },
-      'Nhà máy Masan Consumer Bình Dương': { lat: 11.060, lng: 106.660 },
-      'Nhà máy VinFast Hải Phòng': { lat: 20.816, lng: 106.852 },
-      'FPT Tower': { lat: 21.031, lng: 105.782 },
-      'Sân bay Quốc tế Nội Bài': { lat: 21.218, lng: 105.804 },
-      'Sân bay Quốc tế Tân Sơn Nhất': { lat: 10.818, lng: 106.658 },
-      'Nhà máy Thủy điện Sơn La': { lat: 21.496, lng: 103.995 },
-      'Nhà máy Sữa Đà Nẵng': { lat: 16.030, lng: 108.180 },
-      'Khu liên hợp Gang thép Formosa Hà Tĩnh': { lat: 18.040, lng: 106.330 },
+      'Thủy điện Sơn La': { lat: 21.496, lng: 103.995 },
+      'Thủy điện Lai Châu': { lat: 22.140, lng: 102.980 },
+      'Thủy điện Hòa Bình': { lat: 20.808, lng: 105.328 },
+      'Nhiệt điện Phả Lại': { lat: 21.111, lng: 106.315 },
+      'Nhiệt điện Mông Dương': { lat: 21.070, lng: 107.350 },
+      'Nhiệt điện Nghi Sơn': { lat: 19.330, lng: 105.780 },
+      'Thủy điện Bản Vẽ': { lat: 19.320, lng: 104.480 },
+      'Nhiệt điện Vũng Áng': { lat: 18.120, lng: 106.350 },
+      'Thủy điện Quảng Trị': { lat: 16.650, lng: 106.750 },
+      'Thủy điện A Lưới': { lat: 16.250, lng: 107.250 },
+      'Thủy điện Sông Tranh 2': { lat: 15.350, lng: 108.150 },
+      'Thủy điện Ialy': { lat: 14.220, lng: 107.750 },
+      'Thủy điện Sê San 4': { lat: 13.950, lng: 107.550 },
+      'Điện gió Phương Mai': { lat: 13.850, lng: 109.250 },
+      'Điện mặt trời Trung Nam': { lat: 11.650, lng: 108.950 },
+      'Nhiệt điện Vĩnh Tân': { lat: 11.320, lng: 108.850 },
+      'Thủy điện Trị An': { lat: 11.120, lng: 107.020 },
+      'Nhiệt điện Phú Mỹ': { lat: 10.580, lng: 107.050 },
+      'Điện gió Bạc Liêu': { lat: 9.250, lng: 105.820 },
+      'Nhiệt điện Cà Mau': { lat: 9.180, lng: 104.920 }
     };
 
-    allEquipment.forEach(eq => {
-      const factory = eq.factory || 'Chưa xác định';
-      const customer = eq.customer || 'Chưa xác định';
+    equipmentToProcess.forEach(eq => {
+      const factory = eq.factory?.trim() || 'Chưa xác định';
+      const customer = eq.customer?.trim() || 'Chưa xác định';
       const id = factory.toLowerCase().replace(/\s+/g, '-');
       
       if (!siteMap.has(id)) {
         // Generate some pseudo-random coordinates in VN if unknown
         const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-        const lat = knownCoords[factory]?.lat || (10 + (hash % 10) + (hash % 100) / 100);
-        const lng = knownCoords[factory]?.lng || (105 + (hash % 5) + (hash % 100) / 100);
+        
+        // Case-insensitive coordinate matching
+        const normalizedFactory = factory.toLowerCase();
+        const coordKey = Object.keys(knownCoords).find(k => k.toLowerCase() === normalizedFactory);
+        
+        const lat = (coordKey ? knownCoords[coordKey].lat : null) || (10 + (hash % 10) + (hash % 100) / 100);
+        const lng = (coordKey ? knownCoords[coordKey].lng : null) || (105 + (hash % 5) + (hash % 100) / 100);
 
         siteMap.set(id, {
           id,
@@ -1810,107 +1606,74 @@ export default function App() {
     return matchCustomer && matchFactory;
   });
 
-  const filteredKpiData = {
-    total: filteredSiteData.reduce((sum, site) => sum + site.count, 0),
-    healthy: filteredSiteData.reduce((sum, site) => sum + site.healthy, 0),
-    warning: filteredSiteData.reduce((sum, site) => sum + site.warning, 0),
-    critical: filteredSiteData.reduce((sum, site) => sum + site.critical, 0),
-  };
-
   const dynamicTrendData = useMemo(() => {
     const eq = allEquipment.find(e => e.id === trendingEquipment);
-    if (!eq) return { temp: [], tev: [], dga: [] };
+    if (!eq) return { temp: [], tev: [], dga: [], winding_temp: [], ir: [], winding_res: [], pd: [], elcid: [], pi: [] };
 
-    // Simple hash function to generate deterministic pseudo-random numbers based on equipment ID
-    const seed = eq.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const random = (offset: number) => {
-      const x = Math.sin(seed + offset) * 10000;
-      return x - Math.floor(x);
+    const reportsForEq = allReports.filter(r => r.equipmentId === trendingEquipment);
+    const sortedReports = [...reportsForEq].sort((a, b) => {
+      const [d1, m1, y1] = a.date.split('/');
+      const [d2, m2, y2] = b.date.split('/');
+      return new Date(`${y1}-${m1}-${d1}`).getTime() - new Date(`${y2}-${m2}-${d2}`).getTime();
+    });
+
+    const parseVal = (val: any) => {
+      if (typeof val === 'string') return parseFloat(val.replace(',', '.'));
+      return val;
     };
 
-    const isCritical = eq.status === 'critical';
-    const isWarning = eq.status === 'warning';
-    
-    const baseTemp = isCritical ? 85 : isWarning ? 75 : 60;
-    const tempTrend = Array.from({ length: 9 }).map((_, i) => ({
-      time: `${(i + 8).toString().padStart(2, '0')}:00`,
-      temp: Math.round(baseTemp + random(i) * 10 + (isCritical ? i * 1.5 : isWarning ? i * 0.5 : 0))
-    }));
+    const tempTrend = sortedReports.map(r => ({
+      time: r.date,
+      temp: parseVal(r.measurements?.oilTemp || r.measurements?.statorTemp) || 0
+    })).filter(d => d.temp > 0);
 
-    const baseTev = isCritical ? 20 : isWarning ? 10 : 2;
-    const baseUltra = isCritical ? 10 : isWarning ? 5 : 1;
-    const tevTrend = Array.from({ length: 9 }).map((_, i) => ({
-      time: `${(i + 8).toString().padStart(2, '0')}:00`,
-      tev: Math.round(baseTev + random(i + 100) * 5 + (isCritical ? i * 2 : isWarning ? i * 1 : 0)),
-      ultrasonic: Math.round(baseUltra + random(i + 200) * 3 + (isCritical ? i * 1.5 : isWarning ? i * 0.5 : 0))
-    }));
+    const windingTempTrend = sortedReports.map(r => ({
+      time: r.date,
+      temp: parseVal(r.measurements?.windingTemp || r.measurements?.bearingTemp) || 0
+    })).filter(d => d.temp > 0);
 
-    const baseH2 = isCritical ? 50 : isWarning ? 20 : 5;
-    const dgaTrend = Array.from({ length: 6 }).map((_, i) => {
-      const month = (i * 3 + 1) % 12 || 12;
-      const year = 25 + Math.floor((i * 3 + 1) / 12);
-      const multiplier = isCritical ? Math.pow(1.5, i) : isWarning ? Math.pow(1.2, i) : 1;
+    const tevTrend = sortedReports.map(r => ({
+      time: r.date,
+      tev: parseVal(r.measurements?.tev) || 0,
+      ultrasonic: parseVal(r.measurements?.ultrasonic) || 0
+    })).filter(d => d.tev > 0 || d.ultrasonic > 0);
+
+    const dgaTrend = sortedReports.map(r => {
+      const dgaStr = r.measurements?.dga || '';
+      // Simple parsing if DGA is a string like "H2: 10, CH4: 20" or similar. 
+      // If it's just a status, we might not have numbers. Let's try to extract numbers.
+      // For now, if we don't have structured DGA data, we might return empty or parse it.
+      // Assuming DGA might not be fully structured in the sheet for this trend, we'll return empty if no structured data.
       return {
-        time: `T${month}/${year}`,
-        h2: Math.round((baseH2 + random(i + 300) * 10) * multiplier),
-        ch4: Math.round((baseH2 * 0.7 + random(i + 400) * 5) * multiplier),
-        c2h6: Math.round((baseH2 * 0.4 + random(i + 500) * 3) * multiplier),
-        c2h4: Math.round((baseH2 * 0.3 + random(i + 600) * 2) * multiplier),
-        c2h2: Math.round((isCritical ? 5 : 0) + random(i + 700) * 2 * multiplier),
-        co: Math.round((150 + random(i + 800) * 50) * (multiplier > 1 ? multiplier * 0.5 : 1)),
-        co2: Math.round((1200 + random(i + 900) * 200) * (multiplier > 1 ? multiplier * 0.5 : 1))
+        time: r.date,
+        h2: 0, ch4: 0, c2h6: 0, c2h4: 0, c2h2: 0, co: 0, co2: 0
       };
-    });
+    }); // DGA parsing might be complex depending on sheet format, leaving as placeholder or empty if not available
 
-    const windingTempTrend = Array.from({ length: 9 }).map((_, i) => ({
-      time: `${(i + 8).toString().padStart(2, '0')}:00`,
-      temp: Math.round((baseTemp + 10) + random(i + 1000) * 12 + (isCritical ? i * 1.8 : isWarning ? i * 0.6 : 0))
-    }));
+    const irTrend = sortedReports.map(r => ({
+      time: r.date,
+      ir: parseVal(r.measurements?.irHighLow || r.measurements?.irR) || 0
+    })).filter(d => d.ir > 0);
 
-    const irTrend = Array.from({ length: 6 }).map((_, i) => {
-      const month = (i * 3 + 1) % 12 || 12;
-      const year = 25 + Math.floor((i * 3 + 1) / 12);
-      const baseIr = isCritical ? 500 : isWarning ? 1500 : 5000;
-      return {
-        time: `T${month}/${year}`,
-        ir: Math.round(baseIr + random(i + 1100) * (baseIr * 0.1) - (isCritical ? i * 50 : isWarning ? i * 100 : 0))
-      };
-    });
+    const windingResTrend = sortedReports.map(r => ({
+      time: r.date,
+      res: parseVal(r.measurements?.contactRes) || 0
+    })).filter(d => d.res > 0);
 
-    const windingResTrend = Array.from({ length: 6 }).map((_, i) => {
-      const month = (i * 3 + 1) % 12 || 12;
-      const year = 25 + Math.floor((i * 3 + 1) / 12);
-      const baseRes = 0.5;
-      return {
-        time: `T${month}/${year}`,
-        res: Number((baseRes + random(i + 1200) * 0.05 + (isCritical ? i * 0.02 : isWarning ? i * 0.01 : 0)).toFixed(3))
-      };
-    });
+    const pdTrend = sortedReports.map(r => ({
+      time: r.date,
+      pd: parseVal(r.measurements?.pdR) || 0
+    })).filter(d => d.pd > 0);
 
-    const pdTrend = Array.from({ length: 9 }).map((_, i) => ({
-      time: `${(i + 8).toString().padStart(2, '0')}:00`,
-      pd: Math.round((isCritical ? 50 : isWarning ? 25 : 5) + random(i + 1300) * 10 + (isCritical ? i * 3 : isWarning ? i * 1 : 0))
-    }));
+    const elcidTrend = sortedReports.map(r => ({
+      time: r.date,
+      elcid: parseVal(r.measurements?.elcidR) || 0
+    })).filter(d => d.elcid > 0);
 
-    const elcidTrend = Array.from({ length: 6 }).map((_, i) => {
-      const month = (i * 3 + 1) % 12 || 12;
-      const year = 25 + Math.floor((i * 3 + 1) / 12);
-      const baseElcid = isCritical ? 150 : isWarning ? 80 : 20;
-      return {
-        time: `T${month}/${year}`,
-        elcid: Math.round(baseElcid + random(i + 1400) * 15 + (isCritical ? i * 10 : isWarning ? i * 5 : 0))
-      };
-    });
-
-    const piTrend = Array.from({ length: 6 }).map((_, i) => {
-      const month = (i * 3 + 1) % 12 || 12;
-      const year = 25 + Math.floor((i * 3 + 1) / 12);
-      const basePi = isCritical ? 1.2 : isWarning ? 1.8 : 3.5;
-      return {
-        time: `T${month}/${year}`,
-        pi: Number((basePi + random(i + 1500) * 0.2 - (isCritical ? i * 0.05 : isWarning ? i * 0.1 : 0)).toFixed(2))
-      };
-    });
+    const piTrend = sortedReports.map(r => ({
+      time: r.date,
+      pi: parseVal(r.measurements?.piR) || 0
+    })).filter(d => d.pi > 0);
 
     return { 
       temp: tempTrend, 
@@ -1923,17 +1686,83 @@ export default function App() {
       elcid: elcidTrend,
       pi: piTrend
     };
-  }, [trendingEquipment, allEquipment]);
+  }, [trendingEquipment, allEquipment, allReports]);
+
+  const dynamicParamHistoryData = useMemo(() => {
+    if (!selectedRiskDetail || !selectedParamHistory || !allReports) return null;
+    
+    const paramKeyMap: Record<string, string> = {
+      'Tuổi thiết bị': 'age',
+      'Hệ số tải': 'dutyFactor',
+      'Nhiệt độ dầu': 'oilTemp',
+      'Nhiệt độ cuộn dây': 'windingTemp',
+      'Điện trở cách điện (Cao-Hạ)': 'irHighLow',
+      'Điện trở cách điện (Cao-Vỏ)': 'irHighEarth',
+      'Tình trạng rò rỉ dầu': 'oilLeak',
+      'DGA': 'dga',
+      'Độ bền điện môi': 'dielectricStrength',
+      'Furan': 'furan',
+      'Độ ẩm dầu': 'oilMoisture',
+      'Độ rung': 'vibration',
+      'Mất cân bằng điện áp': 'voltageImbalance',
+      'Nhiệt độ Stator': 'statorTemp',
+      'Nhiệt độ vòng bi': 'bearingTemp',
+      'Nhiệt độ tiếp xúc': 'thermography',
+      'Điện trở tiếp xúc': 'contactRes',
+      'TEV': 'tev',
+      'Số xung TEV': 'tevPulses',
+      'Ultrasonic': 'ultrasonic',
+      'Độ ẩm môi trường': 'humidity',
+      'Áp suất SF6': 'sf6Pressure'
+    };
+
+    const key = paramKeyMap[selectedParamHistory];
+    if (!key) return null;
+
+    const reportsForEq = allReports.filter(r => r.equipmentId === selectedRiskDetail);
+    
+    // Sort by date ascending for chart
+    const sortedReports = [...reportsForEq].sort((a, b) => {
+      const [d1, m1, y1] = a.date.split('/');
+      const [d2, m2, y2] = b.date.split('/');
+      return new Date(`${y1}-${m1}-${d1}`).getTime() - new Date(`${y2}-${m2}-${d2}`).getTime();
+    });
+
+    const dataPoints = sortedReports.map(r => {
+      let val = r.measurements?.[key];
+      if (typeof val === 'string') {
+        val = parseFloat(val.replace(',', '.'));
+      }
+      return {
+        date: r.date,
+        value: isNaN(val) ? null : val
+      };
+    }).filter(d => d.value !== null);
+
+    return dataPoints.length > 0 ? dataPoints : null;
+  }, [allReports, selectedRiskDetail, selectedParamHistory]);
 
   const selectedFactoryName = selectedFactory === 'all' 
     ? 'all' 
     : dynamicSiteData.find(s => s.id === selectedFactory)?.name;
 
   const filteredEquipment = allEquipment.filter(eq => {
+    // If user is a customer and has an assigned factory, restrict to that factory
+    if (userRole === 'customer' && userFactory) {
+      return eq.factory === userFactory;
+    }
+    
     const matchCustomer = selectedCustomer === 'all' || eq.customer === selectedCustomer;
     const matchFactory = selectedFactoryName === 'all' || eq.factory === selectedFactoryName;
     return matchCustomer && matchFactory;
   });
+
+  const filteredKpiData = {
+    total: filteredEquipment.length,
+    healthy: filteredEquipment.filter(e => e.status === 'healthy').length,
+    warning: filteredEquipment.filter(e => e.status === 'warning').length,
+    critical: filteredEquipment.filter(e => e.status === 'critical').length,
+  };
 
   const displayedEquipment = filteredEquipment.filter(eq => {
     const matchStatus = statusFilter === 'all' || eq.status === statusFilter;
@@ -1946,6 +1775,11 @@ export default function App() {
   });
 
   const displayedReports = allReports.filter(report => {
+    // If user is a customer and has an assigned factory, restrict to that factory
+    if (userRole === 'customer' && userFactory) {
+      if (report.factory !== userFactory) return false;
+    }
+    
     const matchSearch = reportFilterSearch === '' || 
       report.id.toLowerCase().includes(reportFilterSearch.toLowerCase()) || 
       report.equipmentId.toLowerCase().includes(reportFilterSearch.toLowerCase()) ||
@@ -2487,6 +2321,14 @@ export default function App() {
     }
   };
 
+  const handleSeedData = () => {
+    // Removed to prevent overwriting real data with mock data
+  };
+
+  const executeSeedData = async () => {
+    // Removed to prevent overwriting real data with mock data
+  };
+
   const handleSyncToSheets = async (equipmentListToSync?: any[], silent: boolean = false) => {
     if (!isGoogleConnected) {
       if (!silent) alert('Vui lòng kết nối Google Drive trước khi đồng bộ.');
@@ -2503,37 +2345,79 @@ export default function App() {
       // Headers
       transformers.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Nhiệt độ dầu (°C)', 'Nhiệt độ cuộn dây (°C)', 'IR Cao-Hạ (MΩ)', 'IR Cao-Vỏ (MΩ)', 'Tình trạng rò rỉ dầu', 'Khí hòa tan DGA (ppm)', 'Độ bền điện môi (kV)', 'Hàm lượng Furan (mg/kg)', 'Độ ẩm trong dầu (ppm)', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
       switchgears.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Chụp ảnh nhiệt (°C)', 'Điện trở tiếp xúc (μΩ)', 'TEV (dBmV)', 'Siêu âm (dBμV)', 'Xung TEV (pps)', 'Độ ẩm (%)', 'Áp suất khí SF6 (bar)', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
-      motors.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Độ rung (mm/s)', 'Nhiệt độ Stator (°C)', 'Điện trở cách điện (GΩ)', 'Phóng điện cục bộ PD (pC)', 'Độ lệch điện áp (%)', 'Chỉ số phân cực PI', 'Nhiệt độ vòng bi (°C)', 'Tan Delta', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
+      motors.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Độ rung (mm/s)', 'Nhiệt độ Stator (°C)', 'Nhiệt độ vòng bi (°C)', 'Độ lệch điện áp (%)', 'Tan-delta R', 'Tan-delta Y', 'Tan-delta B', 'Tip-up R', 'Tip-up Y', 'Tip-up B', 'PD R', 'PD Y', 'PD B', 'IR R', 'IR Y', 'IR B', 'PI R', 'PI Y', 'PI B', 'DD R', 'DD Y', 'DD B', 'ELCID R', 'ELCID Y', 'ELCID B', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
 
       // Map existing data
-      const listToSync = Array.isArray(equipmentListToSync) ? equipmentListToSync : allEquipment;
-      listToSync.forEach(eq => {
-        const baseData = [eq.lastCheck || new Date().toLocaleString('vi-VN'), eq.customer, eq.factory, eq.location, eq.id, eq.name, eq.type, eq.health, eq.status];
-        const raw = eq.rawData || [];
+      const listToSync = Array.isArray(equipmentListToSync) ? equipmentListToSync : allReports;
+      
+      let transformerRowIdx = 2;
+      let switchgearRowIdx = 2;
+      let motorRowIdx = 2;
+
+      listToSync.forEach(item => {
+        const eqId = item.equipmentId || item.id;
+        const eqName = item.equipmentName || item.name;
+        const lastCheckDate = item.date || item.lastCheck || new Date().toLocaleDateString('vi-VN');
+        const baseData = [lastCheckDate, item.customer || '', item.factory || '', item.location || '', eqId, eqName, item.type];
+        const raw = item.rawData || [];
         
-        if (eq.type === 'Máy biến áp') {
-          // Transformers: 9 base + 9 params + 2 new + 1 link = 21 columns
-          const rowData = [...baseData];
+        if (item.type === 'Máy biến áp') {
+          const rowIdx = transformerRowIdx++;
+          const healthFormula = `=MAX(0, MIN(100, 100 - (IFS(I${rowIdx}="Nguy hiểm", 40, I${rowIdx}="Cảnh báo", 20, TRUE, 0)) - (IF(ISNUMBER(S${rowIdx}), S${rowIdx}, 0)/40)*10))`;
+          const statusFormula = `=IFS(OR(AND(ISNUMBER(J${rowIdx}), J${rowIdx}>90), AND(ISNUMBER(K${rowIdx}), K${rowIdx}>105), AND(ISNUMBER(L${rowIdx}), L${rowIdx}<1000), AND(ISNUMBER(M${rowIdx}), M${rowIdx}<1000), N${rowIdx}="heavy", AND(ISNUMBER(O${rowIdx}), O${rowIdx}>2500), AND(ISNUMBER(P${rowIdx}), P${rowIdx}<40), AND(ISNUMBER(Q${rowIdx}), Q${rowIdx}>5), AND(ISNUMBER(R${rowIdx}), R${rowIdx}>25)), "Nguy hiểm", OR(AND(ISNUMBER(J${rowIdx}), J${rowIdx}>80), AND(ISNUMBER(K${rowIdx}), K${rowIdx}>90), AND(ISNUMBER(L${rowIdx}), L${rowIdx}<2000), AND(ISNUMBER(M${rowIdx}), M${rowIdx}<2000), N${rowIdx}="light", AND(ISNUMBER(O${rowIdx}), O${rowIdx}>1000), AND(ISNUMBER(P${rowIdx}), P${rowIdx}<50), AND(ISNUMBER(Q${rowIdx}), Q${rowIdx}>1), AND(ISNUMBER(R${rowIdx}), R${rowIdx}>15)), "Cảnh báo", TRUE, "Bình thường")`;
+          
+          const rowData = [...baseData, healthFormula, statusFormula];
           for (let i = 9; i < 18; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
           rowData.push(raw[18] !== undefined ? raw[18] : ''); // Age
           rowData.push(raw[19] !== undefined ? raw[19] : ''); // Duty Factor
           rowData.push(raw[20] !== undefined ? raw[20] : ''); // Links
           transformers.push(rowData);
-        } else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') {
-          // Switchgears: 9 base + 7 params + 2 new + 1 link = 19 columns
-          const rowData = [...baseData];
+        } else if (item.type === 'Tủ điện trung thế' || item.type === 'Tủ điện') {
+          const rowIdx = switchgearRowIdx++;
+          const healthFormula = `=MAX(0, MIN(100, 100 - (IFS(I${rowIdx}="Nguy hiểm", 40, I${rowIdx}="Cảnh báo", 20, TRUE, 0)) - (IF(ISNUMBER(Q${rowIdx}), Q${rowIdx}, 0)/40)*10))`;
+          const statusFormula = `=IFS(OR(AND(ISNUMBER(J${rowIdx}), J${rowIdx}>75), AND(ISNUMBER(K${rowIdx}), K${rowIdx}>100), AND(ISNUMBER(L${rowIdx}), L${rowIdx}>30), AND(ISNUMBER(M${rowIdx}), M${rowIdx}>15), AND(ISNUMBER(N${rowIdx}), N${rowIdx}>50), AND(ISNUMBER(O${rowIdx}), O${rowIdx}>85), AND(ISNUMBER(P${rowIdx}), P${rowIdx}<5.0)), "Nguy hiểm", OR(AND(ISNUMBER(J${rowIdx}), J${rowIdx}>60), AND(ISNUMBER(K${rowIdx}), K${rowIdx}>50), AND(ISNUMBER(L${rowIdx}), L${rowIdx}>=20), AND(ISNUMBER(M${rowIdx}), M${rowIdx}>5), AND(ISNUMBER(N${rowIdx}), N${rowIdx}>=10), AND(ISNUMBER(O${rowIdx}), O${rowIdx}>70), AND(ISNUMBER(P${rowIdx}), P${rowIdx}<5.5)), "Cảnh báo", TRUE, "Bình thường")`;
+
+          const rowData = [...baseData, healthFormula, statusFormula];
           for (let i = 9; i < 16; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
           rowData.push(raw[16] !== undefined ? raw[16] : ''); // Age
           rowData.push(raw[17] !== undefined ? raw[17] : ''); // Duty Factor
           rowData.push(raw[18] !== undefined ? raw[18] : ''); // Links
           switchgears.push(rowData);
-        } else if (eq.type === 'Động cơ') {
-          // Motors: 9 base + 8 params + 2 new + 1 link = 20 columns
-          const rowData = [...baseData];
-          for (let i = 9; i < 17; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
-          rowData.push(raw[17] !== undefined ? raw[17] : ''); // Age
-          rowData.push(raw[18] !== undefined ? raw[18] : ''); // Duty Factor
-          rowData.push(raw[19] !== undefined ? raw[19] : ''); // Links
+        } else if (item.type === 'Động cơ') {
+          const rowIdx = motorRowIdx++;
+          // Motor Health Index based on Weighted Scoring Method (3-phase)
+          // Columns: N,O,P (Tan-delta), Q,R,S (Tip-up), T,U,V (PD), W,X,Y (IR), Z,AA,AB (PI), AC,AD,AE (DD), AF,AG,AH (ELCID)
+          
+          const worstTanDelta = `MAX(N${rowIdx}, O${rowIdx}, P${rowIdx})`;
+          const worstTipUp = `MAX(Q${rowIdx}, R${rowIdx}, S${rowIdx})`;
+          const worstPD = `MAX(T${rowIdx}, U${rowIdx}, V${rowIdx})`;
+          const worstIR = `MIN(W${rowIdx}, X${rowIdx}, Y${rowIdx})`;
+          const worstPI = `MIN(Z${rowIdx}, AA${rowIdx}, AB${rowIdx})`;
+          const worstDD = `MAX(AC${rowIdx}, AD${rowIdx}, AE${rowIdx})`;
+          const worstELCID = `MAX(AF${rowIdx}, AG${rowIdx}, AH${rowIdx})`;
+
+          const sTanDelta = `IFS(${worstTanDelta}<0.02, 10, ${worstTanDelta}<=0.04, 7, ${worstTanDelta}<=0.07, 5, TRUE, 1)`;
+          const sTipUp = `IFS(${worstTipUp}<0.002, 10, ${worstTipUp}<=0.004, 7, ${worstTipUp}<=0.006, 5, TRUE, 1)`;
+          const sPD = `IFS(${worstPD}<=5000, 10, ${worstPD}<=10000, 7, ${worstPD}<=15000, 5, TRUE, 1)`;
+          const sIR = `IFS(${worstIR}>50, 10, ${worstIR}>=10, 7, ${worstIR}>=1, 5, TRUE, 1)`;
+          const sPI = `IFS(${worstPI}>2, 10, ${worstPI}>=1.5, 7, ${worstPI}>=1.0, 5, TRUE, 1)`;
+          const sDD = `IFS(${worstDD}<2, 10, ${worstDD}<=4, 7, ${worstDD}<=8, 5, TRUE, 1)`;
+          const sELCID = `IFS(${worstELCID}<100, 10, ${worstELCID}<=200, 7, ${worstELCID}<=300, 5, TRUE, 1)`;
+          
+      const sumScoreWeight = `((${sTanDelta}*2) + (${sTipUp}*2) + (${sPD}*3) + (${sIR}*1) + (${sPI}*1) + (${sDD}*1) + (${sELCID}*1))`;
+      const sumWeights = `11`;
+          
+          const healthFormula = `=ROUND((${sumScoreWeight} / (10 * ${sumWeights})) * 100, 1)`;
+          const statusFormula = `=IFS(H${rowIdx}<40, "Nguy hiểm", H${rowIdx}<65, "Cảnh báo", TRUE, "Bình thường")`;
+
+          const rowData = [...baseData, healthFormula, statusFormula];
+          // Vibration, Stator Temp, Bearing Temp, Voltage Imbalance (9, 10, 11, 12)
+          for (let i = 9; i < 13; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
+          // 3-phase tests (13 to 33)
+          for (let i = 13; i < 34; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
+          rowData.push(raw[34] !== undefined ? raw[34] : ''); // Age
+          rowData.push(raw[35] !== undefined ? raw[35] : ''); // Duty Factor
+          rowData.push(raw[36] !== undefined ? raw[36] : ''); // Links
           motors.push(rowData);
         }
       });
@@ -2574,324 +2458,430 @@ export default function App() {
     }
   };
 
-  const handleRegenerateData = () => {
-    setAllEquipment(generateMockData());
-    alert('Đã tạo lại 100 thiết bị mẫu. Bạn có thể bấm "Đồng bộ lên Sheets" để lưu.');
-  };
-
   const handleFetchFromSheets = async () => {
-    if (!isGoogleConnected) {
-      return;
-    }
-
     setIsSyncing(true);
     try {
       const response = await fetch('/api/sheets/get', {
-        headers: getAuthHeaders(false)
+        headers: getAuthHeaders()
       });
+      
       if (!response.ok) {
         const err = await response.json();
         if (response.status === 401) {
           setIsGoogleConnected(false);
           throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.');
         }
-        if (err.error && err.error.includes('SPREADSHEET_ID')) {
-          throw new Error('Chưa cấu hình SPREADSHEET_ID. Vui lòng vào Settings -> Secrets để thêm ID của file Google Sheets.');
-        }
-        if (err.error && (err.error.includes('not found') || err.error.includes('Requested entity was not found'))) {
-          throw new Error('Không tìm thấy file Google Sheets. Vui lòng kiểm tra lại SPREADSHEET_ID trong Settings -> Secrets (chỉ lấy phần ID, không lấy cả đường link).');
-        }
-        throw new Error(err.error || 'Failed to fetch');
+        throw new Error(err.error || 'Failed to fetch data');
       }
 
       const { data } = await response.json();
+      console.log('Fetched data from server:', data);
       
       const newEquipmentList: any[] = [];
+      const newReportsList: any[] = [];
       
-      // Parse transformers
-      if (data.transformers && data.transformers.length > 1) {
-        const header = data.transformers[0];
-        const ageIdx = header.indexOf('Tuổi thọ (Age)');
-        const dutyFactorIdx = header.indexOf('Hệ số làm việc (Duty Factor)');
-        const linksIdx = header.indexOf('File đính kèm (Links)');
+      // Helper to map common fields
+      const getCommonIndices = (header: string[]) => ({
+        dateIdx: getColumnIndex(header, ['Ngày', 'Date', 'Last Check', 'Thời gian', 'Time', 'Ngày kiểm tra']),
+        customerIdx: getColumnIndex(header, ['Khách hàng', 'Customer', 'Client', 'Đơn vị']),
+        factoryIdx: getColumnIndex(header, ['Nhà máy', 'Factory', 'Site', 'Trạm', 'Khu vực']),
+        locationIdx: getColumnIndex(header, ['Vị trí', 'Location', 'Khu vực', 'Area', 'Ngăn lộ']),
+        idIdx: getColumnIndex(header, ['Mã thiết bị', 'ID', 'Equipment ID', 'Mã TB', 'Tag', 'Mã']),
+        nameIdx: getColumnIndex(header, ['Tên thiết bị', 'Name', 'Equipment Name', 'Tên TB', 'Description', 'Tên']),
+        typeIdx: getColumnIndex(header, ['Loại thiết bị', 'Type', 'Loại TB', 'Phân loại']),
+        healthIdx: getColumnIndex(header, ['Chỉ số sức khỏe', 'Health', 'HI', 'Sức khỏe', 'Điểm']),
+        statusIdx: getColumnIndex(header, ['Trạng thái', 'Status', 'Tình trạng', 'Kết quả', 'Đánh giá']),
+        ageIdx: getColumnIndex(header, ['Tuổi thọ', 'Age', 'Năm vận hành', 'Năm SX']),
+        dutyFactorIdx: getColumnIndex(header, ['Hệ số làm việc', 'Duty Factor', 'Hệ số tải']),
+        linksIdx: getColumnIndex(header, ['File đính kèm', 'Links', 'Tài liệu', 'Link'])
+      });
+
+      const allSheetsData = data.allSheets || {};
+      const sheetNames = Object.keys(allSheetsData);
+      
+      if (sheetNames.length === 0) {
+        alert('Không tìm thấy sheet nào trong file Google Sheets.');
+        setIsSyncing(false);
+        return;
+      }
+
+      sheetNames.forEach(sheetName => {
+        const rows = allSheetsData[sheetName];
+        if (!rows || rows.length === 0) return;
+
+        const headerIdx = findHeaderRow(rows);
+        if (headerIdx === -1) return;
+
+        const header = rows[headerIdx];
+        const idx = getCommonIndices(header);
+        const lowerSheetName = sheetName.toLowerCase();
+
+        // Determine equipment type
+        let eqType: 'Máy biến áp' | 'Tủ điện' | 'Động cơ' = 'Máy biến áp';
+        if (lowerSheetName.includes('tủ điện') || lowerSheetName.includes('trung thế') || lowerSheetName.includes('hạ thế') || lowerSheetName.includes('switchgear') || lowerSheetName.includes('swg') || lowerSheetName.includes('mcc') || lowerSheetName.includes('tev') || lowerSheetName.includes('rmu')) {
+          eqType = 'Tủ điện';
+        } else if (lowerSheetName.includes('động cơ') || lowerSheetName.includes('motor') || lowerSheetName.includes('máy bơm') || lowerSheetName.includes('pump') || lowerSheetName.includes('fan') || lowerSheetName.includes('quạt')) {
+          eqType = 'Động cơ';
+        } else if (lowerSheetName.includes('biến áp') || lowerSheetName.includes('mba') || lowerSheetName.includes('transformer')) {
+          eqType = 'Máy biến áp';
+        } else {
+          const hasTransformerCols = getColumnIndex(header, ['Nhiệt độ dầu', 'DGA', 'Furan']) !== -1;
+          const hasSwitchgearCols = getColumnIndex(header, ['TEV', 'Siêu âm', 'SF6']) !== -1;
+          const hasMotorCols = getColumnIndex(header, ['Rung động', 'Stator', 'Bearing']) !== -1;
+          if (hasMotorCols) eqType = 'Động cơ';
+          else if (hasSwitchgearCols) eqType = 'Tủ điện';
+          else eqType = 'Máy biến áp';
+        }
+
+        const dataRows = rows.slice(headerIdx + 1);
         
-        const rows = data.transformers.slice(1); // Skip header
-        rows.forEach((row: any[]) => {
-          if (row[4] && row[5]) { // Must have ID and Name
-            let healthVal = parseInt(row[7]) || 0;
-            let statusVal = row[8] || 'healthy';
-            
-            // Calculate using DNO methodology if age and duty factor are present
-            let age = ageIdx !== -1 ? parseFloat(row[ageIdx]) : NaN;
-            let dutyFactor = dutyFactorIdx !== -1 ? parseFloat(row[dutyFactorIdx]) : NaN;
-            
-            // If age or duty factor is missing, use defaults to calculate
+        if (eqType === 'Máy biến áp') {
+          const mIdx = {
+            oilTemp: getColumnIndex(header, ['Nhiệt độ dầu', 'Oil Temp', 'Temp dầu']),
+            windingTemp: getColumnIndex(header, ['Nhiệt độ cuộn dây', 'Winding Temp', 'Temp cuộn dây']),
+            irHighLow: getColumnIndex(header, ['Điện trở cách điện H-L', 'IR High-Low', 'IR Cao-Hạ']),
+            irHighEarth: getColumnIndex(header, ['Điện trở cách điện H-E', 'IR High-Earth', 'IR Cao-Vỏ']),
+            oilLeak: getColumnIndex(header, ['Rò rỉ dầu', 'Oil Leak']),
+            dga: getColumnIndex(header, ['Phân tích khí hòa tan', 'DGA', 'Khí hòa tan']),
+            dielectricStrength: getColumnIndex(header, ['Độ bền điện môi', 'Dielectric Strength']),
+            furan: getColumnIndex(header, ['Hàm lượng Furan', 'Furan']),
+            oilMoisture: getColumnIndex(header, ['Độ ẩm trong dầu', 'Oil Moisture', 'Độ ẩm dầu'])
+          };
+
+          dataRows.forEach((row: any[]) => {
+            if (!row || row.length === 0) return;
+            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
+            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
+            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
+
+            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
+            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
+            let age = idx.ageIdx !== -1 ? parseFloat(row[idx.ageIdx]?.toString().replace(',', '.') || '10') : 10;
+            let dutyFactor = idx.dutyFactorIdx !== -1 ? parseFloat(row[idx.dutyFactorIdx]?.toString().replace(',', '.') || '1.0') : 1.0;
             if (isNaN(age)) age = 10;
             if (isNaN(dutyFactor)) dutyFactor = 1.0;
-            
+
             let hasCritical = false;
             let hasWarning = false;
             const paramsToCheck = [
-              { key: 'oilTemp', val: row[9] },
-              { key: 'windingTemp', val: row[10] },
-              { key: 'irHighLow', val: row[11] },
-              { key: 'irHighEarth', val: row[12] },
-              { key: 'oilLeak', val: row[13] },
-              { key: 'dga', val: row[14] },
-              { key: 'dielectricStrength', val: row[15] },
-              { key: 'furan', val: row[16] },
-              { key: 'oilMoisture', val: row[17] }
+              { key: 'oilTemp', val: mIdx.oilTemp !== -1 ? row[mIdx.oilTemp] : '' },
+              { key: 'windingTemp', val: mIdx.windingTemp !== -1 ? row[mIdx.windingTemp] : '' },
+              { key: 'irHighLow', val: mIdx.irHighLow !== -1 ? row[mIdx.irHighLow] : '' },
+              { key: 'irHighEarth', val: mIdx.irHighEarth !== -1 ? row[mIdx.irHighEarth] : '' },
+              { key: 'oilLeak', val: mIdx.oilLeak !== -1 ? row[mIdx.oilLeak] : '' },
+              { key: 'dga', val: mIdx.dga !== -1 ? row[mIdx.dga] : '' },
+              { key: 'dielectricStrength', val: mIdx.dielectricStrength !== -1 ? row[mIdx.dielectricStrength] : '' },
+              { key: 'furan', val: mIdx.furan !== -1 ? row[mIdx.furan] : '' },
+              { key: 'oilMoisture', val: mIdx.oilMoisture !== -1 ? row[mIdx.oilMoisture] : '' }
             ];
             paramsToCheck.forEach(p => {
               const status = evaluateEquipmentParam('Máy biến áp', p.key, p.val);
               if (status === 'critical') hasCritical = true;
               if (status === 'warning') hasWarning = true;
             });
-            const healthScoreFactor = hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0);
-            
+
             const params: TransformerParams = {
-              mainTransformer: {
-                age,
-                normalExpectedLife: 40,
-                dutyFactor,
-                locationFactor: 1.0,
-                healthScoreFactor: healthScoreFactor,
-                reliabilityFactor: 1.0,
-                healthScoreCap: 10,
-                healthScoreCollar: 0.5,
-                reliabilityCollar: 0.5
-              },
-              tapchanger: {
-                age,
-                normalExpectedLife: 40,
-                dutyFactor,
-                locationFactor: 1.0,
-                healthScoreFactor: healthScoreFactor,
-                reliabilityFactor: 1.0,
-                healthScoreCap: 10,
-                healthScoreCollar: 0.5,
-                reliabilityCollar: 0.5
-              }
+              mainTransformer: { age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0), reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5 },
+              tapchanger: { age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0), reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5 }
             };
             const result = calculateTransformerHealth(params);
-            healthVal = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-            statusVal = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
-            
-            // Override with actual condition if it's worse than age-based score
-            if (hasCritical) {
-              statusVal = 'critical';
-              healthVal = Math.min(healthVal, 59);
-            } else if (hasWarning && statusVal === 'healthy') {
-              statusVal = 'warning';
-              healthVal = Math.min(healthVal, 79);
-            }
-            
-            // Create a normalized rawData array that matches the new structure
-            const normalizedRawData = [...row];
-            // Ensure array is long enough
-            while (normalizedRawData.length < 21) normalizedRawData.push('');
-            
-            // If the original row didn't have Age/DutyFactor, we need to shift the links
-            if (ageIdx === -1) {
-                // The old format had Links at index 18
-                const oldLinks = row[18] || '';
-                normalizedRawData[18] = age.toString();
-                normalizedRawData[19] = dutyFactor.toString();
-                normalizedRawData[20] = oldLinks;
-            } else {
-                normalizedRawData[18] = age.toString();
-                normalizedRawData[19] = dutyFactor.toString();
-                if (linksIdx !== -1) {
-                    normalizedRawData[20] = row[linksIdx] || '';
-                }
-            }
+            const calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+            if (hasCritical) statusVal = 'critical';
+            else if (hasWarning && statusVal === 'healthy') statusVal = 'warning';
+            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
 
-            newEquipmentList.push({
-              lastCheck: row[0] || '',
-              customer: row[1] || '',
-              factory: row[2] || '',
-              location: row[3] || '',
-              id: row[4],
-              name: row[5],
-              type: row[6] || 'Máy biến áp',
-              health: healthVal,
-              status: statusVal,
-              rawData: normalizedRawData
+            const eqData = {
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              id, name, type: 'Máy biến áp', health: healthVal, status: statusVal,
+              measurements: {
+                oilTemp: paramsToCheck[0].val, windingTemp: paramsToCheck[1].val, irHighLow: paramsToCheck[2].val,
+                irHighEarth: paramsToCheck[3].val, oilLeak: paramsToCheck[4].val, dga: paramsToCheck[5].val,
+                dielectricStrength: paramsToCheck[6].val, furan: paramsToCheck[7].val, oilMoisture: paramsToCheck[8].val,
+                age: age.toString(), dutyFactor: dutyFactor.toString()
+              },
+              rawData: [...row]
+            };
+            newEquipmentList.push(eqData);
+            newReportsList.push({
+              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
+              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              type: 'Máy biến áp', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
+              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
+              rawData: [...row]
             });
-          }
-        });
-      }
+          });
+        } else if (eqType === 'Tủ điện') {
+          const mIdx = {
+            thermography: getColumnIndex(header, ['Nhiệt hồng ngoại', 'Thermography', 'Nhiệt độ tiếp xúc']),
+            contactRes: getColumnIndex(header, ['Điện trở tiếp xúc', 'Contact Res']),
+            tev: getColumnIndex(header, ['TEV']),
+            ultrasonic: getColumnIndex(header, ['Siêu âm', 'Ultrasonic']),
+            tevPulses: getColumnIndex(header, ['Xung TEV', 'TEV Pulses', 'Số xung TEV']),
+            humidity: getColumnIndex(header, ['Độ ẩm', 'Humidity', 'Độ ẩm môi trường']),
+            sf6Pressure: getColumnIndex(header, ['Áp suất SF6', 'SF6 Pressure'])
+          };
 
-      // Parse switchgears
-      if (data.switchgears && data.switchgears.length > 1) {
-        const header = data.switchgears[0];
-        const ageIdx = header.indexOf('Tuổi thọ (Age)');
-        const dutyFactorIdx = header.indexOf('Hệ số làm việc (Duty Factor)');
-        const linksIdx = header.indexOf('File đính kèm (Links)');
+          dataRows.forEach((row: any[]) => {
+            if (!row || row.length === 0) return;
+            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
+            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
+            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
 
-        const rows = data.switchgears.slice(1);
-        rows.forEach((row: any[]) => {
-          if (row[4] && row[5]) {
-            let healthVal = parseInt(row[7]) || 0;
-            let statusVal = row[8] || 'healthy';
-            
-            let age = ageIdx !== -1 ? parseFloat(row[ageIdx]) : NaN;
-            let dutyFactor = dutyFactorIdx !== -1 ? parseFloat(row[dutyFactorIdx]) : NaN;
-            
+            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
+            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
+            let age = idx.ageIdx !== -1 ? parseFloat(row[idx.ageIdx]?.toString().replace(',', '.') || '10') : 10;
+            let dutyFactor = idx.dutyFactorIdx !== -1 ? parseFloat(row[idx.dutyFactorIdx]?.toString().replace(',', '.') || '1.0') : 1.0;
             if (isNaN(age)) age = 10;
             if (isNaN(dutyFactor)) dutyFactor = 1.0;
-            
+
             let hasCritical = false;
             let hasWarning = false;
             const paramsToCheck = [
-              { key: 'thermography', val: row[9] },
-              { key: 'contactRes', val: row[10] },
-              { key: 'tev', val: row[11] },
-              { key: 'ultrasonic', val: row[12] },
-              { key: 'tevPulses', val: row[13] },
-              { key: 'humidity', val: row[14] },
-              { key: 'sf6Pressure', val: row[15] }
+              { key: 'thermography', val: mIdx.thermography !== -1 ? row[mIdx.thermography] : '' },
+              { key: 'contactRes', val: mIdx.contactRes !== -1 ? row[mIdx.contactRes] : '' },
+              { key: 'tev', val: mIdx.tev !== -1 ? row[mIdx.tev] : '' },
+              { key: 'ultrasonic', val: mIdx.ultrasonic !== -1 ? row[mIdx.ultrasonic] : '' },
+              { key: 'tevPulses', val: mIdx.tevPulses !== -1 ? row[mIdx.tevPulses] : '' },
+              { key: 'humidity', val: mIdx.humidity !== -1 ? row[mIdx.humidity] : '' },
+              { key: 'sf6Pressure', val: mIdx.sf6Pressure !== -1 ? row[mIdx.sf6Pressure] : '' }
             ];
             paramsToCheck.forEach(p => {
               const status = evaluateEquipmentParam('Tủ điện', p.key, p.val);
               if (status === 'critical') hasCritical = true;
               if (status === 'warning') hasWarning = true;
             });
-            const measuredFactor = hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0);
-            
+
             const params: SwitchgearParams = {
-              age,
-              normalExpectedLife: 40,
-              dutyFactor,
-              locationFactor: 1.0,
-              healthScoreFactor: 1.0,
-              reliabilityFactor: 1.0,
-              healthScoreCap: 10,
-              healthScoreCollar: 0.5,
-              reliabilityCollar: 0.5,
-              observedFactor: 1.0,
-              measuredFactor: measuredFactor
+              age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: 1.0, reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5, observedFactor: 1.0, measuredFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0)
             };
             const result = calculateSwitchgearHealth(params);
-            healthVal = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-            statusVal = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+            const calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+            if (hasCritical) statusVal = 'critical';
+            else if (hasWarning && statusVal === 'healthy') statusVal = 'warning';
+            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
 
-            const normalizedRawData = [...row];
-            while (normalizedRawData.length < 19) normalizedRawData.push('');
-            
-            if (ageIdx === -1) {
-                const oldLinks = row[16] || '';
-                normalizedRawData[16] = age.toString();
-                normalizedRawData[17] = dutyFactor.toString();
-                normalizedRawData[18] = oldLinks;
-            } else {
-                normalizedRawData[16] = age.toString();
-                normalizedRawData[17] = dutyFactor.toString();
-                if (linksIdx !== -1) {
-                    normalizedRawData[18] = row[linksIdx] || '';
-                }
-            }
-
-            newEquipmentList.push({
-              lastCheck: row[0] || '',
-              customer: row[1] || '',
-              factory: row[2] || '',
-              location: row[3] || '',
-              id: row[4],
-              name: row[5],
-              type: row[6] || 'Tủ điện',
-              health: healthVal,
-              status: statusVal,
-              rawData: normalizedRawData
+            const eqData = {
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              id, name, type: 'Tủ điện', health: healthVal, status: statusVal,
+              measurements: {
+                thermography: paramsToCheck[0].val, contactRes: paramsToCheck[1].val, tev: paramsToCheck[2].val,
+                ultrasonic: paramsToCheck[3].val, tevPulses: paramsToCheck[4].val, humidity: paramsToCheck[5].val,
+                sf6Pressure: paramsToCheck[6].val, age: age.toString(), dutyFactor: dutyFactor.toString()
+              },
+              rawData: [...row]
+            };
+            newEquipmentList.push(eqData);
+            newReportsList.push({
+              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
+              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              type: 'Tủ điện', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
+              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
+              rawData: [...row]
             });
-          }
-        });
-      }
+          });
+        } else if (eqType === 'Động cơ') {
+          const mIdx = {
+            vibration: getColumnIndex(header, ['Rung động', 'Vibration', 'Độ rung']),
+            statorTemp: getColumnIndex(header, ['Nhiệt độ Stator', 'Stator Temp']),
+            bearingTemp: getColumnIndex(header, ['Nhiệt độ ổ bi', 'Bearing Temp', 'Nhiệt độ vòng bi']),
+            voltageImbalance: getColumnIndex(header, ['Mất cân bằng điện áp', 'Voltage Imbalance', 'Độ lệch điện áp']),
+            tanDelta: getColumnIndex(header, ['Tan Delta']),
+            tipUp: getColumnIndex(header, ['Tip Up']),
+            pd: getColumnIndex(header, ['Phóng điện cục bộ', 'PD']),
+            ir: getColumnIndex(header, ['Điện trở cách điện', 'IR']),
+            pi: getColumnIndex(header, ['Chỉ số phân cực', 'PI']),
+            dd: getColumnIndex(header, ['Phóng điện điện môi', 'DD']),
+            elcid: getColumnIndex(header, ['ELCID'])
+          };
 
-      // Parse motors
-      if (data.motors && data.motors.length > 1) {
-        const header = data.motors[0];
-        const ageIdx = header.indexOf('Tuổi thọ (Age)');
-        const dutyFactorIdx = header.indexOf('Hệ số làm việc (Duty Factor)');
-        const linksIdx = header.indexOf('File đính kèm (Links)');
+          dataRows.forEach((row: any[]) => {
+            if (!row || row.length === 0) return;
+            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
+            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
+            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
 
-        const rows = data.motors.slice(1);
-        rows.forEach((row: any[]) => {
-          if (row[4] && row[5]) {
-            let healthVal = parseInt(row[7]) || 0;
-            let statusVal = row[8] || 'healthy';
+            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
+            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
             
-            // For motors, we use the test values to calculate health
-            const ir = parseFloat(row[11]);
-            const pd = parseFloat(row[12]);
-            const pi = parseFloat(row[14]);
-            const tanDelta = parseFloat(row[16]);
-            
-            if (!isNaN(ir) || !isNaN(pd) || !isNaN(pi) || !isNaN(tanDelta)) {
-              const tests: MotorDiagnosticTests = {
-                ratedKV: 6600, // Default assumption if not provided
-                ir: isNaN(ir) ? undefined : { R: ir, Y: ir, B: ir },
-                pd: isNaN(pd) ? undefined : { R: pd, Y: pd, B: pd },
-                pi: isNaN(pi) ? undefined : { R: pi, Y: pi, B: pi },
-                tanDelta: isNaN(tanDelta) ? undefined : { R: tanDelta, Y: tanDelta, B: tanDelta }
+            let hasCritical = false;
+            let hasWarning = false;
+
+            const singleParams = [
+              { key: 'vibration', val: mIdx.vibration !== -1 ? row[mIdx.vibration] : '' },
+              { key: 'statorTemp', val: mIdx.statorTemp !== -1 ? row[mIdx.statorTemp] : '' },
+              { key: 'bearingTemp', val: mIdx.bearingTemp !== -1 ? row[mIdx.bearingTemp] : '' },
+              { key: 'voltageImbalance', val: mIdx.voltageImbalance !== -1 ? row[mIdx.voltageImbalance] : '' }
+            ];
+
+            singleParams.forEach(p => {
+              const status = evaluateEquipmentParam('Động cơ', p.key, p.val);
+              if (status === 'critical') hasCritical = true;
+              if (status === 'warning') hasWarning = true;
+            });
+
+            const parsePhaseData = (baseIdx: number): MotorPhaseData => {
+              if (baseIdx === -1) return { R: null, Y: null, B: null };
+              return {
+                R: parseFloat(row[baseIdx]?.toString().replace(',', '.') || '0') || null,
+                Y: parseFloat(row[baseIdx + 1]?.toString().replace(',', '.') || '0') || null,
+                B: parseFloat(row[baseIdx + 2]?.toString().replace(',', '.') || '0') || null
               };
-              const result = calculateMotorHealth(tests);
-              if (result.hiPercentage > 0) {
-                healthVal = Math.round(result.hiPercentage);
-                statusVal = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
-              }
-            } else {
-              statusVal = healthVal < 60 ? 'critical' : healthVal < 80 ? 'warning' : 'healthy';
-            }
+            };
 
-            let age = ageIdx !== -1 ? parseFloat(row[ageIdx]) : NaN;
-            let dutyFactor = dutyFactorIdx !== -1 ? parseFloat(row[dutyFactorIdx]) : NaN;
+            const tests: MotorDiagnosticTests = {
+              ratedKV: 6600,
+              tanDelta: parsePhaseData(mIdx.tanDelta),
+              tipUp: parsePhaseData(mIdx.tipUp),
+              pd: parsePhaseData(mIdx.pd),
+              ir: parsePhaseData(mIdx.ir),
+              pi: parsePhaseData(mIdx.pi),
+              dd: parsePhaseData(mIdx.dd),
+              elcid: parsePhaseData(mIdx.elcid)
+            };
+
+            // Check phase-based tests for critical/warning
+            const phaseTests = [
+              { key: 'tanDelta', vals: tests.tanDelta },
+              { key: 'tipUp', vals: tests.tipUp },
+              { key: 'pd', vals: tests.pd },
+              { key: 'ir', vals: tests.ir },
+              { key: 'pi', vals: tests.pi },
+              { key: 'dd', vals: tests.dd },
+              { key: 'elcid', vals: tests.elcid }
+            ];
+
+            phaseTests.forEach(test => {
+              if (test.vals) {
+                [test.vals.R, test.vals.Y, test.vals.B].forEach(v => {
+                  if (v !== null) {
+                    const status = evaluateEquipmentParam('Động cơ', test.key, v);
+                    if (status === 'critical') hasCritical = true;
+                    if (status === 'warning') hasWarning = true;
+                  }
+                });
+              }
+            });
+
+            const result = calculateMotorHealth(tests);
+            const calcHealth = Math.max(0, Math.round(result.hiPercentage));
+            if (hasCritical) statusVal = 'critical';
+            else if (hasWarning && statusVal === 'healthy') statusVal = 'warning';
+            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
+
+            let age = idx.ageIdx !== -1 ? parseFloat(row[idx.ageIdx]?.toString().replace(',', '.') || '10') : 10;
+            let dutyFactor = idx.dutyFactorIdx !== -1 ? parseFloat(row[idx.dutyFactorIdx]?.toString().replace(',', '.') || '1.0') : 1.0;
             if (isNaN(age)) age = 10;
             if (isNaN(dutyFactor)) dutyFactor = 1.0;
 
-            const normalizedRawData = [...row];
-            while (normalizedRawData.length < 20) normalizedRawData.push('');
-            
-            if (ageIdx === -1) {
-                const oldLinks = row[17] || '';
-                normalizedRawData[17] = age.toString();
-                normalizedRawData[18] = dutyFactor.toString();
-                normalizedRawData[19] = oldLinks;
-            } else {
-                normalizedRawData[17] = age.toString();
-                normalizedRawData[18] = dutyFactor.toString();
-                if (linksIdx !== -1) {
-                    normalizedRawData[19] = row[linksIdx] || '';
-                }
-            }
-
-            newEquipmentList.push({
-              lastCheck: row[0] || '',
-              customer: row[1] || '',
-              factory: row[2] || '',
-              location: row[3] || '',
-              id: row[4],
-              name: row[5],
-              type: row[6] || 'Động cơ',
-              health: healthVal,
-              status: statusVal,
-              rawData: normalizedRawData
+            const eqData = {
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              id, name, type: 'Động cơ', health: healthVal, status: statusVal,
+              measurements: {
+                vibration: singleParams[0].val, statorTemp: singleParams[1].val, bearingTemp: singleParams[2].val,
+                voltageImbalance: singleParams[3].val,
+                tanDeltaR: tests.tanDelta?.R, tanDeltaY: tests.tanDelta?.Y, tanDeltaB: tests.tanDelta?.B,
+                tipUpR: tests.tipUp?.R, tipUpY: tests.tipUp?.Y, tipUpB: tests.tipUp?.B,
+                pdR: tests.pd?.R, pdY: tests.pd?.Y, pdB: tests.pd?.B,
+                irR: tests.ir?.R, irY: tests.ir?.Y, irB: tests.ir?.B,
+                piR: tests.pi?.R, piY: tests.pi?.Y, piB: tests.pi?.B,
+                ddR: tests.dd?.R, ddY: tests.dd?.Y, ddB: tests.dd?.B,
+                elcidR: tests.elcid?.R, elcidY: tests.elcid?.Y, elcidB: tests.elcid?.B,
+                age: age.toString(), dutyFactor: dutyFactor.toString()
+              },
+              rawData: [...row]
+            };
+            newEquipmentList.push(eqData);
+            newReportsList.push({
+              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
+              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              type: 'Động cơ', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
+              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
+              rawData: [...row]
             });
-          }
-        });
-      }
+          });
+        }
+      });
+
 
       if (newEquipmentList.length > 0) {
-        setAllEquipment(newEquipmentList);
+        // Deduplicate equipment list (keep latest by date)
+        const uniqueEqMap = new Map();
+        newEquipmentList.forEach(eq => {
+          const existing = uniqueEqMap.get(eq.id);
+          if (!existing) {
+            uniqueEqMap.set(eq.id, eq);
+          } else {
+            // Compare dates (DD/MM/YYYY)
+            const parseDate = (dateStr: string) => {
+              if (!dateStr) return 0;
+              const parts = dateStr.split('/');
+              if (parts.length === 3) {
+                return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).getTime();
+              }
+              return new Date(dateStr).getTime() || 0;
+            };
+            const date1 = parseDate(eq.lastCheck);
+            const date2 = parseDate(existing.lastCheck);
+            if (date1 > date2) {
+              uniqueEqMap.set(eq.id, eq);
+            }
+          }
+        });
+        
+        const uniqueEquipmentList = Array.from(uniqueEqMap.values());
+        
+        // Sort reports by date descending
+        newReportsList.sort((a, b) => {
+          const parseDate = (dateStr: string) => {
+            if (!dateStr) return 0;
+            const parts = dateStr.split('/');
+            if (parts.length === 3) {
+              return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).getTime();
+            }
+            return new Date(dateStr).getTime() || 0;
+          };
+          return parseDate(b.date) - parseDate(a.date);
+        });
+
+        setAllEquipment(uniqueEquipmentList);
+        setAllReports(newReportsList);
         setSyncSuccess(true);
+        
+        // Update siteName and customerName from the first equipment found if currently default
+        if (uniqueEquipmentList.length > 0 && (siteName === 'Nhà máy Bắc Ninh' || !siteName)) {
+          setSiteName(uniqueEquipmentList[0].factory);
+          setCustomerName(uniqueEquipmentList[0].customer);
+        }
         setTimeout(() => setSyncSuccess(false), 3000);
         
-        // Automatically sync back to sheets to add missing columns and update health scores
-        await handleSyncToSheets(newEquipmentList, true);
+        alert('Đã tải dữ liệu từ Sheets thành công! Toàn bộ dữ liệu đã được đồng bộ.');
+      } else {
+        alert('Không tìm thấy dữ liệu thiết bị hợp lệ trong Google Sheets.');
       }
     } catch (error: any) {
       console.error('Fetch error:', error);
-      // Don't alert on auto-fetch to avoid annoying the user
+      alert('Lỗi khi tải dữ liệu từ Sheets: ' + error.message);
     } finally {
       setIsSyncing(false);
     }
@@ -2984,7 +2974,10 @@ export default function App() {
         alert('Có lỗi khi upload file đính kèm, nhưng dữ liệu vẫn sẽ được lưu.');
       }
 
-      // Prepare data row based on equipment type
+      // 3. Update local reports state
+      setAllReports(prev => [reportData, ...prev]);
+
+      // 4. Prepare data row based on equipment type
       const now = new Date().toLocaleString('vi-VN');
       const baseData = [now, customerName, siteName, locationName, equipmentCode, equipmentName, selectedEqType, healthResult?.index || 'N/A', healthResult?.status || 'N/A'];
       
@@ -3148,7 +3141,7 @@ export default function App() {
         };
         const result = calculateTransformerHealth(params);
         finalScore = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-        finalStatus = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+        finalStatus = (result.banding === 'HI1' || result.banding === 'HI2') ? 'healthy' : (result.banding === 'HI3' || result.banding === 'HI4') ? 'warning' : 'critical';
       } else {
         // Fallback to old logic if age/dutyFactor not provided
         let totalScore = 0;
@@ -3203,7 +3196,7 @@ export default function App() {
         };
         const result = calculateSwitchgearHealth(params);
         finalScore = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-        finalStatus = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
+        finalStatus = (result.banding === 'HI1' || result.banding === 'HI2') ? 'healthy' : (result.banding === 'HI3' || result.banding === 'HI4') ? 'warning' : 'critical';
       } else {
         // Fallback
         let totalScore = 0;
@@ -3229,54 +3222,29 @@ export default function App() {
         }
       }
     } else if (selectedEqType === 'Động cơ') {
-      const ir = parseFloat(formData.ir);
-      const pd = parseFloat(formData.pd);
-      const pi = parseFloat(formData.pi);
-      const tanDelta = parseFloat(formData.tanDelta);
+      const tests: MotorDiagnosticTests = {
+        ratedKV: 6600,
+        ir: formData.ir,
+        pd: formData.pd,
+        pi: formData.pi,
+        tanDelta: formData.tanDelta,
+        tipUp: formData.tipUp,
+        dd: formData.dd,
+        elcid: formData.elcid
+      };
       
-      if (!isNaN(ir) || !isNaN(pd) || !isNaN(pi) || !isNaN(tanDelta)) {
-        const tests: MotorDiagnosticTests = {
-          ratedKV: 6600,
-          ir: isNaN(ir) ? undefined : { R: ir, Y: ir, B: ir },
-          pd: isNaN(pd) ? undefined : { R: pd, Y: pd, B: pd },
-          pi: isNaN(pi) ? undefined : { R: pi, Y: pi, B: pi },
-          tanDelta: isNaN(tanDelta) ? undefined : { R: tanDelta, Y: tanDelta, B: tanDelta }
-        };
-        const result = calculateMotorHealth(tests);
-        if (result.hiPercentage > 0) {
-          finalScore = Math.round(result.hiPercentage);
-          finalStatus = result.banding === 'HI1' || result.banding === 'HI2' ? 'healthy' : result.banding === 'HI3' ? 'warning' : 'critical';
-        } else {
-          // Fallback if no valid tests
-          let totalScore = 0;
-          let count = 0;
-          let hasCritical = false;
-          let hasWarning = false;
-          Object.keys(formData).forEach(key => {
-            const status = evaluateParam(selectedEqType, key, formData[key]);
-            if (status) {
-              count++;
-              if (status === 'healthy') totalScore += 100;
-              if (status === 'warning') { totalScore += 60; hasWarning = true; }
-              if (status === 'critical') { totalScore += 20; hasCritical = true; }
-            }
-          });
-          if (count > 0) {
-            finalScore = Math.round(totalScore / count);
-            if (hasCritical || finalScore < 60) finalStatus = 'critical';
-            else if (hasWarning || finalScore < 80) finalStatus = 'warning';
-          } else {
-            setHealthResult(null);
-            return;
-          }
-        }
+      const result = calculateMotorHealth(tests);
+      if (result.hiPercentage > 0) {
+        finalScore = Math.round(result.hiPercentage);
+        finalStatus = (result.banding === 'HI1' || result.banding === 'HI2') ? 'healthy' : (result.banding === 'HI3' || result.banding === 'HI4') ? 'warning' : 'critical';
       } else {
-        // Fallback
+        // Fallback for other parameters if diagnostic tests are missing
         let totalScore = 0;
         let count = 0;
         let hasCritical = false;
         let hasWarning = false;
-        Object.keys(formData).forEach(key => {
+        const otherParams = ['vibration', 'statorTemp', 'bearingTemp', 'voltageImbalance'];
+        otherParams.forEach(key => {
           const status = evaluateParam(selectedEqType, key, formData[key]);
           if (status) {
             count++;
@@ -3363,6 +3331,66 @@ export default function App() {
                 {prevValue} {prevTrend === 'up' ? <ArrowUpRight size={14} /> : prevTrend === 'down' ? <ArrowDownRight size={14} /> : <Minus size={14} />}
               </span>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ThreePhaseParamInput = ({ 
+    title, 
+    unit, 
+    standard, 
+    prevValue, 
+    prevTrend,
+    onHistoryClick,
+    values = {}, 
+    onChange, 
+    evalStatus = {} 
+  }: any) => {
+    const getStatusColor = (status: string) => {
+      if (status === 'warning') return 'border-amber-400 bg-amber-50 text-amber-900';
+      if (status === 'critical') return 'border-rose-400 bg-rose-50 text-rose-900';
+      if (status === 'healthy') return 'border-emerald-400 bg-emerald-50 text-emerald-900';
+      return 'border-slate-300 bg-white text-slate-900';
+    };
+
+    return (
+      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+        <div className="flex items-center justify-between mb-3">
+          <label className="text-sm font-semibold text-slate-800">{title} {unit && `(${unit})`}</label>
+          <button 
+            onClick={onHistoryClick}
+            className="text-blue-600 bg-blue-100/50 p-1.5 rounded hover:bg-blue-100 transition-colors flex items-center gap-1 text-xs font-medium"
+          >
+            <BarChartIcon size={14} />
+            Lịch sử
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          {['R', 'Y', 'B'].map(phase => (
+            <div key={phase}>
+              <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Pha {phase}</div>
+              <input 
+                type="number" 
+                value={values[phase] || ''}
+                onChange={(e) => onChange(phase, e.target.value)}
+                placeholder={`${phase}...`} 
+                className={`w-full px-3 py-2 ${getStatusColor(evalStatus[phase])} rounded-lg text-sm outline-none font-medium transition-colors border focus:ring-2 focus:ring-blue-200`} 
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-col justify-center space-y-1.5 bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm">
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-500">Tiêu chuẩn:</span>
+            <span className="font-semibold text-emerald-600">{standard}</span>
+          </div>
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-500">Lần trước:</span>
+            <span className={`font-semibold flex items-center gap-0.5 ${prevTrend === 'up' ? 'text-rose-600' : prevTrend === 'down' ? 'text-emerald-600' : 'text-slate-700'}`}>
+              {prevValue} {prevTrend === 'up' ? <ArrowUpRight size={14} /> : prevTrend === 'down' ? <ArrowDownRight size={14} /> : <Minus size={14} />}
+            </span>
           </div>
         </div>
       </div>
@@ -3554,12 +3582,26 @@ export default function App() {
           />
         </div>
       </div>
+
+      {/* Thông số vận hành */}
       <div>
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
-          <Thermometer size={16} className="text-rose-500" />
-          Nhiệt độ
+          <Activity size={16} className="text-emerald-500" />
+          Thông số vận hành
         </h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ParamInput 
+            title="Độ rung (Vibration)" unit="mm/s" standard="≤ 4.5 mm/s" prevValue="2.1 mm/s" prevTrend="up"
+            value={formData.vibration} onChange={(val: any) => setFormData({...formData, vibration: val})}
+            evalStatus={evaluateParam('Động cơ', 'vibration', formData.vibration)}
+            onHistoryClick={() => { setSelectedParamHistory('Độ rung'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Mất cân bằng điện áp (Voltage Imbalance)" unit="%" standard="≤ 3%" prevValue="1.5%" prevTrend="stable"
+            value={formData.voltageImbalance} onChange={(val: any) => setFormData({...formData, voltageImbalance: val})}
+            evalStatus={evaluateParam('Động cơ', 'voltageImbalance', formData.voltageImbalance)}
+            onHistoryClick={() => { setSelectedParamHistory('Mất cân bằng điện áp'); setShowHistoryModal(true); }}
+          />
           <ParamInput 
             title="Nhiệt độ cuộn dây Stator" unit="°C" standard="≤ 130 °C" prevValue="110 °C" prevTrend="up"
             value={formData.statorTemp} onChange={(val: any) => setFormData({...formData, statorTemp: val})}
@@ -3574,55 +3616,83 @@ export default function App() {
           />
         </div>
       </div>
-      <div>
-        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
-          <Activity size={16} className="text-blue-500" />
-          Độ rung (Vibration)
-        </h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ParamInput 
-            title="Độ rung tổng thể" unit="mm/s" standard="≤ 4.5 mm/s" prevValue="2.1 mm/s" prevTrend="up"
-            value={formData.vibration} onChange={(val: any) => setFormData({...formData, vibration: val})}
-            evalStatus={evaluateParam('Động cơ', 'vibration', formData.vibration)}
-            onHistoryClick={() => { setSelectedParamHistory('Độ rung'); setShowHistoryModal(true); }}
-          />
-        </div>
-      </div>
+
+      {/* Thử nghiệm chẩn đoán (Diagnostic Tests) */}
       <div>
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
           <Zap size={16} className="text-amber-500" />
-          Kiểm tra điện & Cách điện
+          Thử nghiệm chẩn đoán (3 Pha R-Y-B)
         </h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ParamInput 
-            title="Mất cân bằng điện áp (Voltage Imbalance)" unit="%" standard="≤ 3%" prevValue="1.5%" prevTrend="stable"
-            value={formData.voltageImbalance} onChange={(val: any) => setFormData({...formData, voltageImbalance: val})}
-            evalStatus={evaluateParam('Động cơ', 'voltageImbalance', formData.voltageImbalance)}
-            onHistoryClick={() => { setSelectedParamHistory('Mất cân bằng điện áp'); setShowHistoryModal(true); }}
+        <div className="grid grid-cols-1 gap-4">
+          <ThreePhaseParamInput 
+            title="Tan-delta" unit="" standard="< 0.07"
+            values={formData.tanDelta || { R: '', Y: '', B: '' }}
+            onChange={(phase, val) => updateThreePhase('tanDelta', phase, val)}
+            evalStatuses={{
+              R: evaluateParam('Động cơ', 'tanDelta', formData.tanDelta?.R),
+              Y: evaluateParam('Động cơ', 'tanDelta', formData.tanDelta?.Y),
+              B: evaluateParam('Động cơ', 'tanDelta', formData.tanDelta?.B)
+            }}
           />
-          <ParamInput 
-            title="Điện trở cách điện (IR)" unit="GΩ" standard="≥ 100 GΩ" prevValue="120 GΩ" prevTrend="down"
-            value={formData.ir} onChange={(val: any) => setFormData({...formData, ir: val})}
-            evalStatus={evaluateParam('Động cơ', 'ir', formData.ir)}
-            onHistoryClick={() => { setSelectedParamHistory('Điện trở cách điện'); setShowHistoryModal(true); }}
+          <ThreePhaseParamInput 
+            title="Tip-up" unit="" standard="< 0.006"
+            values={formData.tipUp || { R: '', Y: '', B: '' }}
+            onChange={(phase, val) => updateThreePhase('tipUp', phase, val)}
+            evalStatuses={{
+              R: evaluateParam('Động cơ', 'tipUp', formData.tipUp?.R),
+              Y: evaluateParam('Động cơ', 'tipUp', formData.tipUp?.Y),
+              B: evaluateParam('Động cơ', 'tipUp', formData.tipUp?.B)
+            }}
           />
-          <ParamInput 
-            title="Chỉ số phân cực (PI)" unit="" standard="≥ 2.0" prevValue="2.5" prevTrend="stable"
-            value={formData.pi} onChange={(val: any) => setFormData({...formData, pi: val})}
-            evalStatus={evaluateParam('Động cơ', 'pi', formData.pi)}
-            onHistoryClick={() => { setSelectedParamHistory('Chỉ số phân cực (PI)'); setShowHistoryModal(true); }}
+          <ThreePhaseParamInput 
+            title="Phóng điện cục bộ (PD)" unit="pC" standard="< 15000 pC"
+            values={formData.pd || { R: '', Y: '', B: '' }}
+            onChange={(phase, val) => updateThreePhase('pd', phase, val)}
+            evalStatuses={{
+              R: evaluateParam('Động cơ', 'pd', formData.pd?.R),
+              Y: evaluateParam('Động cơ', 'pd', formData.pd?.Y),
+              B: evaluateParam('Động cơ', 'pd', formData.pd?.B)
+            }}
           />
-          <ParamInput 
-            title="Tổn hao điện môi (Tan-delta)" unit="" standard="≤ 0.02" prevValue="0.015" prevTrend="up"
-            value={formData.tanDelta} onChange={(val: any) => setFormData({...formData, tanDelta: val})}
-            evalStatus={evaluateParam('Động cơ', 'tanDelta', formData.tanDelta)}
-            onHistoryClick={() => { setSelectedParamHistory('Tan-delta'); setShowHistoryModal(true); }}
+          <ThreePhaseParamInput 
+            title="Điện trở cách điện (IR)" unit="GΩ" standard="> 1 GΩ"
+            values={formData.ir || { R: '', Y: '', B: '' }}
+            onChange={(phase, val) => updateThreePhase('ir', phase, val)}
+            evalStatuses={{
+              R: evaluateParam('Động cơ', 'ir', formData.ir?.R),
+              Y: evaluateParam('Động cơ', 'ir', formData.ir?.Y),
+              B: evaluateParam('Động cơ', 'ir', formData.ir?.B)
+            }}
           />
-          <ParamInput 
-            title="Phóng điện cục bộ (PD)" unit="pC" standard="≤ 1000 pC" prevValue="800 pC" prevTrend="up"
-            value={formData.pd} onChange={(val: any) => setFormData({...formData, pd: val})}
-            evalStatus={evaluateParam('Động cơ', 'pd', formData.pd)}
-            onHistoryClick={() => { setSelectedParamHistory('Phóng điện cục bộ (PD)'); setShowHistoryModal(true); }}
+          <ThreePhaseParamInput 
+            title="Chỉ số phân cực (PI)" unit="" standard="> 1.0"
+            values={formData.pi || { R: '', Y: '', B: '' }}
+            onChange={(phase, val) => updateThreePhase('pi', phase, val)}
+            evalStatuses={{
+              R: evaluateParam('Động cơ', 'pi', formData.pi?.R),
+              Y: evaluateParam('Động cơ', 'pi', formData.pi?.Y),
+              B: evaluateParam('Động cơ', 'pi', formData.pi?.B)
+            }}
+          />
+          <ThreePhaseParamInput 
+            title="Dielectric Discharge (DD)" unit="" standard="< 8"
+            values={formData.dd || { R: '', Y: '', B: '' }}
+            onChange={(phase, val) => updateThreePhase('dd', phase, val)}
+            evalStatuses={{
+              R: evaluateParam('Động cơ', 'dd', formData.dd?.R),
+              Y: evaluateParam('Động cơ', 'dd', formData.dd?.Y),
+              B: evaluateParam('Động cơ', 'dd', formData.dd?.B)
+            }}
+          />
+          <ThreePhaseParamInput 
+            title="ELCID" unit="mA" standard="< 300 mA"
+            values={formData.elcid || { R: '', Y: '', B: '' }}
+            onChange={(phase, val) => updateThreePhase('elcid', phase, val)}
+            evalStatuses={{
+              R: evaluateParam('Động cơ', 'elcid', formData.elcid?.R),
+              Y: evaluateParam('Động cơ', 'elcid', formData.elcid?.Y),
+              B: evaluateParam('Động cơ', 'elcid', formData.elcid?.B)
+            }}
           />
         </div>
       </div>
@@ -3756,15 +3826,29 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden relative">
       
+      {/* MOBILE SIDEBAR BACKDROP */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/50 z-40 lg:hidden backdrop-blur-sm transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       {/* SIDEBAR */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0">
-        <div className="h-16 flex items-center px-6 border-b border-slate-800">
+      <aside className={`w-64 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 fixed inset-y-0 left-0 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:relative transition-transform duration-300 ease-in-out`}>
+        <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800">
           <div className="flex items-center gap-2 text-white font-bold text-xl tracking-tight">
             <img src="https://static.wixstatic.com/media/dea24c_6207cba10c9e4e15939adcc4dbd42524~mv2.jpg" alt="TEV Logo" className="w-8 h-8 rounded-full bg-white object-contain p-0.5" />
             <span>TEV COE</span>
           </div>
+          <button 
+            className="lg:hidden text-slate-400 hover:text-white"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <X size={20} />
+          </button>
         </div>
         
         <div className="px-6 py-4 border-b border-slate-800">
@@ -3825,7 +3909,10 @@ export default function App() {
         </nav>
 
         <div className="p-4 border-t border-slate-800 space-y-1">
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-800 hover:text-white transition-colors">
+          <button 
+            onClick={() => handleTabChange('settings')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+          >
             <Settings size={18} />
             Cài đặt
           </button>
@@ -3840,16 +3927,23 @@ export default function App() {
       </aside>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden w-full">
         
         {/* HEADER */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0 z-10">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-semibold text-slate-800">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 flex-shrink-0 z-10">
+          <div className="flex items-center gap-3 md:gap-4">
+            <button 
+              className="lg:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <Menu size={24} />
+            </button>
+            <h1 className="text-lg md:text-xl font-semibold text-slate-800 truncate max-w-[180px] sm:max-w-none">
               {activeTab === 'dashboard' ? 'Dashboard Tổng quan' : 
                activeTab === 'equipment' ? 'Quản lý Thiết bị' : 
                activeTab === 'reports' ? 'Kho Báo cáo' : 
-               'Nhập liệu hiện trường (FSE App)'}
+               activeTab === 'settings' ? 'Cài đặt hệ thống' :
+               'Nhập liệu hiện trường'}
             </h1>
             {activeTab !== 'field-entry' && (
               <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-md text-sm text-slate-600 border border-slate-200 cursor-pointer hover:bg-slate-200 transition-colors">
@@ -4097,8 +4191,8 @@ export default function App() {
                       Lịch sử kiểm tra gần đây
                     </h2>
                   </div>
-                  <div className="p-0">
-                    <table className="w-full text-sm text-left">
+                  <div className="p-0 overflow-x-auto">
+                    <table className="w-full text-sm text-left min-w-[600px]">
                       <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
                         <tr>
                           <th className="px-4 py-2 font-medium">Ngày</th>
@@ -4253,37 +4347,47 @@ export default function App() {
                   <p className="text-sm text-slate-500 mt-1">Theo dõi trạng thái thiết bị theo thời gian thực</p>
                 </div>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <span className="text-sm font-medium text-slate-600 whitespace-nowrap">Khách hàng:</span>
-                    <select 
-                      value={selectedCustomer}
-                      onChange={(e) => {
-                        setSelectedCustomer(e.target.value);
-                        setSelectedFactory('all'); // Reset factory when customer changes
-                      }}
-                      className="w-full sm:w-auto border border-slate-300 rounded-lg text-slate-700 bg-slate-50 px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-medium"
-                    >
-                      <option value="all">Tất cả khách hàng</option>
-                      {uniqueCustomers.map(customer => (
-                        <option key={customer} value={customer}>{customer}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <span className="text-sm font-medium text-slate-600 whitespace-nowrap">Nhà máy:</span>
-                    <select 
-                      value={selectedFactory}
-                      onChange={(e) => setSelectedFactory(e.target.value)}
-                      className="w-full sm:w-auto border border-slate-300 rounded-lg text-slate-700 bg-slate-50 px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-medium"
-                    >
-                      <option value="all">Tất cả nhà máy</option>
-                      {dynamicSiteData
-                        .filter(site => selectedCustomer === 'all' || site.customer === selectedCustomer)
-                        .map(site => (
-                        <option key={site.id} value={site.id}>{site.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {!(userRole === 'customer' && userFactory) && (
+                    <>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <span className="text-sm font-medium text-slate-600 whitespace-nowrap">Khách hàng:</span>
+                        <select 
+                          value={selectedCustomer}
+                          onChange={(e) => {
+                            setSelectedCustomer(e.target.value);
+                            setSelectedFactory('all'); // Reset factory when customer changes
+                          }}
+                          className="w-full sm:w-auto border border-slate-300 rounded-lg text-slate-700 bg-slate-50 px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-medium"
+                        >
+                          <option value="all">Tất cả khách hàng</option>
+                          {uniqueCustomers.map(customer => (
+                            <option key={customer} value={customer}>{customer}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <span className="text-sm font-medium text-slate-600 whitespace-nowrap">Nhà máy:</span>
+                        <select 
+                          value={selectedFactory}
+                          onChange={(e) => setSelectedFactory(e.target.value)}
+                          className="w-full sm:w-auto border border-slate-300 rounded-lg text-slate-700 bg-slate-50 px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-medium"
+                        >
+                          <option value="all">Tất cả nhà máy</option>
+                          {dynamicSiteData
+                            .filter(site => selectedCustomer === 'all' || site.customer === selectedCustomer)
+                            .map(site => (
+                            <option key={site.id} value={site.id}>{site.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+                  {userRole === 'customer' && userFactory && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 font-medium text-sm">
+                      <Factory size={16} />
+                      <span>{userFactory}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -4411,7 +4515,7 @@ export default function App() {
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium text-slate-700">Health Index:</span>
                           <div className="w-32">
-                            <HealthBar value={item.health} />
+                            <HealthBar value={item.health} status={item.status} />
                           </div>
                         </div>
                       </div>
@@ -4890,7 +4994,7 @@ export default function App() {
                             <StatusBadge status={eq.status} />
                           </td>
                           <td className="p-4">
-                            <HealthBar value={eq.health} />
+                            <HealthBar value={eq.health} status={eq.status} />
                           </td>
                           <td className="p-4 text-right">
                             <button className="p-1 text-slate-400 hover:text-blue-600 transition-colors rounded">
@@ -4929,7 +5033,7 @@ export default function App() {
           {/* --- EQUIPMENT MANAGEMENT VIEW --- */}
           {activeTab === 'equipment' && (
             <div className="max-w-7xl mx-auto space-y-6">
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-8rem)]">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px] lg:h-[calc(100vh-8rem)]">
                 <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h2 className="font-semibold text-slate-800 flex items-center gap-2">
                     <Server className="text-blue-500" size={20} />
@@ -4957,18 +5061,20 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <span className="text-slate-500 font-medium">Lọc theo:</span>
                   </div>
-                  <select 
-                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
-                    value={filterLocation}
-                    onChange={(e) => { setFilterLocation(e.target.value); setCurrentPage(1); }}
-                  >
-                    <option value="">Tất cả nhà máy</option>
-                    {dynamicSiteData
-                      .filter(site => selectedCustomer === 'all' || site.customer === selectedCustomer)
-                      .map(site => (
-                      <option key={site.id} value={site.name}>{site.name}</option>
-                    ))}
-                  </select>
+                  {!(userRole === 'customer' && userFactory) && (
+                    <select 
+                      className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                      value={filterLocation}
+                      onChange={(e) => { setFilterLocation(e.target.value); setCurrentPage(1); }}
+                    >
+                      <option value="">Tất cả nhà máy</option>
+                      {dynamicSiteData
+                        .filter(site => selectedCustomer === 'all' || site.customer === selectedCustomer)
+                        .map(site => (
+                        <option key={site.id} value={site.name}>{site.name}</option>
+                      ))}
+                    </select>
+                  )}
                   <select 
                     className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
                     value={filterType}
@@ -5021,11 +5127,46 @@ export default function App() {
                             <StatusBadge status={eq.status} />
                           </td>
                           <td className="p-4">
-                            <HealthBar value={eq.health} />
+                            <HealthBar value={eq.health} status={eq.status} />
                           </td>
                           <td className="p-4 text-slate-500">{eq.lastCheck}</td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-2">
+                              <button 
+                                onClick={() => {
+                                  const reportData = {
+                                    id: `PREVIEW-${eq.id}`,
+                                    date: new Date().toLocaleDateString('vi-VN'),
+                                    equipmentId: eq.id,
+                                    equipmentName: eq.name,
+                                    factory: eq.factory,
+                                    type: eq.type,
+                                    inspector: user?.displayName || 'FSE',
+                                    status: eq.status,
+                                    health: eq.health,
+                                    notes: 'Báo cáo xem trước từ dữ liệu hiện tại.',
+                                    measurements: eq.rawData ? (
+                                      eq.type === 'Máy biến áp' ? {
+                                        oilTemp: eq.rawData[9], windingTemp: eq.rawData[10], irHighLow: eq.rawData[11],
+                                        irHighEarth: eq.rawData[12], oilLeak: eq.rawData[13], dga: eq.rawData[14],
+                                        dielectricStrength: eq.rawData[15], furan: eq.rawData[16], oilMoisture: eq.rawData[17]
+                                      } : eq.type === 'Động cơ' ? {
+                                        vibration: eq.rawData[9], statorTemp: eq.rawData[10], ir: eq.rawData[11],
+                                        pd: eq.rawData[12], voltageImbalance: eq.rawData[13], pi: eq.rawData[14],
+                                        bearingTemp: eq.rawData[15], tanDelta: eq.rawData[16]
+                                      } : {
+                                        thermography: eq.rawData[9], contactRes: eq.rawData[10], tev: eq.rawData[11],
+                                        ultrasonic: eq.rawData[12], tevPulses: eq.rawData[13], humidity: eq.rawData[14],
+                                        sf6Pressure: eq.rawData[15]
+                                      }
+                                    ) : {}
+                                  };
+                                  generateIndividualReportPDF(reportData, true, allReports.filter(r => r.equipmentId === eq.id));
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors" title="Xem báo cáo hiện tại"
+                              >
+                                <FileText size={16} />
+                              </button>
                               <button 
                                 onClick={() => setShowEquipmentProfile(true)}
                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Hồ sơ thiết bị"
@@ -5071,13 +5212,26 @@ export default function App() {
           {/* --- REPORTS VIEW --- */}
           {activeTab === 'reports' && (
             <div className="max-w-7xl mx-auto space-y-6">
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-8rem)]">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px] lg:h-[calc(100vh-8rem)]">
                 <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h2 className="font-semibold text-slate-800 flex items-center gap-2">
                     <FileText className="text-blue-500" size={20} />
                     Kho Báo cáo & Tài liệu
                   </h2>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <p className="text-xs text-slate-500 italic mb-2 sm:mb-0">
+                      * Báo cáo tại đây là dữ liệu lịch sử. Để xem báo cáo mới nhất, hãy dùng tab "Quản lý Thiết bị".
+                    </p>
+                    <button 
+                      onClick={() => {
+                        alert('Vui lòng chọn thiết bị trong tab "Quản lý Thiết bị" và nhấn biểu tượng Báo cáo để tạo báo cáo mới nhất.');
+                        handleTabChange('equipment');
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors shadow-sm"
+                    >
+                      <Plus size={16} />
+                      Tạo báo cáo mới
+                    </button>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                       <input 
@@ -5106,19 +5260,21 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <span className="text-slate-500 font-medium">Lọc theo:</span>
                   </div>
-                  <select 
-                    value={reportFilterFactory}
-                    onChange={(e) => {
-                      setReportFilterFactory(e.target.value);
-                      setReportCurrentPage(1);
-                    }}
-                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
-                  >
-                    <option value="all">Tất cả nhà máy</option>
-                    {[...new Set(allEquipment.map(eq => eq.factory))].map(factory => (
-                      <option key={factory} value={factory}>{factory}</option>
-                    ))}
-                  </select>
+                  {!(userRole === 'customer' && userFactory) && (
+                    <select 
+                      value={reportFilterFactory}
+                      onChange={(e) => {
+                        setReportFilterFactory(e.target.value);
+                        setReportCurrentPage(1);
+                      }}
+                      className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                    >
+                      <option value="all">Tất cả nhà máy</option>
+                      {[...new Set(allEquipment.map(eq => eq.factory))].map(factory => (
+                        <option key={factory} value={factory}>{factory}</option>
+                      ))}
+                    </select>
+                  )}
                   <select 
                     value={reportFilterType}
                     onChange={(e) => {
@@ -5145,27 +5301,29 @@ export default function App() {
                     <option value="warning">Cảnh báo</option>
                     <option value="critical">Nguy hiểm</option>
                   </select>
-                  <div className="flex items-center gap-2 ml-auto">
+                  <div className="flex items-center gap-2 w-full lg:w-auto lg:ml-auto">
                     <span className="text-slate-500">Thời gian:</span>
-                    <input 
-                      type="date" 
-                      value={reportFilterStartDate}
-                      onChange={(e) => {
-                        setReportFilterStartDate(e.target.value);
-                        setReportCurrentPage(1);
-                      }}
-                      className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500" 
-                    />
-                    <span className="text-slate-400">-</span>
-                    <input 
-                      type="date" 
-                      value={reportFilterEndDate}
-                      onChange={(e) => {
-                        setReportFilterEndDate(e.target.value);
-                        setReportCurrentPage(1);
-                      }}
-                      className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500" 
-                    />
+                    <div className="flex items-center gap-2 flex-1 lg:flex-none">
+                      <input 
+                        type="date" 
+                        value={reportFilterStartDate}
+                        onChange={(e) => {
+                          setReportFilterStartDate(e.target.value);
+                          setReportCurrentPage(1);
+                        }}
+                        className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 outline-none focus:border-blue-500 text-xs w-full" 
+                      />
+                      <span className="text-slate-400">-</span>
+                      <input 
+                        type="date" 
+                        value={reportFilterEndDate}
+                        onChange={(e) => {
+                          setReportFilterEndDate(e.target.value);
+                          setReportCurrentPage(1);
+                        }}
+                        className="bg-white border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 outline-none focus:border-blue-500 text-xs w-full" 
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -5593,6 +5751,77 @@ export default function App() {
               </div>
             </div>
           )}
+          {/* --- SETTINGS VIEW --- */}
+          {activeTab === 'settings' && (
+            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-slate-100">
+                  <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <Settings className="text-blue-500" size={24} />
+                    Cài đặt tài khoản & Hệ thống
+                  </h2>
+                </div>
+                
+                <div className="p-6 space-y-8">
+                  {/* User Profile Section */}
+                  <section>
+                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Thông tin tài khoản</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-6 rounded-xl border border-slate-100">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">Email đăng nhập</label>
+                        <p className="text-slate-900 font-medium">{user?.email}</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">Vai trò hệ thống</label>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${
+                            userRole === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {userRole === 'admin' ? 'Quản trị viên' : 'Khách hàng'}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">Nhà máy được chỉ định</label>
+                        <p className="text-slate-900 font-medium">{userFactory || 'Tất cả (Admin)'}</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-500 mb-1">User ID (UID)</label>
+                        <p className="text-xs font-mono text-slate-500 truncate" title={user?.uid}>{user?.uid}</p>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Admin Instructions Section */}
+                  {userRole === 'admin' && (
+                    <section className="bg-blue-50 border border-blue-100 p-6 rounded-xl">
+                      <h3 className="text-blue-800 font-bold mb-3 flex items-center gap-2">
+                        <Info size={18} />
+                        Hướng dẫn phân quyền khách hàng
+                      </h3>
+                      <div className="text-sm text-blue-700 space-y-3">
+                        <p>Để giới hạn một khách hàng chỉ xem được dữ liệu của một nhà máy cụ thể (ví dụ: <strong>Nhiệt điện Cà Mau</strong>), bạn cần thực hiện các bước sau trong Firebase Console:</p>
+                        <ol className="list-decimal ml-5 space-y-2">
+                          <li>Truy cập vào <strong>Firestore Database</strong>.</li>
+                          <li>Tìm đến collection <code>users</code>.</li>
+                          <li>Tìm document có ID trùng với <strong>UID</strong> của khách hàng đó.</li>
+                          <li>Thêm trường (Field) mới:
+                            <ul className="list-disc ml-5 mt-1">
+                              <li>Field name: <code>assignedFactory</code></li>
+                              <li>Type: <code>string</code></li>
+                              <li>Value: <code>Nhiệt điện Cà Mau</code> (Phải khớp chính xác với tên nhà máy trong database)</li>
+                            </ul>
+                          </li>
+                          <li>Đảm bảo trường <code>role</code> của người dùng đó là <code>customer</code>.</li>
+                        </ol>
+                        <p className="mt-4 font-medium italic">Hệ thống sẽ tự động lọc toàn bộ Dashboard, Thiết bị và Báo cáo dựa trên nhà máy này khi khách hàng đăng nhập.</p>
+                      </div>
+                    </section>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
@@ -5667,7 +5896,7 @@ export default function App() {
                   {/* Defects Table */}
                   <div className="p-6 lg:col-span-3 flex flex-col">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
+                      <table className="w-full text-left border-collapse min-w-[500px]">
                         <thead>
                           <tr className="border-b border-slate-200">
                             <th className="pb-3 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/3">Defect Type</th>
@@ -5721,7 +5950,7 @@ export default function App() {
                   <p className="text-xs text-slate-500 mt-1">Dựa trên tiêu chuẩn đánh giá IEEE & IEC</p>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full text-left border-collapse min-w-[800px]">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-600 font-bold">
                         <th className="p-4">Hạng mục kiểm tra (Tests)</th>
@@ -5826,8 +6055,8 @@ export default function App() {
                   <FileText size={18} className="text-blue-500" />
                   Danh sách báo cáo cũ
                 </h3>
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-left border-collapse">
+                <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[700px]">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-semibold">
                         <th className="p-4">Mã Báo Cáo</th>
@@ -5962,10 +6191,10 @@ export default function App() {
             </div>
             
             <div className="p-6">
-              {paramHistoryData[selectedParamHistory as keyof typeof paramHistoryData] ? (
+              {dynamicParamHistoryData ? (
                 <div className="h-64 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={paramHistoryData[selectedParamHistory as keyof typeof paramHistoryData]} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <LineChart data={dynamicParamHistoryData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                       <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dx={-10} />
@@ -5997,6 +6226,7 @@ export default function App() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

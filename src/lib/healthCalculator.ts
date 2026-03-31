@@ -127,6 +127,7 @@ export function calculateMotorHealth(tests: MotorDiagnosticTests): { absoluteHI:
     if (tanDelta < 0.02) s = 10;
     else if (tanDelta <= 0.04) s = 7;
     else if (tanDelta <= 0.07) s = 5;
+    else s = 1;
     
     totalScoreWeight += s * w;
     totalWeight += w;
@@ -140,6 +141,7 @@ export function calculateMotorHealth(tests: MotorDiagnosticTests): { absoluteHI:
     if (tipUp < 0.002) s = 10;
     else if (tipUp <= 0.004) s = 7;
     else if (tipUp <= 0.006) s = 5;
+    else s = 1;
     
     totalScoreWeight += s * w;
     totalWeight += w;
@@ -150,9 +152,10 @@ export function calculateMotorHealth(tests: MotorDiagnosticTests): { absoluteHI:
   if (pd !== null) {
     const w = 3;
     let s = 1;
-    if (pd <= 5000) s = 10;
-    else if (pd <= 10000) s = 7; // approx 10000
-    else if (pd <= 15000) s = 5; // approx 15000
+    if (pd < 5000) s = 10;
+    else if (pd <= 10000) s = 7;
+    else if (pd <= 15000) s = 5;
+    else s = 1;
     
     totalScoreWeight += s * w;
     totalWeight += w;
@@ -167,6 +170,7 @@ export function calculateMotorHealth(tests: MotorDiagnosticTests): { absoluteHI:
     if (ir > 50) s = 10;
     else if (ir >= 10) s = 7;
     else if (ir >= 1) s = 5;
+    else s = 1;
     
     if (ir < threshold) s = 1;
     
@@ -180,8 +184,9 @@ export function calculateMotorHealth(tests: MotorDiagnosticTests): { absoluteHI:
     const w = 1;
     let s = 1;
     if (pi > 2) s = 10;
-    else if (pi >= 2) s = 7;
+    else if (pi >= 1.5) s = 7;
     else if (pi >= 1) s = 5;
+    else s = 1;
     
     totalScoreWeight += s * w;
     totalWeight += w;
@@ -192,9 +197,10 @@ export function calculateMotorHealth(tests: MotorDiagnosticTests): { absoluteHI:
   if (dd !== null) {
     const w = 1;
     let s = 1;
-    if (dd <= 1) s = 10;
+    if (dd < 1) s = 10;
     else if (dd <= 4) s = 7;
     else if (dd <= 8) s = 5;
+    else s = 1;
     
     totalScoreWeight += s * w;
     totalWeight += w;
@@ -205,9 +211,10 @@ export function calculateMotorHealth(tests: MotorDiagnosticTests): { absoluteHI:
   if (elcid !== null) {
     const w = 1;
     let s = 1;
-    if (elcid >= 30 && elcid <= 70) s = 10;
-    else if (elcid >= 71 && elcid <= 110) s = 7;
-    else if (elcid >= 111 && elcid <= 200) s = 5;
+    if (elcid < 100) s = 10;
+    else if (elcid <= 200) s = 7;
+    else if (elcid <= 300) s = 5;
+    else s = 1;
     
     totalScoreWeight += s * w;
     totalWeight += w;

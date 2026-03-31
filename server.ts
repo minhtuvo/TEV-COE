@@ -203,9 +203,15 @@ app.get('/api/sheets/get', async (req, res) => {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
-  const spreadsheetId = process.env.SPREADSHEET_ID;
+  let spreadsheetId = process.env.SPREADSHEET_ID;
   if (!spreadsheetId) {
     return res.status(400).json({ error: 'SPREADSHEET_ID environment variable is not set' });
+  }
+
+  // Extract ID if full URL is provided
+  if (spreadsheetId.includes('docs.google.com/spreadsheets/d/')) {
+    const match = spreadsheetId.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (match) spreadsheetId = match[1];
   }
 
   try {
@@ -219,43 +225,58 @@ app.get('/api/sheets/get', async (req, res) => {
 
     // Fetch spreadsheet metadata to get actual sheet names
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
-    const sheetNames = spreadsheet.data.sheets?.map(s => s.properties?.title) || [];
+    const sheetNames = spreadsheet.data.sheets?.map(s => s.properties?.title || '') || [];
     
-    // Find sheets by keywords to be more robust
-    const transformerSheet = sheetNames.find(n => n?.toLowerCase().includes('biến áp')) || sheetNames[0] || 'Máy biến áp';
-    const switchgearSheet = sheetNames.find(n => n?.toLowerCase().includes('tủ điện')) || sheetNames[1] || 'Tủ điện trung thế';
-    const motorSheet = sheetNames.find(n => n?.toLowerCase().includes('động cơ')) || sheetNames[2] || 'Động cơ';
-
-    const ranges = [
-      `${transformerSheet}!A:Z`,
-      `${switchgearSheet}!A:Z`,
-      `${motorSheet}!A:Z`
-    ];
-
-    let response;
-    try {
-      response = await sheets.spreadsheets.values.batchGet({
-        spreadsheetId,
-        ranges,
-      });
-    } catch (e: any) {
-      console.log('Error fetching sheets (might not exist yet):', e.message);
-      if (e.code === 401 || e.status === 401) {
-        throw e; // Rethrow auth errors to be handled by the outer catch block
-      }
-      return res.json({
-        success: true,
-        data: { transformers: [], switchgears: [], motors: [] }
-      });
+    if (sheetNames.length === 0) {
+      return res.json({ success: true, data: { transformers: [], switchgears: [], motors: [] } });
     }
 
-    const data = {
-      transformers: response.data.valueRanges?.[0]?.values || [],
-      switchgears: response.data.valueRanges?.[1]?.values || [],
-      motors: response.data.valueRanges?.[2]?.values || [],
+    const response = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: sheetNames.map(name => `'${name}'!A:AZ`),
+    });
+
+    const allData: Record<string, any[][]> = {};
+    sheetNames.forEach((name, index) => {
+      allData[name] = response.data.valueRanges?.[index]?.values || [];
+    });
+
+    // Categorize data for backward compatibility or easier frontend processing
+    const categorizedData = {
+      transformers: [] as any[][],
+      switchgears: [] as any[][],
+      motors: [] as any[][],
+      allSheets: allData
     };
 
-    res.json({ success: true, data });
+    sheetNames.forEach(name => {
+      const lowerName = name.toLowerCase();
+      const rows = allData[name];
+      if (lowerName.includes('biến áp') || lowerName.includes('mba') || lowerName.includes('transformer')) {
+        categorizedData.transformers = categorizedData.transformers.concat(rows);
+      } else if (lowerName.includes('tủ điện') || lowerName.includes('trung thế') || lowerName.includes('hạ thế') || lowerName.includes('switchgear') || lowerName.includes('swg') || lowerName.includes('mcc') || lowerName.includes('tev') || lowerName.includes('rmu')) {
+        categorizedData.switchgears = categorizedData.switchgears.concat(rows);
+      } else if (lowerName.includes('động cơ') || lowerName.includes('motor') || lowerName.includes('máy bơm') || lowerName.includes('pump') || lowerName.includes('fan') || lowerName.includes('quạt')) {
+        categorizedData.motors = categorizedData.motors.concat(rows);
+      }
+    });
+
+    // Fallback: If a category is empty, try to find sheets that might contain that data but weren't caught by keywords
+    // Or if all categories are empty, put all sheets into all categories to let the frontend filter by column headers
+    if (categorizedData.transformers.length === 0 && categorizedData.switchgears.length === 0 && categorizedData.motors.length === 0) {
+      sheetNames.forEach(name => {
+        categorizedData.transformers = categorizedData.transformers.concat(allData[name]);
+        categorizedData.switchgears = categorizedData.switchgears.concat(allData[name]);
+        categorizedData.motors = categorizedData.motors.concat(allData[name]);
+      });
+    } else {
+      // If some categories are still empty, use the first few sheets as fallback
+      if (categorizedData.transformers.length === 0 && sheetNames.length > 0) categorizedData.transformers = allData[sheetNames[0]];
+      if (categorizedData.switchgears.length === 0 && sheetNames.length > 1) categorizedData.switchgears = allData[sheetNames[1]];
+      if (categorizedData.motors.length === 0 && sheetNames.length > 2) categorizedData.motors = allData[sheetNames[2]];
+    }
+
+    res.json({ success: true, data: categorizedData });
   } catch (error: any) {
     console.error('Error getting data from sheet:', error);
     if (error.code === 401 || error.status === 401) {
@@ -288,12 +309,25 @@ app.post('/api/sheets/sync-export', async (req, res) => {
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
-    // Ensure sheets exist
+    // Ensure sheets exist or match by keyword
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
     const existingSheetTitles = spreadsheet.data.sheets?.map(s => s.properties?.title) || [];
     
     const requiredSheets = ['Máy biến áp', 'Tủ điện trung thế', 'Động cơ'];
-    const missingSheets = requiredSheets.filter(title => !existingSheetTitles.includes(title));
+    const keywords = [
+      ['biến áp'],
+      ['tủ điện', 'tev'],
+      ['động cơ']
+    ];
+
+    const finalSheetNames = requiredSheets.map((title, i) => {
+      const match = existingSheetTitles.find(n => 
+        keywords[i].some(k => n.toLowerCase().includes(k))
+      );
+      return match || title;
+    });
+
+    const missingSheets = finalSheetNames.filter(title => !existingSheetTitles.includes(title));
     
     if (missingSheets.length > 0) {
       await sheets.spreadsheets.batchUpdate({
@@ -308,12 +342,12 @@ app.post('/api/sheets/sync-export', async (req, res) => {
       });
     }
 
-    // Clear existing data first (optional, but good for a full sync)
+    // Clear existing data first
     try {
       await sheets.spreadsheets.values.batchClear({
         spreadsheetId,
         requestBody: {
-          ranges: ['Máy biến áp!A1:Z', 'Tủ điện trung thế!A1:Z', 'Động cơ!A1:Z']
+          ranges: finalSheetNames.map(name => `${name}!A1:Z`)
         }
       });
     } catch (e: any) {
@@ -326,13 +360,13 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     // Update with new data
     const data = [];
     if (transformers && transformers.length > 0) {
-      data.push({ range: 'Máy biến áp!A1', values: transformers });
+      data.push({ range: `${finalSheetNames[0]}!A1`, values: transformers });
     }
     if (switchgears && switchgears.length > 0) {
-      data.push({ range: 'Tủ điện trung thế!A1', values: switchgears });
+      data.push({ range: `${finalSheetNames[1]}!A1`, values: switchgears });
     }
     if (motors && motors.length > 0) {
-      data.push({ range: 'Động cơ!A1', values: motors });
+      data.push({ range: `${finalSheetNames[2]}!A1`, values: motors });
     }
 
     if (data.length > 0) {
@@ -343,6 +377,67 @@ app.post('/api/sheets/sync-export', async (req, res) => {
           data: data
         }
       });
+
+      // Format Column A as Date (dd/mm/yyyy) and auto-resize columns
+      const sheetMap = new Map(spreadsheet.data.sheets?.map(s => [s.properties?.title?.trim(), s.properties?.sheetId]) || []);
+      const formattingRequests = [];
+      
+      for (const title of finalSheetNames) {
+        // Try exact match first
+        let id = sheetMap.get(title);
+        if (id === undefined) {
+          // Try case-insensitive partial match
+          const entry = Array.from(sheetMap.entries()).find(([name]) => 
+            name.toLowerCase().includes(title.toLowerCase()) || 
+            title.toLowerCase().includes(name.toLowerCase())
+          );
+          if (entry) id = entry[1];
+        }
+
+        if (id !== undefined) {
+          // Format Column A (Date)
+          formattingRequests.push({
+            repeatCell: {
+              range: {
+                sheetId: id,
+                startRowIndex: 1,
+                startColumnIndex: 0,
+                endColumnIndex: 1
+              },
+              cell: {
+                userEnteredFormat: {
+                  numberFormat: {
+                    type: 'DATE',
+                    pattern: 'dd/mm/yyyy'
+                  }
+                }
+              },
+              fields: 'userEnteredFormat.numberFormat'
+            }
+          });
+          
+          // Auto-resize columns
+          formattingRequests.push({
+            autoResizeDimensions: {
+              dimensions: {
+                sheetId: id,
+                dimension: 'COLUMNS',
+                startIndex: 0,
+                endIndex: 21
+              }
+            }
+          });
+        }
+      }
+
+      if (formattingRequests.length > 0) {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: {
+            requests: formattingRequests
+          }
+        });
+      }
     }
 
     res.json({ success: true, message: 'Data synced successfully' });
