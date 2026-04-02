@@ -1013,19 +1013,36 @@ const DgaMatrix = ({ matrix }: { matrix: Record<string, string> }) => {
 };
 
 const evaluateEquipmentParam = (type: string, param: string, value: any) => {
-  if (value === '' || value === undefined) return null;
-  const numVal = Number(value);
+  if (value === '' || value === undefined || value === null) return null;
+  
+  // Robust number parsing (handles units like "65 °C" or "500 ppm")
+  const parseVal = (val: any) => {
+    if (typeof val === 'number') return val;
+    const s = val.toString().replace(/[^0-9.,-]/g, '').replace(',', '.');
+    const n = parseFloat(s);
+    return isNaN(n) ? null : n;
+  };
+
+  const numVal = parseVal(value);
   
   if (type === 'Máy biến áp') {
-    if (param === 'oilTemp') return numVal <= 80 ? 'healthy' : numVal <= 90 ? 'warning' : 'critical';
-    if (param === 'windingTemp') return numVal <= 90 ? 'healthy' : numVal <= 105 ? 'warning' : 'critical';
-    if (param === 'irHighLow') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
-    if (param === 'irHighEarth') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
-    if (param === 'oilLeak') return value === 'normal' ? 'healthy' : value === 'light' ? 'warning' : 'critical';
-    if (param === 'dga') return numVal <= 1000 ? 'healthy' : numVal <= 2500 ? 'warning' : 'critical';
-    if (param === 'dielectricStrength') return numVal >= 50 ? 'healthy' : numVal >= 40 ? 'warning' : 'critical';
-    if (param === 'furan') return numVal <= 1 ? 'healthy' : numVal <= 5 ? 'warning' : 'critical';
-    if (param === 'oilMoisture') return numVal <= 15 ? 'healthy' : numVal <= 25 ? 'warning' : 'critical';
+    if (numVal !== null) {
+      if (param === 'oilTemp') return numVal <= 80 ? 'healthy' : numVal <= 90 ? 'warning' : 'critical';
+      if (param === 'windingTemp') return numVal <= 90 ? 'healthy' : numVal <= 105 ? 'warning' : 'critical';
+      if (param === 'irHighLow') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
+      if (param === 'irHighEarth') return numVal >= 2000 ? 'healthy' : numVal >= 1000 ? 'warning' : 'critical';
+      if (param === 'dga') return numVal <= 1000 ? 'healthy' : numVal <= 2500 ? 'warning' : 'critical';
+      if (param === 'dielectricStrength') return numVal >= 50 ? 'healthy' : numVal >= 40 ? 'warning' : 'critical';
+      if (param === 'furan') return numVal <= 1 ? 'healthy' : numVal <= 5 ? 'warning' : 'critical';
+      if (param === 'oilMoisture') return numVal <= 15 ? 'healthy' : numVal <= 25 ? 'warning' : 'critical';
+    }
+    
+    if (param === 'oilLeak') {
+      const s = value?.toString().toLowerCase().trim() || '';
+      if (s === 'none' || s === 'normal' || s === 'bình thường' || s === 'không' || s === 'tốt' || s === 'đạt' || s === '') return 'healthy';
+      if (s === 'light' || s === 'nhẹ' || s === 'ít' || s === 'theo dõi') return 'warning';
+      return 'critical';
+    }
   }
   if (type === 'Động cơ') {
     if (param === 'statorTemp') return numVal <= 110 ? 'healthy' : numVal <= 130 ? 'warning' : 'critical';
@@ -1078,9 +1095,9 @@ const findHeaderRow = (rows: any[][]) => {
 
 const mapStatusFromSheet = (status: any) => {
   const s = status?.toString().toLowerCase() || '';
-  if (s.includes('bình thường') || s.includes('healthy') || s.includes('tốt') || s.includes('normal')) return 'healthy';
+  if (s.includes('bình thường') || s.includes('healthy') || s.includes('tốt') || s.includes('normal') || s.includes('đạt')) return 'healthy';
   if (s.includes('cảnh báo') || s.includes('warning') || s.includes('theo dõi')) return 'warning';
-  if (s.includes('nguy hiểm') || s.includes('critical') || s.includes('xấu') || s.includes('đang hỏng')) return 'critical';
+  if (s.includes('nguy hiểm') || s.includes('critical') || s.includes('xấu') || s.includes('đang hỏng') || s.includes('không đạt')) return 'critical';
   return 'healthy'; // Default
 };
 
@@ -1326,8 +1343,17 @@ export default function App() {
     const isCritical = eq.status === 'critical';
     const isWarning = eq.status === 'warning';
     const baseRisk = 100 - eq.health;
-    const getStatus = (score: number) => score >= 8 ? 'Critical' : score >= 4 ? 'Moderate' : 'Good';
-    const getRec = (score: number, critRec: string, modRec: string) => score >= 8 ? critRec : score >= 4 ? modRec : 'Bình thường';
+    const getStatus = (score: number) => {
+      if (score >= 8) return 'Excellent';
+      if (score >= 6) return 'Good';
+      if (score >= 4) return 'Moderate';
+      return 'Critical';
+    };
+    const getRec = (score: number, critRec: string, modRec: string) => {
+      if (score < 4) return critRec;
+      if (score < 6) return modRec;
+      return 'Bình thường';
+    };
 
     let generalRecommendation = '';
     let failureProfile: any[] = [];
@@ -1342,13 +1368,13 @@ export default function App() {
       const bdv = raw[15] ? parseFloat(raw[15].toString().replace(',', '.')) : (isCritical ? 25 + Math.random() * 10 : isWarning ? 35 + Math.random() * 10 : 55 + Math.random() * 15);
       const ffa = raw[16] ? parseFloat(raw[16].toString().replace(',', '.')) : (isCritical ? 5.5 + Math.random() * 2 : isWarning ? 3.5 + Math.random() * 2 : 0.5 + Math.random() * 2);
       
-      // Scoring based on PDF calibration tables
-      const moistureScore = moisture > 45 ? 10 : moisture > 35 ? 8 : moisture > 25 ? 4 : moisture > 15 ? 2 : 0;
-      const acidityScore = acidity > 0.3 ? 10 : acidity > 0.2 ? 8 : acidity > 0.15 ? 4 : acidity > 0.1 ? 2 : 0;
-      const bdvScore = bdv < 30 ? 10 : bdv < 40 ? 4 : bdv < 50 ? 2 : 0;
-      const ffaScore = ffa > 7 ? 10 : ffa > 6 ? 8 : ffa > 5 ? 6 : ffa > 4 ? 4 : 0;
-      const dgaScore = isCritical ? 9 : isWarning ? 5 : 1;
-      const pdScore = isCritical ? 8 : isWarning ? 4 : 1;
+      // Scoring based on PDF calibration tables (Inverted: 10 is Good, 0 is Bad)
+      const moistureScore = moisture > 45 ? 0 : moisture > 35 ? 2 : moisture > 25 ? 6 : moisture > 15 ? 8 : 10;
+      const acidityScore = acidity > 0.3 ? 0 : acidity > 0.2 ? 2 : acidity > 0.15 ? 6 : acidity > 0.1 ? 8 : 10;
+      const bdvScore = bdv < 30 ? 0 : bdv < 40 ? 6 : bdv < 50 ? 8 : 10;
+      const ffaScore = ffa > 7 ? 0 : ffa > 6 ? 2 : ffa > 5 ? 4 : ffa > 4 ? 6 : 10;
+      const dgaScore = isCritical ? 1 : isWarning ? 5 : 10;
+      const pdScore = isCritical ? 2 : isWarning ? 6 : 10;
 
       generalRecommendation = isCritical 
         ? 'Cảnh báo mức độ cao. Cần tiến hành kiểm tra DGA, đo PD và lên kế hoạch bảo dưỡng/thay thế ngay lập tức.' 
@@ -1357,17 +1383,17 @@ export default function App() {
           : 'Thiết bị hoạt động bình thường. Tiếp tục bảo dưỡng định kỳ theo khuyến cáo của nhà sản xuất.';
 
       failureProfile = [
-        { subject: 'Tình trạng bên ngoài', score: Math.min(100, baseRisk + Math.random() * 20) },
-        { subject: 'Phóng điện cục bộ (PD)', score: Math.min(100, pdScore * 10 + Math.random() * 10) },
-        { subject: 'Chất lượng dầu', score: Math.min(100, Math.max(moistureScore, acidityScore, bdvScore) * 10 + Math.random() * 10) },
-        { subject: 'Khí hòa tan (DGA)', score: Math.min(100, dgaScore * 10 + Math.random() * 10) },
-        { subject: 'Lão hóa giấy (FFA)', score: Math.min(100, ffaScore * 10 + Math.random() * 10) },
+        { subject: 'Tình trạng bên ngoài', score: Math.min(100, 100 - (baseRisk + Math.random() * 20)) },
+        { subject: 'Phóng điện cục bộ (PD)', score: Math.min(100, pdScore * 10) },
+        { subject: 'Chất lượng dầu', score: Math.min(100, Math.min(moistureScore, acidityScore, bdvScore) * 10) },
+        { subject: 'Khí hòa tan (DGA)', score: Math.min(100, dgaScore * 10) },
+        { subject: 'Lão hóa giấy (FFA)', score: Math.min(100, ffaScore * 10) },
       ];
 
       generatedDefects = [
-        { name: 'Suy giảm chất lượng dầu (Oil Degradation)', warnings: Math.max(moistureScore, acidityScore) * 2.5, risk: Math.max(moistureScore, acidityScore) * 10 },
-        { name: 'Phóng điện cục bộ (Partial Discharge)', warnings: pdScore * 2, risk: pdScore * 10 },
-        { name: 'Lão hóa giấy cách điện (Paper Ageing)', warnings: ffaScore * 2, risk: ffaScore * 10 },
+        { name: 'Suy giảm chất lượng dầu (Oil Degradation)', warnings: (10 - Math.min(moistureScore, acidityScore)) * 2.5, risk: (10 - Math.min(moistureScore, acidityScore)) * 10 },
+        { name: 'Phóng điện cục bộ (Partial Discharge)', warnings: (10 - pdScore) * 2, risk: (10 - pdScore) * 10 },
+        { name: 'Lão hóa giấy cách điện (Paper Ageing)', warnings: (10 - ffaScore) * 2, risk: (10 - ffaScore) * 10 },
       ].filter(d => d.risk > 0);
 
       tests = [
@@ -1384,9 +1410,9 @@ export default function App() {
       const pulses = raw[13] ? parseFloat(raw[13].toString().replace(',', '.')) : (isCritical ? Math.floor(1 + Math.random() * 28) : isWarning ? Math.floor(1 + Math.random() * 5) : 0);
       const ultrasonic = raw[12] ? parseFloat(raw[12].toString().replace(',', '.')) : (isCritical ? 20 + Math.random() * 20 : isWarning ? 5 + Math.random() * 15 : Math.random() * 5);
 
-      const tevScore = tevLevel > 29 ? 10 : tevLevel >= 20 ? 6 : 1;
-      const pulsesScore = pulses >= 7 && pulses <= 29 ? 10 : pulses >= 1 && pulses <= 6 ? 8 : pulses >= 30 ? 4 : 1; // 30-50 is noise
-      const ultrasonicScore = ultrasonic > 15 ? 10 : ultrasonic > 5 ? 6 : 1;
+      const tevScore = tevLevel > 29 ? 1 : tevLevel >= 20 ? 4 : 10;
+      const pulsesScore = pulses >= 7 && pulses <= 29 ? 1 : pulses >= 1 && pulses <= 6 ? 4 : pulses >= 30 ? 6 : 10; 
+      const ultrasonicScore = ultrasonic > 15 ? 1 : ultrasonic > 5 ? 4 : 10;
 
       generalRecommendation = isCritical 
           ? 'Khả năng rất cao có hiện tượng phóng điện cục bộ. Yêu cầu kiểm tra vào lần dừng máy kế tiếp hoặc dừng máy ngay để xác định nguồn.' 
@@ -1395,15 +1421,15 @@ export default function App() {
             : 'Không có dấu hiệu phóng điện cục bộ. Kiểm tra lại trong vòng 12 tháng.';
 
       failureProfile = [
-          { subject: 'Tình trạng bên ngoài', score: Math.min(100, baseRisk + Math.random() * 20) },
-          { subject: 'Phóng điện TEV', score: Math.min(100, tevScore * 10 + Math.random() * 10) },
-          { subject: 'Phóng điện siêu âm', score: Math.min(100, ultrasonicScore * 10 + Math.random() * 10) },
-          { subject: 'Mật độ xung', score: Math.min(100, pulsesScore * 10 + Math.random() * 10) },
+          { subject: 'Tình trạng bên ngoài', score: Math.min(100, 100 - (baseRisk + Math.random() * 20)) },
+          { subject: 'Phóng điện TEV', score: Math.min(100, tevScore * 10) },
+          { subject: 'Phóng điện siêu âm', score: Math.min(100, ultrasonicScore * 10) },
+          { subject: 'Mật độ xung', score: Math.min(100, pulsesScore * 10) },
       ];
 
       generatedDefects = [
-        { name: 'Phóng điện bề mặt (Surface PD)', warnings: ultrasonicScore * 2, risk: ultrasonicScore * 10 },
-        { name: 'Phóng điện bên trong (Internal PD)', warnings: tevScore * 2, risk: tevScore * 10 },
+        { name: 'Phóng điện bề mặt (Surface PD)', warnings: (10 - ultrasonicScore) * 2, risk: (10 - ultrasonicScore) * 10 },
+        { name: 'Phóng điện bên trong (Internal PD)', warnings: (10 - tevScore) * 2, risk: (10 - tevScore) * 10 },
       ].filter(d => d.risk > 10);
 
       tests = [
@@ -1419,11 +1445,11 @@ export default function App() {
       const pi = raw[25] ? parseFloat(raw[25].toString().replace(',', '.')) : (isCritical ? 0.8 + Math.random() * 0.2 : isWarning ? 1.2 + Math.random() * 0.8 : 2.5 + Math.random() * 1.5);
       const elcid = raw[31] ? parseFloat(raw[31].toString().replace(',', '.')) : (isCritical ? 250 + Math.random() * 100 : isWarning ? 120 + Math.random() * 80 : 40 + Math.random() * 30);
 
-      const tanDeltaScore = tanDelta >= 0.1 ? 10 : tanDelta >= 0.07 ? 8 : tanDelta >= 0.04 ? 4 : 1;
-      const pdScore = pd >= 20000 ? 10 : pd >= 15000 ? 8 : pd >= 10000 ? 4 : 1;
-      const irScore = ir < 1 ? 10 : ir < 10 ? 8 : ir < 50 ? 4 : 1;
-      const piScore = pi < 1 ? 10 : pi < 2 ? 6 : 1;
-      const elcidScore = elcid > 200 ? 10 : elcid > 110 ? 8 : elcid > 70 ? 4 : 1;
+      const tanDeltaScore = tanDelta >= 0.1 ? 1 : tanDelta >= 0.07 ? 3 : tanDelta >= 0.04 ? 6 : 10;
+      const pdScore = pd >= 20000 ? 1 : pd >= 15000 ? 3 : pd >= 10000 ? 6 : 10;
+      const irScore = ir < 1 ? 1 : ir < 10 ? 3 : ir < 50 ? 6 : 10;
+      const piScore = pi < 1 ? 1 : pi < 2 ? 5 : 10;
+      const elcidScore = elcid > 200 ? 1 : elcid > 110 ? 3 : elcid > 70 ? 6 : 10;
 
       generalRecommendation = isCritical 
           ? 'Tình trạng cách điện suy giảm nghiêm trọng. Cần lên kế hoạch bảo dưỡng, sấy cuộn dây hoặc quấn lại.' 
@@ -1432,17 +1458,17 @@ export default function App() {
             : 'Cách điện động cơ ở trạng thái tốt. Tiếp tục vận hành và bảo dưỡng định kỳ.';
 
       failureProfile = [
-          { subject: 'Tổn hao điện môi (Tan-delta)', score: Math.min(100, tanDeltaScore * 10 + Math.random() * 10) },
-          { subject: 'Phóng điện cục bộ (PD)', score: Math.min(100, pdScore * 10 + Math.random() * 10) },
-          { subject: 'Điện trở cách điện (IR)', score: Math.min(100, irScore * 10 + Math.random() * 10) },
-          { subject: 'Chỉ số phân cực (PI)', score: Math.min(100, piScore * 10 + Math.random() * 10) },
-          { subject: 'Lõi thép (ELCID)', score: Math.min(100, elcidScore * 10 + Math.random() * 10) },
+          { subject: 'Tổn hao điện môi (Tan-delta)', score: Math.min(100, tanDeltaScore * 10) },
+          { subject: 'Phóng điện cục bộ (PD)', score: Math.min(100, pdScore * 10) },
+          { subject: 'Điện trở cách điện (IR)', score: Math.min(100, irScore * 10) },
+          { subject: 'Chỉ số phân cực (PI)', score: Math.min(100, piScore * 10) },
+          { subject: 'Lõi thép (ELCID)', score: Math.min(100, elcidScore * 10) },
       ];
 
       generatedDefects = [
-        { name: 'Lão hóa cách điện cuộn dây', warnings: irScore * 2, risk: irScore * 10 },
-        { name: 'Phóng điện cục bộ stator', warnings: pdScore * 2, risk: pdScore * 10 },
-        { name: 'Hỏng hóc lõi thép', warnings: elcidScore * 2, risk: elcidScore * 10 },
+        { name: 'Lão hóa cách điện cuộn dây', warnings: (10 - irScore) * 2, risk: (10 - irScore) * 10 },
+        { name: 'Phóng điện cục bộ stator', warnings: (10 - pdScore) * 2, risk: (10 - pdScore) * 10 },
+        { name: 'Hỏng hóc lõi thép', warnings: (10 - elcidScore) * 2, risk: (10 - elcidScore) * 10 },
       ].filter(d => d.risk > 10);
 
       tests = [
@@ -1819,10 +1845,11 @@ export default function App() {
   const totalPages = Math.ceil(displayedEquipment.length / itemsPerPage);
   const paginatedEquipment = displayedEquipment.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  const topRiskCount = Math.max(5, Math.ceil(filteredEquipment.length * 0.1));
   const filteredTopRiskEquipment = filteredEquipment
     .filter(eq => eq.status === 'critical' || eq.status === 'warning')
     .sort((a, b) => a.health - b.health)
-    .slice(0, 5);
+    .slice(0, topRiskCount);
 
   const filteredStatusDistribution = [
     { name: 'Khỏe mạnh', value: filteredKpiData.healthy, color: '#10b981' },
@@ -2590,10 +2617,27 @@ export default function App() {
               tapchanger: { age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0), reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5 }
             };
             const result = calculateTransformerHealth(params);
-            const calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-            if (hasCritical) statusVal = 'critical';
-            else if (hasWarning && statusVal === 'healthy') statusVal = 'warning';
+            let calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+            
+            if (hasCritical) {
+              statusVal = 'critical';
+              if (calcHealth >= 60) calcHealth = 59; // Ensure health reflects critical status
+            } else if (hasWarning) {
+              statusVal = 'warning';
+              if (calcHealth >= 80) calcHealth = 79; // Ensure health reflects warning status
+              else if (calcHealth < 60) calcHealth = 60; // Ensure health doesn't drop to critical if only warning
+            } else {
+              statusVal = 'healthy';
+              if (calcHealth < 80) calcHealth = 85; // Ensure health reflects healthy status
+            }
+
             if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
+            else {
+              // If health is provided but doesn't match status, adjust it
+              if (statusVal === 'critical' && healthVal >= 60) healthVal = 59;
+              if (statusVal === 'warning' && (healthVal >= 80 || healthVal < 60)) healthVal = 75;
+              if (statusVal === 'healthy' && healthVal < 80) healthVal = 90;
+            }
 
             const eqData = {
               lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
@@ -2667,10 +2711,26 @@ export default function App() {
               age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: 1.0, reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5, observedFactor: 1.0, measuredFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0)
             };
             const result = calculateSwitchgearHealth(params);
-            const calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-            if (hasCritical) statusVal = 'critical';
-            else if (hasWarning && statusVal === 'healthy') statusVal = 'warning';
+            let calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
+            
+            if (hasCritical) {
+              statusVal = 'critical';
+              if (calcHealth >= 60) calcHealth = 59;
+            } else if (hasWarning) {
+              statusVal = 'warning';
+              if (calcHealth >= 80) calcHealth = 79;
+              else if (calcHealth < 60) calcHealth = 60;
+            } else {
+              statusVal = 'healthy';
+              if (calcHealth < 80) calcHealth = 85;
+            }
+
             if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
+            else {
+              if (statusVal === 'critical' && healthVal >= 60) healthVal = 59;
+              if (statusVal === 'warning' && (healthVal >= 80 || healthVal < 60)) healthVal = 75;
+              if (statusVal === 'healthy' && healthVal < 80) healthVal = 90;
+            }
 
             const eqData = {
               lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
@@ -2782,10 +2842,26 @@ export default function App() {
             });
 
             const result = calculateMotorHealth(tests);
-            const calcHealth = Math.max(0, Math.round(result.hiPercentage));
-            if (hasCritical) statusVal = 'critical';
-            else if (hasWarning && statusVal === 'healthy') statusVal = 'warning';
+            let calcHealth = Math.max(0, Math.round(result.hiPercentage));
+            
+            if (hasCritical) {
+              statusVal = 'critical';
+              if (calcHealth >= 60) calcHealth = 59;
+            } else if (hasWarning) {
+              statusVal = 'warning';
+              if (calcHealth >= 80) calcHealth = 79;
+              else if (calcHealth < 60) calcHealth = 60;
+            } else {
+              statusVal = 'healthy';
+              if (calcHealth < 80) calcHealth = 85;
+            }
+
             if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
+            else {
+              if (statusVal === 'critical' && healthVal >= 60) healthVal = 59;
+              if (statusVal === 'warning' && (healthVal >= 80 || healthVal < 60)) healthVal = 75;
+              if (statusVal === 'healthy' && healthVal < 80) healthVal = 90;
+            }
 
             let age = idx.ageIdx !== -1 ? parseFloat(row[idx.ageIdx]?.toString().replace(',', '.') || '10') : 10;
             let dutyFactor = idx.dutyFactorIdx !== -1 ? parseFloat(row[idx.dutyFactorIdx]?.toString().replace(',', '.') || '1.0') : 1.0;
@@ -4499,7 +4575,7 @@ export default function App() {
                   <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                     <h2 className="font-semibold text-slate-800 flex items-center gap-2">
                       <AlertTriangle className="text-rose-500" size={18} />
-                      Top rủi ro cao nhất
+                      Top 10% rủi ro cao nhất
                     </h2>
                   </div>
                   <div className="p-2 flex-1 overflow-y-auto max-h-[400px]">
@@ -5886,7 +5962,8 @@ export default function App() {
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                  currentDetailedRiskData.status === 'critical' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
+                  currentDetailedRiskData.status === 'critical' ? 'bg-rose-100 text-rose-600' : 
+                  currentDetailedRiskData.status === 'warning' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
                 }`}>
                   <AlertTriangle size={20} />
                 </div>
@@ -5907,7 +5984,8 @@ export default function App() {
                   <div className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Health Index</div>
                   <div className="flex items-end gap-2 justify-center">
                     <span className={`text-5xl font-black ${
-                      currentDetailedRiskData.status === 'critical' ? 'text-rose-600' : 'text-amber-500'
+                      currentDetailedRiskData.status === 'critical' ? 'text-rose-600' : 
+                      currentDetailedRiskData.status === 'warning' ? 'text-amber-500' : 'text-emerald-500'
                     }`}>
                       {currentDetailedRiskData.health}
                     </span>
@@ -5941,7 +6019,20 @@ export default function App() {
                           <PolarGrid stroke="#e2e8f0" />
                           <PolarAngleAxis dataKey="subject" tick={{ fill: '#475569', fontSize: 11, fontWeight: 500 }} />
                           <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} />
-                          <Radar name="Risk" dataKey="score" stroke={currentDetailedRiskData.status === 'critical' ? '#f43f5e' : '#3b82f6'} strokeWidth={2} fill={currentDetailedRiskData.status === 'critical' ? '#f43f5e' : '#3b82f6'} fillOpacity={0.3} />
+                          <Radar 
+                            name="Health" 
+                            dataKey="score" 
+                            stroke={
+                              currentDetailedRiskData.status === 'critical' ? '#f43f5e' : 
+                              currentDetailedRiskData.status === 'warning' ? '#f59e0b' : '#10b981'
+                            } 
+                            strokeWidth={2} 
+                            fill={
+                              currentDetailedRiskData.status === 'critical' ? '#f43f5e' : 
+                              currentDetailedRiskData.status === 'warning' ? '#f59e0b' : '#10b981'
+                            } 
+                            fillOpacity={0.3} 
+                          />
                         </RadarChart>
                       </ResponsiveContainer>
                     </div>
