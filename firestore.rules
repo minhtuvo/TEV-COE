@@ -71,7 +71,7 @@ service cloud.firestore {
       return isAuthenticated() && (
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-        (request.auth.token.email == "sgm1707@gmail.com" && request.auth.token.email_verified == true)
+        (request.auth.token.email == "sgm1707@gmail.com")
       );
     }
 
@@ -110,7 +110,12 @@ service cloud.firestore {
     function isValidCustomer(data) {
       return hasRequiredFields(['name', 'createdAt']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             (!('factories' in data) || (data.factories is list)) &&
+             (!('email' in data) || (data.email is string)) &&
+             (!('phone' in data) || (data.phone is string)) &&
+             (!('address' in data) || (data.address is string)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string));
     }
 
     function isValidEquipment(data) {
@@ -161,6 +166,46 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
+    function isValidWorkOrder(data) {
+      return hasRequiredFields(['title', 'equipmentId', 'customerId', 'status', 'priority', 'type', 'createdAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             (data.equipmentId is string || data.equipmentId is list) &&
+             data.customerId is string && data.customerId.size() > 0 && data.customerId.size() < 100 &&
+             data.status in ["initiated", "approved", "planned", "scheduled", "in-progress", "completed", "cancelled", "overdue"] &&
+             data.priority in ['low', 'medium', 'high', 'urgent'] &&
+             data.type in ["preventive", "corrective", "inspection", "emergency", "unplanned"] &&
+             (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() < 100)) &&
+             (!('description' in data) || (data.description is string && data.description.size() < 2000)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 2000)) &&
+             (!('attachments' in data) || (data.attachments is list && data.attachments.size() < 20)) &&
+             (!('usedMaterials' in data) || (data.usedMaterials is list && data.usedMaterials.size() < 50)) &&
+             (!('responsibleApprove' in data) || (data.responsibleApprove is string)) &&
+             (!('responsibleDo' in data) || (data.responsibleDo is string)) &&
+             (!('workPermitId' in data) || (data.workPermitId is string)) &&
+             (!('blockingRequired' in data) || (data.blockingRequired is bool)) &&
+             (!('isUnplanned' in data) || (data.isUnplanned is bool)) &&
+             (!('failureCode' in data) || (data.failureCode is string)) &&
+             (!('pmFrequency' in data) || (data.pmFrequency is string)) &&
+             (!('estimatedTime' in data) || (data.estimatedTime is number)) &&
+             (!('laborCount' in data) || (data.laborCount is number)) &&
+             (!('laborCost' in data) || (data.laborCost is number)) &&
+             (!('partCost' in data) || (data.partCost is number)) &&
+             data.createdAt is string;
+    }
+
+    function isValidInventoryItem(data) {
+      return hasRequiredFields(['name', 'sku', 'quantity', 'unit', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.sku is string && data.sku.size() > 0 && data.sku.size() < 100 &&
+             data.quantity is number &&
+             data.unit is string && data.unit.size() > 0 && data.unit.size() < 50 &&
+             (!('category' in data) || (data.category is string && data.category.size() < 100)) &&
+             (!('minStock' in data) || data.minStock is number) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 200)) &&
+             (!('price' in data) || data.price is number) &&
+             data.createdAt is string;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -179,22 +224,42 @@ service cloud.firestore {
     match /customers/{customerId} {
       allow read: if isAdmin() || isCustomerOwner(customerId);
       allow create: if isAdmin() && isValidCustomer(request.resource.data);
-      allow update: if isAdmin() && isValidCustomer(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow update: if isAdmin() && isValidCustomer(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /equipment/{equipmentId} {
       allow read: if isAdmin() || isCustomerOwner(resource.data.customerId);
       allow create: if isAdmin() && isValidEquipment(request.resource.data);
-      allow update: if isAdmin() && isValidEquipment(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow update: if isAdmin() && isValidEquipment(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /dgaReports/{reportId} {
       allow read: if isAdmin() || isCustomerOwner(resource.data.customerId);
       allow create: if isAdmin() && isValidDgaReport(request.resource.data);
-      allow update: if isAdmin() && isValidDgaReport(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'equipmentId', 'customerId']);
+      allow update: if isAdmin() && isValidDgaReport(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    match /workOrders/{orderId} {
+      allow read: if isAdmin() || isCustomerOwner(resource.data.customerId);
+      allow create: if isAdmin() && isValidWorkOrder(request.resource.data);
+      allow update: if isAuthenticated() && isValidWorkOrder(request.resource.data) && (
+        isAdmin() || (isCustomerOwner(resource.data.customerId) && areImmutableFieldsUnchanged(['createdAt', 'equipmentId', 'customerId']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidInventoryItem(request.resource.data);
+      allow update: if isAdmin() && isValidInventoryItem(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /_connection_test_/ping {
+      allow read: if true;
     }
   }
 }

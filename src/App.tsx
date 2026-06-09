@@ -12,8 +12,11 @@ import {
   MapPin,
   Factory,
   ChevronDown,
+  ChevronRight,
   MoreVertical,
   TrendingUp,
+  TrendingDown,
+  Clock,
   AlertCircle,
   ClipboardList,
   QrCode,
@@ -31,21 +34,27 @@ import {
   Plus,
   X,
   Download,
+  Upload,
   Eye,
   Calendar,
   PieChart as PieChartIcon,
   BarChart as BarChartIcon,
   Wind,
+  Sun,
   Droplets,
   Gauge,
   RefreshCw,
   LogOut,
   User,
+  Users,
   Paperclip,
   Info,
   Database,
   Menu,
-  Copy
+  Copy,
+  Package,
+  Trash2,
+  ShieldCheck
 } from 'lucide-react';
 import {
   LineChart,
@@ -77,8 +86,9 @@ import autoTable from 'jspdf-autotable';
 import * as htmlToImage from 'html-to-image';
 import { auth, db, signInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, onSnapshot, orderBy, limit, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Html5QrcodeScanner } from 'html5-qrcode';
+import { QRCodeSVG } from 'qrcode.react';
 import { 
   calculateSwitchgearHealth, 
   calculateTransformerHealth, 
@@ -88,6 +98,363 @@ import {
   MotorDiagnosticTests,
   MotorPhaseData
 } from './lib/healthCalculator';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+// --- Mock Data for Maintenance Analytics ---
+const mtbfData = [
+  { month: 'Jan', hours: 320, target: 350 },
+  { month: 'Feb', hours: 330, target: 350 },
+  { month: 'Mar', hours: 340, target: 350 },
+  { month: 'Apr', hours: 345, target: 350 },
+  { month: 'May', hours: 300, target: 350 },
+  { month: 'Jun', hours: 310, target: 350 },
+  { month: 'Jul', hours: 330, target: 350 },
+  { month: 'Aug', hours: 340, target: 350 },
+  { month: 'Sep', hours: 345, target: 350 },
+  { month: 'Oct', hours: 370, target: 350 },
+  { month: 'Nov', hours: 365, target: 350 },
+  { month: 'Dec', hours: 355, target: 350 },
+];
+
+const mttrData = [
+  { month: 'Jan', hours: 4.0, target: 3.5 },
+  { month: 'Feb', hours: 3.8, target: 3.5 },
+  { month: 'Mar', hours: 3.9, target: 3.5 },
+  { month: 'Apr', hours: 3.8, target: 3.5 },
+  { month: 'May', hours: 3.5, target: 3.5 },
+  { month: 'Jun', hours: 3.6, target: 3.5 },
+  { month: 'Jul', hours: 3.2, target: 3.5 },
+  { month: 'Aug', hours: 2.5, target: 3.5 },
+  { month: 'Sep', hours: 2.4, target: 3.5 },
+  { month: 'Oct', hours: 2.7, target: 3.5 },
+  { month: 'Nov', hours: 2.7, target: 3.5 },
+  { month: 'Dec', hours: 2.6, target: 3.5 },
+];
+
+const anomaliesData = [
+  { name: 'Damaged Lens', value: 85 },
+  { name: 'Cooling Failure', value: 45 },
+  { name: 'Valve Failure', value: 35 },
+  { name: 'Limit Switch', value: 25 },
+  { name: 'Fan Failure', value: 18 },
+  { name: 'Connectivity', value: 12 },
+];
+
+const maintenanceCostData = [
+  { month: 'Jan', cost: 6.0, target: 5.0 },
+  { month: 'Feb', cost: 6.0, target: 5.0 },
+  { month: 'Mar', cost: 5.0, target: 5.0 },
+  { month: 'Apr', cost: 5.0, target: 5.0 },
+  { month: 'May', cost: 3.7, target: 5.0 },
+  { month: 'Jun', cost: 3.3, target: 5.0 },
+  { month: 'Jul', cost: 2.4, target: 5.0 },
+  { month: 'Aug', cost: 2.2, target: 5.0 },
+  { month: 'Sep', cost: 1.6, target: 5.0 },
+  { month: 'Oct', cost: 1.5, target: 5.0 },
+  { month: 'Nov', cost: 1.3, target: 5.0 },
+  { month: 'Dec', cost: 0.8, target: 5.0 },
+];
+
+const adherenceData = [
+  { name: 'Adherence', value: 82, color: '#10b981' },
+  { name: 'Fail', value: 18, color: '#ef4444' },
+];
+
+const MaintenanceCharts = ({ equipment, workOrders, reports }: { equipment: any, workOrders: any[], reports: any[] }) => {
+  // Filter data for this specific equipment
+  const eqWorkOrders = workOrders.filter(wo => wo.equipmentId.includes(equipment.id));
+  const eqReports = reports.filter(r => r.equipmentId === equipment.id);
+
+  // Helper to get month name
+  const getMonthName = (dateStr: string) => {
+    try {
+      if (!dateStr) return '---';
+      const parts = dateStr.split('/');
+      if (parts.length < 2) return '---';
+      const monthIdx = parseInt(parts[1]) - 1;
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return months[monthIdx] || '---';
+    } catch {
+      return '---';
+    }
+  };
+
+  // 1. Calculate OEE Score (Mocked based on health but slightly dynamic)
+  const oeeScore = equipment.health ? Math.min(100, Math.max(0, equipment.health - 5 + Math.floor(Math.random() * 10))) : 76;
+
+  // 2. MTBF Evolution
+  const monthsList = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const currentMonthIdx = new Date().getMonth();
+  
+  const mtbfEvolution = monthsList.slice(0, Math.max(6, currentMonthIdx + 1)).map((month, idx) => {
+    const monthOrders = eqWorkOrders.filter(wo => getMonthName(wo.dueDate) === month && (wo.type === 'corrective' || wo.type === 'emergency'));
+    let hours = monthOrders.length > 0 ? 350 - (monthOrders.length * 50) : 340 + (idx * 5);
+    return { month, hours: Math.max(100, hours), target: 350 };
+  });
+
+  // 3. MTTR Evolution
+  const mttrEvolution = monthsList.slice(0, Math.max(6, currentMonthIdx + 1)).map((month, idx) => {
+    const monthOrders = eqWorkOrders.filter(wo => getMonthName(wo.dueDate) === month && wo.status === 'completed');
+    let avgTime = monthOrders.length > 0 
+      ? monthOrders.reduce((acc, curr) => acc + (curr.actualTimeSpent || 0), 0) / monthOrders.length 
+      : 3.5 - (idx * 0.1);
+    return { month, hours: parseFloat(avgTime.toFixed(1)), target: 3.5 };
+  });
+
+  // 4. Top Anomalies
+  const failureCounts: Record<string, number> = {};
+  eqWorkOrders.forEach(wo => {
+    if (wo.failureCode) {
+      failureCounts[wo.failureCode] = (failureCounts[wo.failureCode] || 0) + 1;
+    }
+  });
+  
+  let anomaliesDataList = Object.entries(failureCounts).map(([name, count]) => ({
+    name: name.charAt(0).toUpperCase() + name.slice(1),
+    value: count * 20
+  })).sort((a, b) => b.value - a.value);
+
+  if (anomaliesDataList.length === 0) {
+    anomaliesDataList = [
+      { name: 'Nhiệt độ dầu', value: equipment.status === 'critical' ? 85 : 15 },
+      { name: 'Rò rỉ nhẹ', value: 30 },
+      { name: 'Độ ẩm dầu', value: 20 }
+    ];
+  }
+
+  // 5. Maintenance Cost
+  const costEvolution = monthsList.slice(0, Math.max(6, currentMonthIdx + 1)).map((month, idx) => {
+    const monthOrders = eqWorkOrders.filter(wo => getMonthName(wo.dueDate) === month);
+    let monthCost = monthOrders.reduce((acc, curr) => acc + (curr.laborCost || 0) + (curr.partCost || 0), 0) / 1000;
+    if (monthCost === 0) monthCost = 0.5 + (idx * 0.1); 
+    return { month, cost: parseFloat(monthCost.toFixed(2)), target: 5.0 };
+  });
+
+  // 6. Adherence to Schedule
+  const completedOrders = eqWorkOrders.filter(wo => wo.status === 'completed').length;
+  const totalOrders = eqWorkOrders.length;
+  const adherenceScore = totalOrders > 0 ? Math.round((completedOrders / totalOrders) * 100) : 85;
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* OEE Gauge */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <h4 className="text-sm font-bold text-slate-700 mb-4 text-center uppercase tracking-wider">OEE Performance</h4>
+          <div className="h-40 flex flex-col items-center justify-center relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={[
+                    { value: oeeScore, fill: oeeScore > 70 ? '#10b981' : oeeScore > 40 ? '#f59e0b' : '#ef4444' },
+                    { value: 100 - oeeScore, fill: '#f1f5f9' }
+                  ]}
+                  cx="50%"
+                  cy="100%"
+                  startAngle={180}
+                  endAngle={0}
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={0}
+                  dataKey="value"
+                >
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute bottom-2 text-center">
+              <div className="text-2xl font-bold text-slate-800">{oeeScore}%</div>
+              <div className="text-[10px] text-slate-500 font-medium uppercase">OEE SCORE</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mt-2 border-t border-slate-100 pt-3">
+            <div className="text-center">
+              <div className="text-[10px] text-slate-500 uppercase">MTBF</div>
+              <div className="text-xs font-bold text-emerald-600">
+                {mtbfEvolution.length > 0 ? mtbfEvolution[mtbfEvolution.length - 1].hours : '---'} hrs
+              </div>
+            </div>
+            <div className="text-center border-x border-slate-100">
+              <div className="text-[10px] text-slate-500 uppercase">MTTR</div>
+              <div className="text-xs font-bold text-rose-600">
+                {mttrEvolution.length > 0 ? mttrEvolution[mttrEvolution.length - 1].hours : '---'} hrs
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-slate-500 uppercase">AM STEP</div>
+              <div className="text-xs font-bold text-blue-600">3</div>
+            </div>
+          </div>
+        </div>
+
+        {/* MTBF Evolution */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <h4 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">MTBF Evolution (hrs)</h4>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={mtbfEvolution}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ fill: '#f8fafc' }}
+                />
+                <Bar dataKey="hours" radius={[4, 4, 0, 0]}>
+                  {mtbfEvolution.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.hours >= entry.target ? '#10b981' : entry.hours >= entry.target * 0.9 ? '#f59e0b' : '#ef4444'} />
+                  ))}
+                </Bar>
+                <ReferenceLine y={350} stroke="#94a3b8" strokeDasharray="3 3" label={{ position: 'right', value: 'Target', fill: '#94a3b8', fontSize: 10 }} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* MTTR Evolution */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <h4 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">MTTR Evolution (hrs)</h4>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={mttrEvolution}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ fill: '#f8fafc' }}
+                />
+                <Bar dataKey="hours" radius={[4, 4, 0, 0]}>
+                  {mttrEvolution.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.hours <= entry.target ? '#10b981' : entry.hours <= entry.target * 1.1 ? '#f59e0b' : '#ef4444'} />
+                  ))}
+                </Bar>
+                <ReferenceLine y={3.5} stroke="#94a3b8" strokeDasharray="3 3" label={{ position: 'right', value: 'Target', fill: '#94a3b8', fontSize: 10 }} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Top Anomalies */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <h4 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">Top Anomalies</h4>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={anomaliesDataList} layout="vertical" margin={{ left: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                <XAxis type="number" hide />
+                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} width={80} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                />
+                <Bar dataKey="value" fill="#0369a1" radius={[0, 4, 4, 0]} barSize={15} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Maintenance Cost */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <h4 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">Maintenance Cost (k$)</h4>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={costEvolution}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ fill: '#f8fafc' }}
+                />
+                <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
+                  {costEvolution.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.cost <= entry.target ? '#10b981' : '#f59e0b'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Adherence to Schedule */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <h4 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider text-center">Adherence to Schedule</h4>
+          <div className="h-48 relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: 'Completed', value: adherenceScore, fill: '#10b981' },
+                    { name: 'Remaining', value: 100 - adherenceScore, fill: '#f1f5f9' }
+                  ]}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={70}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+              <div className="text-xl font-bold text-slate-800">{adherenceScore}%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // --- PDF Helper ---
 let robotoRegularBase64: string | null = null;
@@ -1066,6 +1433,23 @@ const evaluateEquipmentParam = (type: string, param: string, value: any) => {
     if (param === 'humidity') return numVal <= 60 ? 'healthy' : numVal <= 80 ? 'warning' : 'critical';
     if (param === 'sf6Pressure') return numVal >= 5.5 ? 'healthy' : numVal >= 5.0 ? 'warning' : 'critical';
   }
+  if (type === 'Inverter') {
+    if (numVal !== null) {
+      if (param === 'acOutputVoltage') return (numVal >= 207 && numVal <= 244) || (numVal >= 360 && numVal <= 424) ? 'healthy' : 'warning';
+      if (param === 'acFrequency') return (numVal >= 49.7 && numVal <= 50.3) ? 'healthy' : 'warning';
+      if (param === 'harmonicDistortion') return numVal <= 1 ? 'healthy' : numVal <= 3 ? 'warning' : 'critical';
+      if (param === 'maxEfficiency') return numVal >= 95 ? 'healthy' : numVal >= 90 ? 'warning' : 'critical';
+      if (param === 'euroEfficiency') return numVal >= 94 ? 'healthy' : numVal >= 89 ? 'warning' : 'critical';
+      if (param === 'operatingTemp') return numVal <= 40 ? 'healthy' : numVal <= 50 ? 'warning' : 'critical';
+    }
+    
+    // Boolean/Status checks
+    const s = value?.toString().toLowerCase().trim() || '';
+    if (param === 'antiIslanding') return s === 'đạt' || s === 'pass' || s === 'ok' || s === 'yes' ? 'healthy' : 'critical';
+    if (param === 'rcdIsolation') return s === 'đạt' || s === 'pass' || s === 'ok' || s === 'yes' ? 'healthy' : 'critical';
+    if (param === 'physicalDisconnects') return s === 'đạt' || s === 'pass' || s === 'ok' || s === 'yes' ? 'healthy' : 'critical';
+    if (param === 'airFilters') return s === 'sạch' || s === 'clean' || s === 'ok' ? 'healthy' : 'warning';
+  }
   return null;
 };
 
@@ -1101,6 +1485,26 @@ const mapStatusFromSheet = (status: any) => {
   return 'healthy'; // Default
 };
 
+const calculateNextPMDate = (lastDateStr: string, frequency: string) => {
+  if (!lastDateStr || !frequency) return null;
+  const date = new Date(lastDateStr);
+  if (isNaN(date.getTime())) return null;
+
+  switch (frequency) {
+    case 'daily': date.setDate(date.getDate() + 1); break;
+    case 'weekly': date.setDate(date.getDate() + 7); break;
+    case 'bi-monthly': date.setDate(date.getDate() + 15); break;
+    case 'monthly': date.setMonth(date.getMonth() + 1); break;
+    case '3-months': date.setMonth(date.getMonth() + 3); break;
+    case '6-months': date.setMonth(date.getMonth() + 6); break;
+    case '1-year': date.setFullYear(date.getFullYear() + 1); break;
+    case '3-years': date.setFullYear(date.getFullYear() + 3); break;
+    case '6-years': date.setFullYear(date.getFullYear() + 6); break;
+    default: return null;
+  }
+  return date;
+};
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -1108,6 +1512,99 @@ export default function App() {
   const [userFactory, setUserFactory] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [equipmentSearch, setEquipmentSearch] = useState('');
+  const [showEqDropdown, setShowEqDropdown] = useState(false);
+  const [workOrders, setWorkOrders] = useState<any[]>([]);
+  const [isWorkOrdersLoading, setIsWorkOrdersLoading] = useState(false);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [isCustomersLoading, setIsCustomersLoading] = useState(false);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [isInventoryLoading, setIsInventoryLoading] = useState(false);
+
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
+  const [showInventoryModal, setShowInventoryModal] = useState(false);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<any>(null);
+  const [selectedInventoryItem, setSelectedInventoryItem] = useState<any>(null);
+  const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [newWorkOrder, setNewWorkOrder] = useState({
+    title: '',
+    description: '',
+    equipmentId: [] as string[],
+    customerId: '',
+    factory: '',
+    priority: 'medium',
+    type: 'preventive',
+    status: 'initiated',
+    assignedTo: '',
+    dueDate: '',
+    usedMaterials: [] as any[],
+    responsibleApprove: 'TM',
+    responsibleDo: 'Everybody',
+    blockingRequired: false,
+    workPermitId: '',
+    isUnplanned: false,
+    failureCode: '',
+    rootCause: '',
+    actualTimeSpent: 0,
+    pmFrequency: '',
+    estimatedTime: 0,
+    laborCount: 0,
+    laborCost: 0,
+    partCost: 0,
+    attachments: [] as string[],
+    downtimeStart: '',
+    repairStart: '',
+    repairEnd: '',
+    restartTime: ''
+  });
+  const [newInventoryItem, setNewInventoryItem] = useState({
+    name: '',
+    sku: '',
+    category: '',
+    quantity: 0,
+    unit: 'pcs',
+    minStock: 5,
+    location: '',
+    price: 0
+  });
+  const [newCustomer, setNewCustomer] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    factories: [] as string[]
+  });
+  
+  const [woTypeFilter, setWoTypeFilter] = useState('');
+  const [woPriorityFilter, setWoPriorityFilter] = useState('');
+  const [woStatusFilter, setWoStatusFilter] = useState('');
+  const [woAssigneeFilter, setWoAssigneeFilter] = useState('');
+  const [woSearchQuery, setWoSearchQuery] = useState('');
+  const [woError, setWoError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<{isOpen: boolean, message: string, onConfirm: () => void} | null>(null);
+  
+  const [selectedParamHistory, setSelectedParamHistory] = useState('');
+  const [showEquipmentProfile, setShowEquipmentProfile] = useState(false);
+  const [selectedEqType, setSelectedEqType] = useState('Máy biến áp');
+  const [equipmentCode, setEquipmentCode] = useState('TRF-01');
+  const [equipmentName, setEquipmentName] = useState('Máy biến áp T1');
+  const [siteName, setSiteName] = useState('Nhà máy Bắc Ninh');
+  const [customerName, setCustomerName] = useState('Công ty Điện lực A');
+  const [locationName, setLocationName] = useState('Trạm biến áp 110kV');
+  const [wpNumber, setWpNumber] = useState('');
+  const [showEqSuggestions, setShowEqSuggestions] = useState(false);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [isNewEquipment, setIsNewEquipment] = useState(false);
+  const [formData, setFormData] = useState<Record<string, any>>({});
+  const [healthResult, setHealthResult] = useState<{index: number, status: string} | null>(null);
+  const [selectedRiskDetail, setSelectedRiskDetail] = useState<string | null>(null);
+  const [selectedEqForQR, setSelectedEqForQR] = useState<any>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [allEquipment, setAllEquipment] = useState(initialAllEquipment);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -1135,6 +1632,8 @@ export default function App() {
                 setUserCustomerName(customerDoc.data().name);
               }
             }
+            // Ensure customer database is loaded for all users (to populate dropdowns)
+            fetchCustomers();
           } else {
             // Create default user document
             // If email matches the default admin email, set as admin
@@ -1166,6 +1665,27 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const eqId = params.get('eqId');
+    if (eqId && allEquipment.length > 0) {
+      const foundEq = allEquipment.find(e => e.id.toLowerCase() === eqId.toLowerCase());
+      if (foundEq) {
+        setEquipmentCode(foundEq.id);
+        setEquipmentName(foundEq.name);
+        setCustomerName(foundEq.customer);
+        setSiteName(foundEq.factory);
+        setLocationName(foundEq.location);
+        setSelectedEqType(foundEq.type === 'Tủ điện' ? 'Tủ điện trung thế' : foundEq.type);
+        populateFormData(foundEq);
+        setShowEquipmentProfile(true);
+        // Clear the param from URL without refreshing
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, '', newUrl);
+      }
+    }
+  }, [allEquipment]);
+
   const handleLogin = async () => {
     try {
       await signInWithGoogle();
@@ -1174,7 +1694,71 @@ export default function App() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const fetchWorkOrders = () => {
+    if (!auth.currentUser) return;
+    
+    setIsWorkOrdersLoading(true);
+    const q = query(
+      collection(db, 'workOrders'),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const orders = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setWorkOrders(orders);
+      setIsWorkOrdersLoading(false);
+    }, (error) => {
+      console.error("Error fetching work orders:", error);
+      setIsWorkOrdersLoading(false);
+    });
+
+    return unsubscribe;
+  };
+
+  const handleViewEquipmentProfile = (eq: any) => {
+    setEquipmentCode(eq.id);
+    setEquipmentName(eq.name);
+    setCustomerName(eq.customer);
+    setSiteName(eq.factory);
+    setLocationName(eq.location);
+    setSelectedEqType(eq.type === 'Tủ điện' ? 'Tủ điện trung thế' : eq.type);
+    populateFormData(eq);
+    setShowEquipmentProfile(true);
+  };
+
+  const fetchCustomers = () => {
+    if (!auth.currentUser) return;
+    setIsCustomersLoading(true);
+    const q = query(collection(db, 'customers'), orderBy('name', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setCustomers(items);
+      setIsCustomersLoading(false);
+    }, (error) => {
+      console.error("Error fetching customers:", error);
+      setIsCustomersLoading(false);
+    });
+    return unsubscribe;
+  };
+
+  const fetchInventory = () => {
+    if (!auth.currentUser) return;
+    setIsInventoryLoading(true);
+    const q = query(collection(db, 'inventory'), orderBy('name', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setInventory(items);
+      setIsInventoryLoading(false);
+    }, (error) => {
+      console.error("Error fetching inventory:", error);
+      setIsInventoryLoading(false);
+    });
+    return unsubscribe;
+  };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -1182,20 +1766,15 @@ export default function App() {
     if (tab === 'dashboard' && isGoogleConnected) {
       handleFetchFromSheets();
     }
+    if (tab === 'cmms' || tab === 'customers') {
+      fetchWorkOrders();
+      fetchCustomers();
+    }
+    if (tab === 'inventory') {
+      fetchInventory();
+    }
   };
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [selectedParamHistory, setSelectedParamHistory] = useState('');
-  const [showEquipmentProfile, setShowEquipmentProfile] = useState(false);
-  const [selectedEqType, setSelectedEqType] = useState('Máy biến áp');
-  const [equipmentCode, setEquipmentCode] = useState('TRF-01');
-  const [equipmentName, setEquipmentName] = useState('Máy biến áp T1');
-  const [siteName, setSiteName] = useState('Nhà máy Bắc Ninh');
-  const [customerName, setCustomerName] = useState('Công ty Điện lực A');
-  const [locationName, setLocationName] = useState('Trạm biến áp 110kV');
-  const [showEqSuggestions, setShowEqSuggestions] = useState(false);
-  const [showQRScanner, setShowQRScanner] = useState(false);
-  const [isNewEquipment, setIsNewEquipment] = useState(false);
-  const [formData, setFormData] = useState<Record<string, any>>({});
+
   const updateThreePhase = (param: string, phase: string, val: any) => {
     const current = formData[param] || { R: '', Y: '', B: '' };
     setFormData({
@@ -1203,9 +1782,6 @@ export default function App() {
       [param]: { ...current, [phase]: val }
     });
   };
-  const [healthResult, setHealthResult] = useState<{index: number, status: string} | null>(null);
-  const [selectedRiskDetail, setSelectedRiskDetail] = useState<string | null>(null);
-  const [allEquipment, setAllEquipment] = useState(initialAllEquipment);
 
   const populateFormData = (eq: any) => {
     if (!eq) return;
@@ -1221,6 +1797,7 @@ export default function App() {
         if (eq.type === 'Máy biến áp') linksStr = eq.rawData[20] || '';
         else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') linksStr = eq.rawData[18] || '';
         else if (eq.type === 'Động cơ') linksStr = eq.rawData[19] || '';
+        else if (eq.type === 'Inverter') linksStr = eq.rawData[23] || '';
       }
     } else if (eq.rawData) {
       // Fallback to rawData (less robust, but kept for compatibility)
@@ -1266,6 +1843,24 @@ export default function App() {
           dutyFactor: eq.rawData[18] || ''
         });
         linksStr = eq.rawData[19] || '';
+      } else if (eq.type === 'Inverter') {
+        setFormData({
+          dcInputVoltage: eq.rawData[9] || '',
+          mpptVoltageRange: eq.rawData[10] || '',
+          dcInputCurrent: eq.rawData[11] || '',
+          acOutputVoltage: eq.rawData[12] || '',
+          acFrequency: eq.rawData[13] || '',
+          harmonicDistortion: eq.rawData[14] || '',
+          maxEfficiency: eq.rawData[15] || '',
+          euroEfficiency: eq.rawData[16] || '',
+          antiIslanding: eq.rawData[17] || '',
+          rcdIsolation: eq.rawData[18] || '',
+          dielectricVoltage: eq.rawData[19] || '',
+          physicalDisconnects: eq.rawData[20] || '',
+          operatingTemp: eq.rawData[21] || '',
+          airFilters: eq.rawData[22] || ''
+        });
+        linksStr = eq.rawData[23] || '';
       }
     }
 
@@ -1284,6 +1879,372 @@ export default function App() {
     }
   };
 
+  const generateWorkOrderPDF = async (order: any) => {
+    const pdf = await getConfiguredJsPDF();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    
+    // Add TEV Logo (using a placeholder or stylized text if image is not available)
+    // We will draw a simple stylized TEV logo
+    pdf.setFillColor(30, 64, 175); // Blue-800
+    pdf.rect(20, 15, 30, 15, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(14);
+    pdf.setFont('Roboto', 'bold');
+    pdf.text('TEV', 35, 25, { align: 'center' });
+    
+    // Header
+    pdf.setFontSize(20);
+    pdf.setTextColor(30, 64, 175); // Blue-800
+    pdf.text('PHIẾU CÔNG VIỆC / WORK ORDER', pageWidth / 2, 25, { align: 'center' });
+    
+    pdf.setFontSize(10);
+    pdf.setTextColor(100, 116, 139); // Slate-500
+    pdf.setFont('Roboto', 'normal');
+    pdf.text(`Mã phiếu / WO ID: ${order.workPermitId || order.id.substring(0, 8)}`, pageWidth - 20, 20, { align: 'right' });
+    pdf.text(`Ngày tạo / Created: ${order.createdAt ? new Date(order.createdAt).toLocaleDateString('vi-VN') : 'N/A'}`, pageWidth - 20, 25, { align: 'right' });
+
+    // Content
+    pdf.setFontSize(12);
+    pdf.setTextColor(30, 41, 59); // Slate-800
+    pdf.setFont('Roboto', 'bold');
+    pdf.text('THÔNG TIN CHUNG / GENERAL INFO', 20, 45);
+    pdf.line(20, 47, pageWidth - 20, 47);
+
+    pdf.setFont('Roboto', 'normal');
+    autoTable(pdf, {
+      startY: 50,
+      head: [['Hạng mục / Item', 'Chi tiết / Details']],
+      body: [
+        ['Tiêu đề / Title', order.title],
+        ['Mô tả / Description', order.description || 'Không có mô tả / No description'],
+        ['Thiết bị / Equipment', order.equipmentId],
+        ['Khách hàng / Customer', order.customerId],
+        ['Loại công việc / Type', order.type],
+        ['Mức độ ưu tiên / Priority', order.priority],
+        ['Trạng thái / Status', order.status],
+        ['Người thực hiện / PIC', order.assignedTo || 'Chưa phân công / Unassigned'],
+        ['Hạn hoàn thành / Due Date', order.dueDate ? new Date(order.dueDate).toLocaleDateString('vi-VN') : 'N/A'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [51, 65, 85], font: 'Roboto', fontStyle: 'bold' },
+      bodyStyles: { font: 'Roboto' },
+    });
+
+    // Materials
+    if (order.usedMaterials && order.usedMaterials.length > 0) {
+      const finalY = (pdf as any).lastAutoTable.finalY || 150;
+      pdf.setFont('Roboto', 'bold');
+      pdf.text('VẬT TƯ SỬ DỤNG / USED MATERIALS', 20, finalY + 15);
+      pdf.line(20, finalY + 17, pageWidth - 20, finalY + 17);
+
+      autoTable(pdf, {
+        startY: finalY + 20,
+        head: [['Tên vật tư / Material Name', 'Số lượng / Qty', 'Đơn vị / Unit']],
+        body: order.usedMaterials.map((m: any) => [m.name, m.quantity, m.unit]),
+        theme: 'grid',
+        headStyles: { fillColor: [71, 85, 105], font: 'Roboto', fontStyle: 'bold' },
+        bodyStyles: { font: 'Roboto' },
+      });
+    }
+
+    // Signatures
+    const finalY2 = (pdf as any).lastAutoTable.finalY || 200;
+    pdf.setFontSize(10);
+    pdf.setFont('Roboto', 'bold');
+    pdf.text('Người thực hiện / Technician', 40, finalY2 + 30);
+    pdf.setFont('Roboto', 'normal');
+    pdf.text('(Ký và ghi rõ họ tên / Sign & Name)', 35, finalY2 + 35);
+    
+    pdf.setFont('Roboto', 'bold');
+    pdf.text('Xác nhận khách hàng / Customer', pageWidth - 80, finalY2 + 30);
+    pdf.setFont('Roboto', 'normal');
+    pdf.text('(Ký và ghi rõ họ tên / Sign & Name)', pageWidth - 85, finalY2 + 35);
+
+    pdf.save(`WorkOrder_${order.workPermitId || order.id.substring(0, 8)}.pdf`);
+  };
+
+  const handleSaveInventoryItem = async () => {
+    if (!newInventoryItem.name || !newInventoryItem.sku) {
+      alert('Vui lòng nhập tên và mã SKU');
+      return;
+    }
+
+    try {
+      let invId = '';
+      const now = new Date().toISOString();
+      if (selectedInventoryItem) {
+        invId = selectedInventoryItem.id;
+        await updateDoc(doc(db, 'inventory', invId), {
+          ...newInventoryItem,
+          updatedAt: now
+        });
+      } else {
+        const docRef = await addDoc(collection(db, 'inventory'), {
+          ...newInventoryItem,
+          createdAt: now,
+          updatedAt: now
+        });
+        invId = docRef.id;
+      }
+
+      // Sync to Google Sheets
+      await syncToSheet('QuanLyKho', [[
+        invId,
+        newInventoryItem.name,
+        newInventoryItem.sku,
+        newInventoryItem.category,
+        newInventoryItem.quantity,
+        newInventoryItem.unit,
+        newInventoryItem.minStock,
+        newInventoryItem.location,
+        newInventoryItem.price,
+        selectedInventoryItem ? selectedInventoryItem.createdAt : now,
+        now
+      ]]);
+
+      setShowInventoryModal(false);
+      setNewInventoryItem({
+        name: '',
+        sku: '',
+        category: '',
+        quantity: 0,
+        unit: 'pcs',
+        minStock: 5,
+        location: '',
+        price: 0
+      });
+      setSelectedInventoryItem(null);
+      alert('Đã lưu vật tư thành công!');
+    } catch (error) {
+      console.error("Error saving inventory item:", error);
+      alert('Lỗi khi lưu vật tư');
+    }
+  };
+
+  const handleSaveCustomer = async () => {
+    if (!newCustomer.name) {
+      alert('Vui lòng nhập tên khách hàng');
+      return;
+    }
+
+    try {
+      let custId = '';
+      const now = new Date().toISOString();
+      if (editingCustomer) {
+        custId = editingCustomer.id;
+        await updateDoc(doc(db, 'customers', custId), {
+          ...newCustomer,
+          updatedAt: now
+        });
+      } else {
+        custId = generateNextCustomerId();
+        await setDoc(doc(db, 'customers', custId), {
+          ...newCustomer,
+          createdAt: now,
+          updatedAt: now
+        });
+      }
+
+      setShowCustomerModal(false);
+      setNewCustomer({ name: '', email: '', phone: '', address: '', factories: [] });
+      setEditingCustomer(null);
+    } catch (error) {
+      console.error("Error saving customer:", error);
+      alert('Lỗi khi lưu khách hàng');
+    }
+  };
+
+  const handleDeleteCustomer = async (id: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      message: 'Bạn có chắc chắn muốn xóa khách hàng này?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'customers', id));
+          setConfirmDialog(null);
+        } catch (error) {
+          console.error("Error deleting customer:", error);
+          alert('Lỗi khi xóa khách hàng');
+        }
+      }
+    });
+  };
+
+  const handleDeleteWorkOrder = async (id: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      message: 'Bạn có chắc chắn muốn xóa phiếu công việc này?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'workOrders', id));
+          setConfirmDialog(null);
+        } catch (error) {
+          console.error("Error deleting work order:", error);
+          setWoError('Lỗi khi xóa phiếu công việc');
+        }
+      }
+    });
+  };
+
+  const generateWorkPermitId = () => {
+    const currentYear = new Date().getFullYear();
+    const wpPrefix = `WP-${currentYear}-`;
+    const currentYearWPs = workOrders
+      .map(wo => wo.workPermitId)
+      .filter(id => id && id.startsWith(wpPrefix));
+    
+    let maxNum = 0;
+    currentYearWPs.forEach(id => {
+      const numStr = id.replace(wpPrefix, '');
+      const num = parseInt(numStr, 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    });
+    
+    const nextNum = maxNum + 1;
+    return `${wpPrefix}${nextNum.toString().padStart(3, '0')}`;
+  };
+
+  const generateNextCustomerId = () => {
+    const prefix = 'KH-';
+    const existingIds = customers
+      .map(c => c.id)
+      .filter(id => id && id.startsWith(prefix));
+    
+    let maxNum = 0;
+    existingIds.forEach(id => {
+      const numStr = id.replace(prefix, '');
+      const num = parseInt(numStr, 10);
+      if (!isNaN(num) && num > maxNum) {
+        maxNum = num;
+      }
+    });
+    
+    const nextNum = maxNum + 1;
+    return `${prefix}${nextNum.toString().padStart(3, '0')}`;
+  };
+
+  const handleSaveWorkOrder = async () => {
+    setWoError('');
+    if (!newWorkOrder.title || !newWorkOrder.equipmentId || (Array.isArray(newWorkOrder.equipmentId) && newWorkOrder.equipmentId.length === 0) || !newWorkOrder.customerId) {
+      setWoError('Vui lòng nhập tiêu đề, chọn ít nhất một thiết bị và chọn khách hàng');
+      return;
+    }
+
+    try {
+      let woId = '';
+      const now = new Date().toISOString();
+      
+      // Auto-populate timestamps based on status
+      const updatedWO = { ...newWorkOrder };
+      
+      if (updatedWO.status === 'in-progress' && !updatedWO.repairStart) {
+        updatedWO.repairStart = now;
+      }
+      
+      if (updatedWO.status === 'completed') {
+        if (!updatedWO.repairEnd) updatedWO.repairEnd = now;
+        if (!updatedWO.restartTime) updatedWO.restartTime = now;
+      }
+
+      if (updatedWO.isUnplanned && !updatedWO.downtimeStart) {
+        updatedWO.downtimeStart = selectedWorkOrder ? (selectedWorkOrder.downtimeStart || now) : now;
+      }
+
+      if (selectedWorkOrder) {
+        // Update
+        woId = selectedWorkOrder.id;
+        await updateDoc(doc(db, 'workOrders', woId), {
+          ...updatedWO,
+          updatedAt: now,
+          completedAt: updatedWO.status === 'completed' ? now : (selectedWorkOrder?.completedAt || null)
+        });
+      } else {
+        // Create
+        const docRef = await addDoc(collection(db, 'workOrders'), {
+          ...updatedWO,
+          createdAt: now,
+          updatedAt: now,
+          completedAt: updatedWO.status === 'completed' ? now : null
+        });
+        woId = docRef.id;
+      }
+
+      // Sync to Google Sheets
+      const customerNameStr = customers.find(c => c.id === updatedWO.customerId)?.name || updatedWO.customerId;
+      const attachmentsStr = updatedWO.attachments ? updatedWO.attachments.join(', ') : '';
+      const equipmentIdsStr = Array.isArray(updatedWO.equipmentId) ? updatedWO.equipmentId.join(', ') : updatedWO.equipmentId;
+      await syncToSheet('CMMS', [[
+        woId,
+        updatedWO.workPermitId,
+        updatedWO.title,
+        updatedWO.description,
+        equipmentIdsStr,
+        customerNameStr,
+        updatedWO.factory || '',
+        updatedWO.type,
+        updatedWO.priority,
+        updatedWO.status,
+        updatedWO.isUnplanned ? 'Unplanned' : 'Planned',
+        updatedWO.assignedTo,
+        updatedWO.responsibleApprove,
+        updatedWO.dueDate,
+        selectedWorkOrder ? selectedWorkOrder.createdAt : now,
+        now,
+        updatedWO.pmFrequency || '',
+        updatedWO.failureCode || '',
+        updatedWO.rootCause || '',
+        updatedWO.actualTimeSpent || 0,
+        updatedWO.estimatedTime || 0,
+        updatedWO.laborCount || 0,
+        updatedWO.laborCost || 0,
+        updatedWO.partCost || 0,
+        attachmentsStr,
+        updatedWO.downtimeStart || '',
+        updatedWO.repairStart || '',
+        updatedWO.repairEnd || '',
+        updatedWO.restartTime || ''
+      ]]);
+
+      setShowWorkOrderModal(false);
+      setNewWorkOrder({
+        title: '',
+        description: '',
+        equipmentId: [],
+        customerId: '',
+        factory: '',
+        priority: 'medium',
+        type: 'preventive',
+        status: 'initiated',
+        assignedTo: '',
+        dueDate: '',
+        usedMaterials: [],
+        responsibleApprove: 'TM',
+        responsibleDo: 'Everybody',
+        blockingRequired: false,
+        workPermitId: '',
+        isUnplanned: false,
+        failureCode: '',
+        rootCause: '',
+        actualTimeSpent: 0,
+        pmFrequency: '',
+        estimatedTime: 0,
+        laborCount: 0,
+        laborCost: 0,
+        partCost: 0,
+        attachments: [],
+        downtimeStart: '',
+        repairStart: '',
+        repairEnd: '',
+        restartTime: ''
+      });
+      setSelectedWorkOrder(null);
+    } catch (error) {
+      console.error("Error saving work order:", error);
+      setWoError('Lỗi: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  };
   const handleQRScan = (decodedText: string) => {
     // Stop the scanner
     setShowQRScanner(false);
@@ -1300,7 +2261,8 @@ export default function App() {
       setSelectedEqType(foundEq.type === 'Tủ điện' ? 'Tủ điện trung thế' : foundEq.type);
       setIsNewEquipment(false);
       populateFormData(foundEq);
-      alert(`Đã tìm thấy thiết bị: ${foundEq.name} (${foundEq.id})`);
+      setShowEquipmentProfile(true);
+      alert(`Đã tìm thấy thiết bị: ${foundEq.name} (${foundEq.id}). Đang hiển thị hồ sơ chi tiết.`);
     } else {
       setEquipmentCode(decodedText);
       setIsNewEquipment(true);
@@ -1554,6 +2516,27 @@ export default function App() {
   });
   const [dgaAnalysisResult, setDgaAnalysisResult] = useState<any>(null);
 
+  const [deepAnalysisSubTab, setDeepAnalysisSubTab] = useState<'dga' | 'pv-cell' | 'wind-turbine'>('dga');
+
+  const [pvCellData, setPvCellData] = useState({
+    temp: '45',
+    irradiance: '800',
+    voc: '40',
+    isc: '9',
+    ff: '0.75',
+    efficiency: '18'
+  });
+  const [pvAnalysisResult, setPvAnalysisResult] = useState<any>(null);
+
+  const [windBladeData, setWindBladeData] = useState({
+    vibration: '0.5',
+    acoustic: '20',
+    rotationSpeed: '15',
+    windSpeed: '12',
+    visualNotes: ''
+  });
+  const [windAnalysisResult, setWindAnalysisResult] = useState<any>(null);
+
   const dynamicSiteData = useMemo(() => {
     const siteMap = new Map();
     
@@ -1670,16 +2653,19 @@ export default function App() {
     })).filter(d => d.tev > 0 || d.ultrasonic > 0);
 
     const dgaTrend = sortedReports.map(r => {
-      const dgaStr = r.measurements?.dga || '';
-      // Simple parsing if DGA is a string like "H2: 10, CH4: 20" or similar. 
-      // If it's just a status, we might not have numbers. Let's try to extract numbers.
-      // For now, if we don't have structured DGA data, we might return empty or parse it.
-      // Assuming DGA might not be fully structured in the sheet for this trend, we'll return empty if no structured data.
       return {
         time: r.date,
-        h2: 0, ch4: 0, c2h6: 0, c2h4: 0, c2h2: 0, co: 0, co2: 0
+        h2: parseVal(r.measurements?.h2) || 0,
+        o2: parseVal(r.measurements?.o2) || 0,
+        n2: parseVal(r.measurements?.n2) || 0,
+        ch4: parseVal(r.measurements?.ch4) || 0,
+        co: parseVal(r.measurements?.co) || 0,
+        co2: parseVal(r.measurements?.co2) || 0,
+        c2h4: parseVal(r.measurements?.c2h4) || 0,
+        c2h6: parseVal(r.measurements?.c2h6) || 0,
+        c2h2: parseVal(r.measurements?.c2h2) || 0
       };
-    }); // DGA parsing might be complex depending on sheet format, leaving as placeholder or empty if not available
+    }).filter(d => d.h2 > 0 || d.ch4 > 0 || d.c2h2 > 0 || d.co > 0);
 
     const irTrend = sortedReports.map(r => ({
       time: r.date,
@@ -1868,6 +2854,59 @@ export default function App() {
     ? Math.round(filteredEquipment.reduce((sum, eq) => sum + eq.health, 0) / filteredEquipment.length)
     : 0;
 
+  const reliabilityKpis = useMemo(() => {
+    const filteredWOs = workOrders.filter(wo => {
+      if (userRole === 'customer' && userFactory) {
+        return wo.customerId === selectedCustomer; 
+      }
+      return (selectedCustomer === 'all' || wo.customerId === selectedCustomer);
+    });
+
+    const completedCorrective = filteredWOs.filter(wo => 
+      (wo.type === 'corrective' || wo.type === 'emergency' || wo.isUnplanned) && 
+      wo.status === 'completed'
+    );
+
+    // 1. MTTR: Total Repair Time / Total No. of Repairs
+    const totalRepairTime = completedCorrective.reduce((sum, wo) => sum + (wo.actualTimeSpent || 0), 0);
+    const mttr = completedCorrective.length > 0 ? (totalRepairTime / completedCorrective.length).toFixed(1) : '0.0';
+
+    // 2. MTBF: Total Operational Hours / Total No. of Failures
+    const totalAssets = filteredEquipment.length;
+    const totalOpHours = totalAssets * 30 * 24; 
+    const totalFailures = completedCorrective.length;
+    const mtbf = totalFailures > 0 ? Math.round(totalOpHours / totalFailures) : totalOpHours;
+
+    // 3. MTTF: Total Hours of Operation / Total Assets
+    const mttf = totalAssets > 0 ? Math.round(totalOpHours / totalAssets) : 0;
+
+    // 4. MWT: Average time waiting for maintenance
+    const assignedWOs = filteredWOs.filter(wo => wo.status !== 'initiated');
+    const totalWaitTime = assignedWOs.reduce((sum, wo) => {
+      const created = new Date(wo.createdAt).getTime();
+      const updated = new Date(wo.updatedAt).getTime();
+      return sum + Math.max(0, (updated - created) / (1000 * 60 * 60)); 
+    }, 0);
+    const mwt = assignedWOs.length > 0 ? (totalWaitTime / assignedWOs.length).toFixed(1) : '0.0';
+
+    const totalBreakdownTime = totalRepairTime;
+    const totalCost = filteredWOs.reduce((sum, wo) => sum + (wo.laborCost || 0) + (wo.partCost || 0), 0);
+    const backlog = filteredWOs.filter(wo => wo.status !== 'completed' && wo.status !== 'cancelled').length;
+    
+    const preventive = filteredWOs.filter(wo => wo.type === 'preventive' || wo.type === 'predictive');
+    const completedPreventive = preventive.filter(wo => wo.status === 'completed');
+    const compliance = preventive.length > 0 ? Math.round((completedPreventive.length / preventive.length) * 100) : 100;
+
+    // Maintenance Type Distribution
+    const typeDist = [
+      { name: 'Preventive', value: filteredWOs.filter(wo => wo.type === 'preventive' || wo.type === 'predictive').length, color: '#3b82f6' },
+      { name: 'Reactive', value: filteredWOs.filter(wo => wo.type === 'corrective' || wo.type === 'emergency').length, color: '#f43f5e' },
+      { name: 'Other', value: filteredWOs.filter(wo => !['preventive', 'predictive', 'corrective', 'emergency'].includes(wo.type)).length, color: '#94a3b8' }
+    ];
+
+    return { mttr, mtbf, mttf, mwt, totalBreakdownTime, totalCost, backlog, compliance, typeDist };
+  }, [workOrders, filteredEquipment, selectedCustomer, userRole, userFactory]);
+
   let healthColor = '#10b981'; // emerald-500
   let healthText = 'Khá Tốt';
   let healthTextColor = 'text-emerald-600';
@@ -1892,6 +2931,9 @@ export default function App() {
 
   // Google Auth Effect
   useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 3;
+
     const checkAuthStatus = async () => {
       try {
         const response = await fetch('/api/auth/status', {
@@ -1900,12 +2942,22 @@ export default function App() {
         if (response.ok) {
           const data = await response.json();
           setIsGoogleConnected(data.isAuthenticated);
+          retryCount = 0; // Reset on success
         }
-      } catch (error) {
-        console.error('Failed to check auth status', error);
+      } catch (error: any) {
+        // Only log error if we've exhausted retries or it's not a fetch error
+        if (error.message === 'Failed to fetch' && retryCount < maxRetries) {
+          retryCount++;
+          setTimeout(checkAuthStatus, 2000 * retryCount); // Exponential backoff
+        } else {
+          console.error('Failed to check auth status', error);
+        }
       }
     };
     checkAuthStatus();
+
+    // Poll for status every 30 seconds to catch expiration
+    const interval = setInterval(checkAuthStatus, 30000);
 
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) {
@@ -1919,7 +2971,35 @@ export default function App() {
       }
     };
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Firestore connection test
+  useEffect(() => {
+    const testFirestore = async () => {
+      try {
+        const { doc, getDocFromCache, getDocFromServer } = await import('firebase/firestore');
+        // Try cache first, then server
+        try {
+          await getDocFromCache(doc(db, '_connection_test_', 'ping'));
+        } catch (e) {
+          // Ignore cache errors
+        }
+        await getDocFromServer(doc(db, '_connection_test_', 'ping')).catch(err => {
+          if (err.code === 'unavailable') {
+            console.warn('Firestore is unavailable (offline mode). This is expected in some network environments.');
+          } else if (err.code !== 'not-found') {
+            console.error('Firestore connection test failed:', err);
+          }
+        });
+      } catch (error) {
+        console.error('Firestore test error:', error);
+      }
+    };
+    testFirestore();
   }, []);
 
   const getAuthHeaders = (isJson = true) => {
@@ -1932,6 +3012,34 @@ export default function App() {
       headers['Content-Type'] = 'application/json';
     }
     return headers;
+  };
+
+  const syncToSheet = async (sheetName: string, values: any[]) => {
+    if (!isGoogleConnected) {
+      throw new Error('Chưa kết nối Google Drive.');
+    }
+    try {
+      const response = await fetch('/api/sheets/append', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          range: `${sheetName}!A:Z`,
+          values
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Lỗi không xác định' }));
+        if (response.status === 401) {
+          setIsGoogleConnected(false);
+          throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.');
+        }
+        throw new Error(err.error || 'Lỗi đồng bộ Google Sheets');
+      }
+      return true;
+    } catch (error: any) {
+      console.error('Lỗi đồng bộ Google Sheets:', error);
+      throw error;
+    }
   };
 
   const handleConnectGoogle = async () => {
@@ -2293,6 +3401,66 @@ export default function App() {
     });
   };
 
+  const analyzePVCell = () => {
+    const eff = parseFloat(pvCellData.efficiency);
+    const temp = parseFloat(pvCellData.temp);
+    
+    let condition = 'Tốt';
+    let recommendations = ['Tiếp tục theo dõi định kỳ.'];
+    let color = 'text-emerald-600';
+    let bgColor = 'bg-emerald-50';
+
+    if (eff < 15 || temp > 65) {
+      condition = 'Nguy hiểm';
+      recommendations = ['Kiểm tra điểm nóng (hotspot) ngay lập tức.', 'Vệ sinh bề mặt tấm pin.', 'Kiểm tra đấu nối inverter.'];
+      color = 'text-red-600';
+      bgColor = 'bg-red-50';
+    } else if (eff < 17 || temp > 55) {
+      condition = 'Cảnh báo';
+      recommendations = ['Kiểm tra vệ sinh tấm pin.', 'Theo dõi nhiệt độ vận hành.'];
+      color = 'text-amber-600';
+      bgColor = 'bg-amber-50';
+    }
+
+    setPvAnalysisResult({
+      condition,
+      recommendations,
+      color,
+      bgColor,
+      timestamp: new Date().toLocaleString('vi-VN')
+    });
+  };
+
+  const analyzeWindBlade = () => {
+    const vib = parseFloat(windBladeData.vibration);
+    const acoustic = parseFloat(windBladeData.acoustic);
+    
+    let condition = 'Tốt';
+    let recommendations = ['Bảo trì định kỳ theo kế hoạch.'];
+    let color = 'text-emerald-600';
+    let bgColor = 'bg-emerald-50';
+
+    if (vib > 1.5 || acoustic > 60) {
+      condition = 'Nguy hiểm';
+      recommendations = ['Dừng turbine ngay lập tức để kiểm tra vết nứt.', 'Kiểm tra độ cân bằng cánh.', 'Sử dụng drone kiểm tra chi tiết bề mặt.'];
+      color = 'text-red-600';
+      bgColor = 'bg-red-50';
+    } else if (vib > 0.8 || acoustic > 40) {
+      condition = 'Cảnh báo';
+      recommendations = ['Tăng tần suất giám sát rung động.', 'Lên kế hoạch kiểm tra bằng hình ảnh trong kỳ dừng máy tới.'];
+      color = 'text-amber-600';
+      bgColor = 'bg-amber-50';
+    }
+
+    setWindAnalysisResult({
+      condition,
+      recommendations,
+      color,
+      bgColor,
+      timestamp: new Date().toLocaleString('vi-VN')
+    });
+  };
+
   const exportToPDF = async () => {
     const reportElement = document.getElementById('dga-report-content');
     if (!reportElement) return;
@@ -2373,11 +3541,19 @@ export default function App() {
       const transformers: any[] = [];
       const switchgears: any[] = [];
       const motors: any[] = [];
+      const inverters: any[] = [];
+      const cmmsData: any[] = [];
+      const inventoryData: any[] = [];
+      const customersData: any[] = [];
       
       // Headers
       transformers.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Nhiệt độ dầu (°C)', 'Nhiệt độ cuộn dây (°C)', 'IR Cao-Hạ (MΩ)', 'IR Cao-Vỏ (MΩ)', 'Tình trạng rò rỉ dầu', 'Khí hòa tan DGA (ppm)', 'Độ bền điện môi (kV)', 'Hàm lượng Furan (mg/kg)', 'Độ ẩm trong dầu (ppm)', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
       switchgears.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Chụp ảnh nhiệt (°C)', 'Điện trở tiếp xúc (μΩ)', 'TEV (dBmV)', 'Siêu âm (dBμV)', 'Xung TEV (pps)', 'Độ ẩm (%)', 'Áp suất khí SF6 (bar)', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
       motors.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Độ rung (mm/s)', 'Nhiệt độ Stator (°C)', 'Nhiệt độ vòng bi (°C)', 'Độ lệch điện áp (%)', 'Tan-delta R', 'Tan-delta Y', 'Tan-delta B', 'Tip-up R', 'Tip-up Y', 'Tip-up B', 'PD R', 'PD Y', 'PD B', 'IR R', 'IR Y', 'IR B', 'PI R', 'PI Y', 'PI B', 'DD R', 'DD Y', 'DD B', 'ELCID R', 'ELCID Y', 'ELCID B', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
+      inverters.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Điện áp DC (V)', 'Dải MPPT (V)', 'Dòng điện DC (A)', 'Điện áp AC (V)', 'Tần số AC (Hz)', 'Độ méo hài (%)', 'Hiệu suất tối đa (%)', 'Hiệu suất Châu Âu (%)', 'Chống hòa lưới', 'Dòng rò & Cách ly', 'Điện áp chịu đựng (kV)', 'Cách ly vật lý', 'Nhiệt độ vận hành (°C)', 'Bộ lọc khí', 'File đính kèm (Links)']);
+      cmmsData.push(['Mã WO', 'Mã Work Permit', 'Tiêu đề', 'Mô tả', 'Thiết bị', 'Khách hàng', 'Nhà máy', 'Loại công việc', 'Ngoài kế hoạch', 'Mức độ ưu tiên', 'Trạng thái', 'Người thực hiện (PIC)', 'Vai trò Phê duyệt', 'Vai trò Thực hiện', 'Yêu cầu Cô lập', 'Hạn hoàn thành', 'Vật tư sử dụng', 'Ngày tạo', 'Ngày cập nhật']);
+      inventoryData.push(['Mã vật tư', 'Tên vật tư', 'SKU', 'Danh mục', 'Số lượng', 'Đơn vị', 'Tồn kho tối thiểu', 'Vị trí', 'Đơn giá', 'Ngày tạo', 'Ngày cập nhật']);
+      customersData.push(['Mã khách hàng', 'Tên khách hàng', 'Danh sách nhà máy', 'Email', 'Số điện thoại', 'Địa chỉ', 'Ngày tạo', 'Ngày cập nhật']);
 
       // Map existing data
       const listToSync = Array.isArray(equipmentListToSync) ? equipmentListToSync : allReports;
@@ -2385,6 +3561,7 @@ export default function App() {
       let transformerRowIdx = 2;
       let switchgearRowIdx = 2;
       let motorRowIdx = 2;
+      let inverterRowIdx = 2;
 
       listToSync.forEach(item => {
         const eqId = item.equipmentId || item.id;
@@ -2399,10 +3576,10 @@ export default function App() {
           const statusFormula = `=IFS(OR(AND(ISNUMBER(J${rowIdx}), J${rowIdx}>90), AND(ISNUMBER(K${rowIdx}), K${rowIdx}>105), AND(ISNUMBER(L${rowIdx}), L${rowIdx}<1000), AND(ISNUMBER(M${rowIdx}), M${rowIdx}<1000), N${rowIdx}="heavy", AND(ISNUMBER(O${rowIdx}), O${rowIdx}>2500), AND(ISNUMBER(P${rowIdx}), P${rowIdx}<40), AND(ISNUMBER(Q${rowIdx}), Q${rowIdx}>5), AND(ISNUMBER(R${rowIdx}), R${rowIdx}>25)), "Nguy hiểm", OR(AND(ISNUMBER(J${rowIdx}), J${rowIdx}>80), AND(ISNUMBER(K${rowIdx}), K${rowIdx}>90), AND(ISNUMBER(L${rowIdx}), L${rowIdx}<2000), AND(ISNUMBER(M${rowIdx}), M${rowIdx}<2000), N${rowIdx}="light", AND(ISNUMBER(O${rowIdx}), O${rowIdx}>1000), AND(ISNUMBER(P${rowIdx}), P${rowIdx}<50), AND(ISNUMBER(Q${rowIdx}), Q${rowIdx}>1), AND(ISNUMBER(R${rowIdx}), R${rowIdx}>15)), "Cảnh báo", TRUE, "Bình thường")`;
           
           const rowData = [...baseData, healthFormula, statusFormula];
-          for (let i = 9; i < 18; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
-          rowData.push(raw[18] !== undefined ? raw[18] : ''); // Age
-          rowData.push(raw[19] !== undefined ? raw[19] : ''); // Duty Factor
-          rowData.push(raw[20] !== undefined ? raw[20] : ''); // Links
+          for (let i = 9; i < 27; i++) rowData.push(raw[i] !== undefined ? raw[i] : '');
+          rowData.push(raw[27] !== undefined ? raw[27] : ''); // Age
+          rowData.push(raw[28] !== undefined ? raw[28] : ''); // Duty Factor
+          rowData.push(raw[29] !== undefined ? raw[29] : ''); // Links
           transformers.push(rowData);
         } else if (item.type === 'Tủ điện trung thế' || item.type === 'Tủ điện') {
           const rowIdx = switchgearRowIdx++;
@@ -2451,7 +3628,85 @@ export default function App() {
           rowData.push(raw[35] !== undefined ? raw[35] : ''); // Duty Factor
           rowData.push(raw[36] !== undefined ? raw[36] : ''); // Links
           motors.push(rowData);
+        } else if (item.type === 'Inverter') {
+          const rowIdx = inverterRowIdx++;
+          const rowData = [...baseData, item.health || 0, item.status || 'healthy'];
+          const raw = item.measurements || {};
+          
+          rowData.push(raw.dcInputVoltage || '');
+          rowData.push(raw.mpptVoltageRange || '');
+          rowData.push(raw.dcInputCurrent || '');
+          rowData.push(raw.acOutputVoltage || '');
+          rowData.push(raw.acFrequency || '');
+          rowData.push(raw.harmonicDistortion || '');
+          rowData.push(raw.maxEfficiency || '');
+          rowData.push(raw.euroEfficiency || '');
+          rowData.push(raw.antiIslanding || '');
+          rowData.push(raw.rcdIsolation || '');
+          rowData.push(raw.dielectricVoltage || '');
+          rowData.push(raw.physicalDisconnects || '');
+          rowData.push(raw.operatingTemp || '');
+          rowData.push(raw.airFilters || '');
+          rowData.push(item.fileUrl || '');
+          inverters.push(rowData);
         }
+      });
+
+      // Map CMMS data
+      workOrders.forEach(wo => {
+        const materialsStr = (wo.usedMaterials || []).map((m: any) => `${m.name} (${m.quantity} ${m.unit})`).join(', ');
+        cmmsData.push([
+          wo.id,
+          wo.workPermitId || '',
+          wo.title || '',
+          wo.description || '',
+          (Array.isArray(wo.equipmentId) ? wo.equipmentId.join(', ') : wo.equipmentId) || '',
+          wo.customerId || '',
+          wo.factory || '',
+          wo.type || '',
+          wo.isUnplanned ? 'Có' : 'Không',
+          wo.priority || '',
+          wo.status || '',
+          wo.assignedTo || '',
+          wo.responsibleApprove || '',
+          wo.responsibleDo || '',
+          wo.blockingRequired ? 'Có' : 'Không',
+          wo.dueDate ? new Date(wo.dueDate).toLocaleDateString('vi-VN') : '',
+          materialsStr,
+          wo.createdAt ? new Date(wo.createdAt).toLocaleString('vi-VN') : '',
+          wo.updatedAt ? new Date(wo.updatedAt).toLocaleString('vi-VN') : ''
+        ]);
+      });
+
+      // Map Inventory data
+      inventory.forEach(item => {
+        inventoryData.push([
+          item.id,
+          item.name,
+          item.sku || '',
+          item.category || '',
+          item.quantity || 0,
+          item.unit || '',
+          item.minStock || 0,
+          item.location || '',
+          item.price || 0,
+          item.createdAt || new Date().toISOString(),
+          new Date().toISOString()
+        ]);
+      });
+
+      // Map Customer data
+      customers.forEach(cust => {
+        customersData.push([
+          cust.id,
+          cust.name,
+          (cust.factories || []).join(', '),
+          cust.email || '',
+          cust.phone || '',
+          cust.address || '',
+          cust.createdAt || new Date().toISOString(),
+          cust.updatedAt || new Date().toISOString()
+        ]);
       });
 
       const response = await fetch('/api/sheets/sync-export', {
@@ -2460,7 +3715,11 @@ export default function App() {
         body: JSON.stringify({
           transformers,
           switchgears,
-          motors
+          motors,
+          inverters,
+          cmmsData,
+          inventoryData,
+          customersData
         })
       });
 
@@ -2484,7 +3743,10 @@ export default function App() {
       if (!silent) alert('Đồng bộ dữ liệu lên Google Sheets thành công!');
     } catch (error: any) {
       console.error('Sync error:', error);
-      if (!silent) alert('Lỗi khi đồng bộ dữ liệu: ' + error.message);
+      const errorMessage = error.message === 'Failed to fetch' 
+        ? 'Không thể kết nối với máy chủ. Vui lòng kiểm tra kết nối mạng hoặc thử lại sau vài giây.' 
+        : error.message;
+      if (!silent) alert('Lỗi khi đồng bộ dữ liệu: ' + errorMessage);
     } finally {
       setIsSyncing(false);
     }
@@ -2518,13 +3780,14 @@ export default function App() {
         customerIdx: getColumnIndex(header, ['Khách hàng', 'Customer', 'Client', 'Đơn vị']),
         factoryIdx: getColumnIndex(header, ['Nhà máy', 'Factory', 'Site', 'Trạm', 'Khu vực']),
         locationIdx: getColumnIndex(header, ['Vị trí', 'Location', 'Khu vực', 'Area', 'Ngăn lộ']),
-        idIdx: getColumnIndex(header, ['Mã thiết bị', 'ID', 'Equipment ID', 'Mã TB', 'Tag', 'Mã']),
-        nameIdx: getColumnIndex(header, ['Tên thiết bị', 'Name', 'Equipment Name', 'Tên TB', 'Description', 'Tên']),
+        idIdx: getColumnIndex(header, ['Mã thiết bị', 'Equipment ID', 'Mã TB', 'Tag']),
+        nameIdx: getColumnIndex(header, ['Tên thiết bị', 'Equipment Name', 'Tên TB', 'Description']),
         typeIdx: getColumnIndex(header, ['Loại thiết bị', 'Type', 'Loại TB', 'Phân loại']),
         healthIdx: getColumnIndex(header, ['Chỉ số sức khỏe', 'Health', 'HI', 'Sức khỏe', 'Điểm']),
         statusIdx: getColumnIndex(header, ['Trạng thái', 'Status', 'Tình trạng', 'Kết quả', 'Đánh giá']),
         ageIdx: getColumnIndex(header, ['Tuổi thọ', 'Age', 'Năm vận hành', 'Năm SX']),
         dutyFactorIdx: getColumnIndex(header, ['Hệ số làm việc', 'Duty Factor', 'Hệ số tải']),
+        criticalityIdx: getColumnIndex(header, ['Độ quan trọng', 'Criticality', 'Phân loại rủi ro', 'Mức độ quan trọng']),
         linksIdx: getColumnIndex(header, ['File đính kèm', 'Links', 'Tài liệu', 'Link'])
       });
 
@@ -2537,32 +3800,104 @@ export default function App() {
         return;
       }
 
-      sheetNames.forEach(sheetName => {
+      let syncedCustomersCount = 0;
+      let syncedInventoryCount = 0;
+      for (const sheetName of sheetNames) {
         const rows = allSheetsData[sheetName];
-        if (!rows || rows.length === 0) return;
+        if (!rows || rows.length === 0) continue;
 
         const headerIdx = findHeaderRow(rows);
-        if (headerIdx === -1) return;
+        if (headerIdx === -1) continue;
 
         const header = rows[headerIdx];
         const idx = getCommonIndices(header);
         const lowerSheetName = sheetName.toLowerCase();
 
+        // Skip non-equipment sheets
+        if (lowerSheetName.includes('khachhang') || lowerSheetName.includes('khách hàng')) {
+          const dataRows = rows.slice(headerIdx + 1);
+          for (const row of dataRows) {
+            if (!row || row.length < 2) continue;
+            const id = row[0]?.toString().trim();
+            const name = row[1]?.toString().trim();
+            if (!id || !name || id.toLowerCase().includes('mã khách hàng')) continue;
+
+            const factories = row[2] ? row[2].toString().split(',').map((s: string) => s.trim()).filter((s: string) => s !== '') : [];
+            const email = row[3] || '';
+            const phone = row[4] || '';
+            const address = row[5] || '';
+            const createdAt = row[6] || new Date().toISOString();
+            const updatedAt = row[7] || new Date().toISOString();
+
+            try {
+              await setDoc(doc(db, 'customers', id), {
+                name, factories, email, phone, address, createdAt, updatedAt
+              }, { merge: true });
+              syncedCustomersCount++;
+            } catch (err) {
+              handleFirestoreError(err, OperationType.WRITE, `customers/${id}`);
+            }
+          }
+          continue;
+        }
+
+        // Handle Inventory sheets
+        if (lowerSheetName.includes('quanlykho') || lowerSheetName.includes('kho')) {
+          const dataRows = rows.slice(headerIdx + 1);
+          for (const row of dataRows) {
+            if (!row || row.length < 2) continue;
+            const id = row[0]?.toString().trim();
+            const name = row[1]?.toString().trim();
+            if (!id || !name || id.toLowerCase().includes('mã vật tư') || id.toLowerCase().includes('id')) continue;
+
+            const sku = row[2] || '';
+            const category = row[3] || '';
+            const quantity = parseFloat(row[4]?.toString().replace(',', '.') || '0') || 0;
+            const unit = row[5] || '';
+            const minStock = parseFloat(row[6]?.toString().replace(',', '.') || '0') || 0;
+            const location = row[7] || '';
+            const price = parseFloat(row[8]?.toString().replace(',', '.') || '0') || 0;
+            const createdAt = row[9] || new Date().toISOString();
+
+            try {
+              await setDoc(doc(db, 'inventory', id), {
+                name, sku, category, quantity, unit, minStock, location, price, createdAt
+              }, { merge: true });
+              syncedInventoryCount++;
+            } catch (err) {
+              handleFirestoreError(err, OperationType.WRITE, `inventory/${id}`);
+            }
+          }
+          continue;
+        }
+
+        if (lowerSheetName.includes('cmms') || lowerSheetName.includes('dashboard') || lowerSheetName.includes('nhân sự') || lowerSheetName.includes('nhansu')) {
+          continue;
+        }
+
         // Determine equipment type
-        let eqType: 'Máy biến áp' | 'Tủ điện' | 'Động cơ' = 'Máy biến áp';
+        let eqType: 'Máy biến áp' | 'Tủ điện' | 'Động cơ' | 'Inverter' = 'Máy biến áp';
         if (lowerSheetName.includes('tủ điện') || lowerSheetName.includes('trung thế') || lowerSheetName.includes('hạ thế') || lowerSheetName.includes('switchgear') || lowerSheetName.includes('swg') || lowerSheetName.includes('mcc') || lowerSheetName.includes('tev') || lowerSheetName.includes('rmu')) {
           eqType = 'Tủ điện';
         } else if (lowerSheetName.includes('động cơ') || lowerSheetName.includes('motor') || lowerSheetName.includes('máy bơm') || lowerSheetName.includes('pump') || lowerSheetName.includes('fan') || lowerSheetName.includes('quạt')) {
           eqType = 'Động cơ';
         } else if (lowerSheetName.includes('biến áp') || lowerSheetName.includes('mba') || lowerSheetName.includes('transformer')) {
           eqType = 'Máy biến áp';
+        } else if (lowerSheetName.includes('inverter') || lowerSheetName.includes('biến tần') || lowerSheetName.includes('solar') || lowerSheetName.includes('wind')) {
+          eqType = 'Inverter';
         } else {
           const hasTransformerCols = getColumnIndex(header, ['Nhiệt độ dầu', 'DGA', 'Furan']) !== -1;
           const hasSwitchgearCols = getColumnIndex(header, ['TEV', 'Siêu âm', 'SF6']) !== -1;
           const hasMotorCols = getColumnIndex(header, ['Rung động', 'Stator', 'Bearing']) !== -1;
+          const hasInverterCols = getColumnIndex(header, ['MPPT', 'DC Input', 'AC Output', 'Hiệu suất']) !== -1;
+          const hasEqId = getColumnIndex(header, ['Mã thiết bị', 'Mã TB', 'Equipment ID']) !== -1;
+          
           if (hasMotorCols) eqType = 'Động cơ';
           else if (hasSwitchgearCols) eqType = 'Tủ điện';
-          else eqType = 'Máy biến áp';
+          else if (hasInverterCols) eqType = 'Inverter';
+          else if (hasTransformerCols) eqType = 'Máy biến áp';
+          else if (hasEqId) eqType = 'Máy biến áp';
+          else continue; // Skip sheet if no equipment indicators found
         }
 
         const dataRows = rows.slice(headerIdx + 1);
@@ -2577,7 +3912,16 @@ export default function App() {
             dga: getColumnIndex(header, ['Phân tích khí hòa tan', 'DGA', 'Khí hòa tan']),
             dielectricStrength: getColumnIndex(header, ['Độ bền điện môi', 'Dielectric Strength']),
             furan: getColumnIndex(header, ['Hàm lượng Furan', 'Furan']),
-            oilMoisture: getColumnIndex(header, ['Độ ẩm trong dầu', 'Oil Moisture', 'Độ ẩm dầu'])
+            oilMoisture: getColumnIndex(header, ['Độ ẩm trong dầu', 'Oil Moisture', 'Độ ẩm dầu']),
+            h2: getColumnIndex(header, ['H2']),
+            o2: getColumnIndex(header, ['O2']),
+            n2: getColumnIndex(header, ['N2']),
+            ch4: getColumnIndex(header, ['CH4']),
+            co: getColumnIndex(header, ['CO']),
+            co2: getColumnIndex(header, ['CO2']),
+            c2h4: getColumnIndex(header, ['C2H4']),
+            c2h6: getColumnIndex(header, ['C2H6']),
+            c2h2: getColumnIndex(header, ['C2H2'])
           };
 
           dataRows.forEach((row: any[]) => {
@@ -2604,7 +3948,16 @@ export default function App() {
               { key: 'dga', val: mIdx.dga !== -1 ? row[mIdx.dga] : '' },
               { key: 'dielectricStrength', val: mIdx.dielectricStrength !== -1 ? row[mIdx.dielectricStrength] : '' },
               { key: 'furan', val: mIdx.furan !== -1 ? row[mIdx.furan] : '' },
-              { key: 'oilMoisture', val: mIdx.oilMoisture !== -1 ? row[mIdx.oilMoisture] : '' }
+              { key: 'oilMoisture', val: mIdx.oilMoisture !== -1 ? row[mIdx.oilMoisture] : '' },
+              { key: 'h2', val: mIdx.h2 !== -1 ? row[mIdx.h2] : '' },
+              { key: 'o2', val: mIdx.o2 !== -1 ? row[mIdx.o2] : '' },
+              { key: 'n2', val: mIdx.n2 !== -1 ? row[mIdx.n2] : '' },
+              { key: 'ch4', val: mIdx.ch4 !== -1 ? row[mIdx.ch4] : '' },
+              { key: 'co', val: mIdx.co !== -1 ? row[mIdx.co] : '' },
+              { key: 'co2', val: mIdx.co2 !== -1 ? row[mIdx.co2] : '' },
+              { key: 'c2h4', val: mIdx.c2h4 !== -1 ? row[mIdx.c2h4] : '' },
+              { key: 'c2h6', val: mIdx.c2h6 !== -1 ? row[mIdx.c2h6] : '' },
+              { key: 'c2h2', val: mIdx.c2h2 !== -1 ? row[mIdx.c2h2] : '' }
             ];
             paramsToCheck.forEach(p => {
               const status = evaluateEquipmentParam('Máy biến áp', p.key, p.val);
@@ -2644,11 +3997,15 @@ export default function App() {
               customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
               factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
               location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
               id, name, type: 'Máy biến áp', health: healthVal, status: statusVal,
               measurements: {
                 oilTemp: paramsToCheck[0].val, windingTemp: paramsToCheck[1].val, irHighLow: paramsToCheck[2].val,
                 irHighEarth: paramsToCheck[3].val, oilLeak: paramsToCheck[4].val, dga: paramsToCheck[5].val,
                 dielectricStrength: paramsToCheck[6].val, furan: paramsToCheck[7].val, oilMoisture: paramsToCheck[8].val,
+                h2: paramsToCheck[9].val, o2: paramsToCheck[10].val, n2: paramsToCheck[11].val,
+                ch4: paramsToCheck[12].val, co: paramsToCheck[13].val, co2: paramsToCheck[14].val,
+                c2h4: paramsToCheck[15].val, c2h6: paramsToCheck[16].val, c2h2: paramsToCheck[17].val,
                 age: age.toString(), dutyFactor: dutyFactor.toString()
               },
               rawData: [...row]
@@ -2737,6 +4094,7 @@ export default function App() {
               customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
               factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
               location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
               id, name, type: 'Tủ điện', health: healthVal, status: statusVal,
               measurements: {
                 thermography: paramsToCheck[0].val, contactRes: paramsToCheck[1].val, tev: paramsToCheck[2].val,
@@ -2873,6 +4231,7 @@ export default function App() {
               customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
               factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
               location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
               id, name, type: 'Động cơ', health: healthVal, status: statusVal,
               measurements: {
                 vibration: singleParams[0].val, statorTemp: singleParams[1].val, bearingTemp: singleParams[2].val,
@@ -2901,8 +4260,86 @@ export default function App() {
               rawData: [...row]
             });
           });
+        } else if (eqType === 'Inverter') {
+          const mIdx = {
+            dcInputVoltage: getColumnIndex(header, ['Điện áp DC', 'DC Input Voltage', 'Voc max']),
+            mpptVoltageRange: getColumnIndex(header, ['Dải MPPT', 'MPPT Voltage Range']),
+            dcInputCurrent: getColumnIndex(header, ['Dòng điện DC', 'DC Input Current', 'Isc']),
+            acOutputVoltage: getColumnIndex(header, ['Điện áp AC', 'AC Output Voltage']),
+            acFrequency: getColumnIndex(header, ['Tần số AC', 'AC Frequency']),
+            harmonicDistortion: getColumnIndex(header, ['Độ méo hài', 'Harmonic Distortion', 'THD']),
+            maxEfficiency: getColumnIndex(header, ['Hiệu suất tối đa', 'Max Efficiency']),
+            euroEfficiency: getColumnIndex(header, ['Hiệu suất Châu Âu', 'Euro Efficiency']),
+            antiIslanding: getColumnIndex(header, ['Chống hòa lưới', 'Anti-islanding']),
+            rcdIsolation: getColumnIndex(header, ['Dòng rò & Cách ly', 'RCD & Isolation']),
+            dielectricVoltage: getColumnIndex(header, ['Điện áp chịu đựng', 'Dielectric Voltage']),
+            physicalDisconnects: getColumnIndex(header, ['Cách ly vật lý', 'Physical Disconnects']),
+            operatingTemp: getColumnIndex(header, ['Nhiệt độ vận hành', 'Operating Temp']),
+            airFilters: getColumnIndex(header, ['Bộ lọc khí', 'Air Filters'])
+          };
+
+          dataRows.forEach((row: any[]) => {
+            if (!row || row.length === 0) return;
+            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
+            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
+            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
+
+            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
+            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
+            
+            let hasCritical = false;
+            let hasWarning = false;
+
+            const measurements: any = {};
+            Object.entries(mIdx).forEach(([key, colIdx]) => {
+              if (colIdx !== -1) {
+                const val = row[colIdx];
+                measurements[key] = val;
+                const status = evaluateEquipmentParam('Inverter', key, val);
+                if (status === 'critical') hasCritical = true;
+                if (status === 'warning') hasWarning = true;
+              }
+            });
+
+            let calcHealth = 100;
+            if (hasCritical) {
+              statusVal = 'critical';
+              calcHealth = 55;
+            } else if (hasWarning) {
+              statusVal = 'warning';
+              calcHealth = 75;
+            } else {
+              statusVal = 'healthy';
+              calcHealth = 95;
+            }
+
+            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
+
+            const eqData = {
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
+              id, name, type: 'Inverter', health: healthVal, status: statusVal,
+              measurements,
+              rawData: [...row]
+            };
+            newEquipmentList.push(eqData);
+            newReportsList.push({
+              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
+              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
+              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
+              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
+              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
+              type: 'Inverter', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
+              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
+              rawData: [...row]
+            });
+          });
         }
-      });
+      }
 
 
       if (newEquipmentList.length > 0) {
@@ -2957,34 +4394,24 @@ export default function App() {
         setTimeout(() => setSyncSuccess(false), 3000);
         
         alert('Đã tải dữ liệu từ Sheets thành công! Toàn bộ dữ liệu đã được đồng bộ.');
+      } else if (syncedCustomersCount > 0 || syncedInventoryCount > 0) {
+        let msg = '';
+        if (syncedCustomersCount > 0) msg += `Đã đồng bộ ${syncedCustomersCount} khách hàng. `;
+        if (syncedInventoryCount > 0) msg += `Đã đồng bộ ${syncedInventoryCount} vật tư kho. `;
+        alert(msg.trim());
       } else {
-        alert('Không tìm thấy dữ liệu thiết bị hợp lệ trong Google Sheets.');
+        alert('Không tìm thấy dữ liệu thiết bị, khách hàng hoặc kho hợp lệ trong Google Sheets.');
       }
     } catch (error: any) {
       console.error('Fetch error:', error);
-      alert('Lỗi khi tải dữ liệu từ Sheets: ' + error.message);
+      const errorMessage = error.message === 'Failed to fetch' 
+        ? 'Không thể kết nối với máy chủ. Vui lòng kiểm tra kết nối mạng hoặc thử lại sau vài giây.' 
+        : error.message;
+      alert('Lỗi khi tải dữ liệu từ Sheets: ' + errorMessage);
     } finally {
       setIsSyncing(false);
     }
   };
-
-  // Check auth status on mount
-  useEffect(() => {
-    const checkAuthStatus = async () => {
-      try {
-        const response = await fetch('/api/auth/status', {
-          headers: getAuthHeaders(false)
-        });
-        const data = await response.json();
-        if (data.isAuthenticated) {
-          setIsGoogleConnected(true);
-        }
-      } catch (error) {
-        console.error('Failed to check auth status:', error);
-      }
-    };
-    checkAuthStatus();
-  }, []);
 
   // Auto fetch when connected
   useEffect(() => {
@@ -3077,6 +4504,15 @@ export default function App() {
           formData.dielectricStrength || '',
           formData.furan || '',
           formData.oilMoisture || '',
+          formData.h2 || '',
+          formData.o2 || '',
+          formData.n2 || '',
+          formData.ch4 || '',
+          formData.co || '',
+          formData.co2 || '',
+          formData.c2h4 || '',
+          formData.c2h6 || '',
+          formData.c2h2 || '',
           formData.age || '',
           formData.dutyFactor || '',
           attachmentLinks
@@ -3113,6 +4549,26 @@ export default function App() {
           attachmentLinks
         ];
         range = 'Động cơ!A:Z';
+      } else if (selectedEqType === 'Inverter') {
+        values = [
+          ...baseData,
+          formData.dcInputVoltage || '',
+          formData.mpptVoltageRange || '',
+          formData.dcInputCurrent || '',
+          formData.acOutputVoltage || '',
+          formData.acFrequency || '',
+          formData.harmonicDistortion || '',
+          formData.maxEfficiency || '',
+          formData.euroEfficiency || '',
+          formData.antiIslanding || '',
+          formData.rcdIsolation || '',
+          formData.dielectricVoltage || '',
+          formData.physicalDisconnects || '',
+          formData.operatingTemp || '',
+          formData.airFilters || '',
+          attachmentLinks
+        ];
+        range = 'Inverter!A:Z';
       }
 
       const response = await fetch('/api/sheets/append', {
@@ -3637,6 +5093,70 @@ export default function App() {
           />
         </div>
       </div>
+
+      {/* Chi tiết khí hòa tan (DGA) */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Activity size={16} className="text-blue-500" />
+          Chi tiết khí hòa tan (DGA)
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <ParamInput 
+            title="H2" unit="ppm" standard="< 100" prevValue="15" prevTrend="stable"
+            value={formData.h2} onChange={(val: any) => setFormData({...formData, h2: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('H2'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="CH4" unit="ppm" standard="< 120" prevValue="20" prevTrend="stable"
+            value={formData.ch4} onChange={(val: any) => setFormData({...formData, ch4: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('CH4'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="C2H6" unit="ppm" standard="< 65" prevValue="10" prevTrend="stable"
+            value={formData.c2h6} onChange={(val: any) => setFormData({...formData, c2h6: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('C2H6'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="C2H4" unit="ppm" standard="< 50" prevValue="5" prevTrend="stable"
+            value={formData.c2h4} onChange={(val: any) => setFormData({...formData, c2h4: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('C2H4'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="C2H2" unit="ppm" standard="< 1" prevValue="0" prevTrend="stable"
+            value={formData.c2h2} onChange={(val: any) => setFormData({...formData, c2h2: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('C2H2'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="CO" unit="ppm" standard="< 350" prevValue="150" prevTrend="stable"
+            value={formData.co} onChange={(val: any) => setFormData({...formData, co: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('CO'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="CO2" unit="ppm" standard="< 2500" prevValue="1200" prevTrend="stable"
+            value={formData.co2} onChange={(val: any) => setFormData({...formData, co2: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('CO2'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="O2" unit="ppm" standard="" prevValue="500" prevTrend="stable"
+            value={formData.o2} onChange={(val: any) => setFormData({...formData, o2: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('O2'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="N2" unit="ppm" standard="" prevValue="45000" prevTrend="stable"
+            value={formData.n2} onChange={(val: any) => setFormData({...formData, n2: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('N2'); setShowHistoryModal(true); }}
+          />
+        </div>
+      </div>
     </>
   );
 
@@ -3775,6 +5295,166 @@ export default function App() {
               B: evaluateParam('Động cơ', 'elcid', formData.elcid?.B)
             }}
           />
+        </div>
+      </div>
+    </>
+  );
+
+  const renderInverterParams = () => (
+    <>
+      {/* Thông số điện cơ bản */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Zap size={16} className="text-blue-500" />
+          Thông số điện cơ bản (DC & AC)
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ParamInput 
+            title="Điện áp DC đầu vào (Voc max)" unit="V" standard="< Umax Inverter" prevValue="600V" prevTrend="stable"
+            value={formData.dcInputVoltage} onChange={(val: any) => setFormData({...formData, dcInputVoltage: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Điện áp DC đầu vào'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Dải điện áp MPPT" unit="V" standard="UMPPTmin ≤ V ≤ UMPPTmax" prevValue="450V" prevTrend="stable"
+            value={formData.mpptVoltageRange} onChange={(val: any) => setFormData({...formData, mpptVoltageRange: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Dải điện áp MPPT'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Dòng điện DC đầu vào (Isc)" unit="A" standard="≤ Imax Inverter" prevValue="15A" prevTrend="stable"
+            value={formData.dcInputCurrent} onChange={(val: any) => setFormData({...formData, dcInputCurrent: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Dòng điện DC đầu vào'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Điện áp đầu ra AC" unit="V" standard="230/400V (+6%/-10%)" prevValue="230V" prevTrend="stable"
+            value={formData.acOutputVoltage} onChange={(val: any) => setFormData({...formData, acOutputVoltage: val})}
+            evalStatus={evaluateParam('Inverter', 'acOutputVoltage', formData.acOutputVoltage)}
+            onHistoryClick={() => { setSelectedParamHistory('Điện áp đầu ra AC'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Tần số AC" unit="Hz" standard="50Hz (±0.3 Hz)" prevValue="50Hz" prevTrend="stable"
+            value={formData.acFrequency} onChange={(val: any) => setFormData({...formData, acFrequency: val})}
+            evalStatus={evaluateParam('Inverter', 'acFrequency', formData.acFrequency)}
+            onHistoryClick={() => { setSelectedParamHistory('Tần số AC'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Độ méo hài (THD)" unit="%" standard="< 3%" prevValue="1.2%" prevTrend="stable"
+            value={formData.harmonicDistortion} onChange={(val: any) => setFormData({...formData, harmonicDistortion: val})}
+            evalStatus={evaluateParam('Inverter', 'harmonicDistortion', formData.harmonicDistortion)}
+            onHistoryClick={() => { setSelectedParamHistory('Độ méo hài'); setShowHistoryModal(true); }}
+          />
+        </div>
+      </div>
+
+      {/* Thông số Hiệu suất */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Activity size={16} className="text-emerald-500" />
+          Thông số Hiệu suất
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ParamInput 
+            title="Hiệu suất tối đa (Max Efficiency)" unit="%" standard="95% - 97.5%" prevValue="97.2%" prevTrend="stable"
+            value={formData.maxEfficiency} onChange={(val: any) => setFormData({...formData, maxEfficiency: val})}
+            evalStatus={evaluateParam('Inverter', 'maxEfficiency', formData.maxEfficiency)}
+            onHistoryClick={() => { setSelectedParamHistory('Hiệu suất tối đa'); setShowHistoryModal(true); }}
+          />
+          <ParamInput 
+            title="Hiệu suất Châu Âu (Euro Efficiency)" unit="%" standard="94% - 96%" prevValue="95.5%" prevTrend="stable"
+            value={formData.euroEfficiency} onChange={(val: any) => setFormData({...formData, euroEfficiency: val})}
+            evalStatus={evaluateParam('Inverter', 'euroEfficiency', formData.euroEfficiency)}
+            onHistoryClick={() => { setSelectedParamHistory('Hiệu suất Châu Âu'); setShowHistoryModal(true); }}
+          />
+        </div>
+      </div>
+
+      {/* Bảo vệ An toàn */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <ShieldCheck size={16} className="text-rose-500" />
+          Bảo vệ An toàn & Tiêu chuẩn
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="p-3 border border-slate-200 rounded-lg bg-slate-50">
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Chống hòa lưới (Anti-islanding)</label>
+            <select 
+              value={formData.antiIslanding} 
+              onChange={(e) => setFormData({...formData, antiIslanding: e.target.value})}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                evaluateParam('Inverter', 'antiIslanding', formData.antiIslanding) === 'Bình thường' ? 'border-emerald-200 focus:ring-emerald-500' : 'border-rose-200 focus:ring-rose-500'
+              }`}
+            >
+              <option value="">-- Chọn trạng thái --</option>
+              <option value="Đạt">Đạt (Ngắt &lt; 0.1s)</option>
+              <option value="Không đạt">Không đạt</option>
+            </select>
+          </div>
+          <div className="p-3 border border-slate-200 rounded-lg bg-slate-50">
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Dòng rò & Cách ly (RCD Type B)</label>
+            <select 
+              value={formData.rcdIsolation} 
+              onChange={(e) => setFormData({...formData, rcdIsolation: e.target.value})}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                evaluateParam('Inverter', 'rcdIsolation', formData.rcdIsolation) === 'Bình thường' ? 'border-emerald-200 focus:ring-emerald-500' : 'border-rose-200 focus:ring-rose-500'
+              }`}
+            >
+              <option value="">-- Chọn trạng thái --</option>
+              <option value="Đạt">Đạt tiêu chuẩn IEC 60364</option>
+              <option value="Không đạt">Không đạt</option>
+            </select>
+          </div>
+          <div className="p-3 border border-slate-200 rounded-lg bg-slate-50">
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Cách ly vật lý (Disconnects)</label>
+            <select 
+              value={formData.physicalDisconnects} 
+              onChange={(e) => setFormData({...formData, physicalDisconnects: e.target.value})}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                evaluateParam('Inverter', 'physicalDisconnects', formData.physicalDisconnects) === 'Bình thường' ? 'border-emerald-200 focus:ring-emerald-500' : 'border-rose-200 focus:ring-rose-500'
+              }`}
+            >
+              <option value="">-- Chọn trạng thái --</option>
+              <option value="Đạt">Đạt (Có khóa OFF)</option>
+              <option value="Không đạt">Không đạt</option>
+            </select>
+          </div>
+          <ParamInput 
+            title="Điện áp chịu đựng (Dielectric)" unit="kV" standard="DC: 2.5-8kV, AC: 4kV" prevValue="4kV" prevTrend="stable"
+            value={formData.dielectricVoltage} onChange={(val: any) => setFormData({...formData, dielectricVoltage: val})}
+            evalStatus={null}
+            onHistoryClick={() => { setSelectedParamHistory('Điện áp chịu đựng'); setShowHistoryModal(true); }}
+          />
+        </div>
+      </div>
+
+      {/* Môi trường & Vật lý */}
+      <div>
+        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Thermometer size={16} className="text-amber-500" />
+          Yêu cầu Vật lý & Môi trường
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ParamInput 
+            title="Nhiệt độ vận hành" unit="°C" standard="≤ 40 °C" prevValue="35 °C" prevTrend="stable"
+            value={formData.operatingTemp} onChange={(val: any) => setFormData({...formData, operatingTemp: val})}
+            evalStatus={evaluateParam('Inverter', 'operatingTemp', formData.operatingTemp)}
+            onHistoryClick={() => { setSelectedParamHistory('Nhiệt độ vận hành'); setShowHistoryModal(true); }}
+          />
+          <div className="p-3 border border-slate-200 rounded-lg bg-slate-50">
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Bộ lọc khí (Air Filters)</label>
+            <select 
+              value={formData.airFilters} 
+              onChange={(e) => setFormData({...formData, airFilters: e.target.value})}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                evaluateParam('Inverter', 'airFilters', formData.airFilters) === 'Bình thường' ? 'border-emerald-200 focus:ring-emerald-500' : 'border-amber-200 focus:ring-amber-500'
+              }`}
+            >
+              <option value="">-- Chọn trạng thái --</option>
+              <option value="Sạch">Sạch / Thông thoáng</option>
+              <option value="Bẩn">Bẩn / Cần vệ sinh</option>
+            </select>
+          </div>
         </div>
       </div>
     </>
@@ -3987,6 +5667,34 @@ export default function App() {
             <Activity size={18} />
             Phân tích chuyên sâu
           </button>
+          <button 
+            onClick={() => handleTabChange('cmms')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'cmms' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+          >
+            <ClipboardList size={18} />
+            Quản lý CMMS
+          </button>
+          <button 
+            onClick={() => handleTabChange('pm-schedule')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'pm-schedule' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Calendar size={18} />
+            Lịch bảo trì PM
+          </button>
+          <button 
+            onClick={() => handleTabChange('customers')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'customers' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+          >
+            <User size={18} />
+            Quản lý Khách hàng
+          </button>
+          <button 
+            onClick={() => handleTabChange('inventory')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'inventory' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Package size={18} />
+            Quản lý Kho
+          </button>
         </nav>
 
         <div className="p-4 border-t border-slate-800 space-y-1">
@@ -4170,6 +5878,17 @@ export default function App() {
                   </div>
                   
                   <div className="mt-4">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Số Work Permit (WP)</label>
+                    <input 
+                      type="text" 
+                      value={wpNumber}
+                      onChange={(e) => setWpNumber(e.target.value)}
+                      placeholder="VD: WP-2026-001"
+                      className="w-full px-4 py-2.5 bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 rounded-lg text-base outline-none font-medium text-slate-900"
+                    />
+                  </div>
+                  
+                  <div className="mt-4">
                     <label className="block text-sm font-medium text-slate-700 mb-1">Loại thiết bị</label>
                     <select 
                       value={selectedEqType}
@@ -4179,6 +5898,7 @@ export default function App() {
                       <option value="Máy biến áp">Máy biến áp</option>
                       <option value="Động cơ">Động cơ điện</option>
                       <option value="Tủ điện trung thế">Tủ điện trung thế (Switchgear)</option>
+                      <option value="Inverter">Inverter Solar/Wind</option>
                     </select>
                   </div>
                   
@@ -4202,13 +5922,16 @@ export default function App() {
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-slate-700 mb-1">Khách hàng</label>
-                          <input 
-                            type="text" 
+                          <select 
                             value={customerName}
                             onChange={(e) => setCustomerName(e.target.value)}
-                            placeholder="VD: Công ty Điện lực A"
                             className="w-full px-3 py-2 bg-white border border-slate-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-200 rounded-md text-sm outline-none"
-                          />
+                          >
+                            <option value="">-- Chọn khách hàng --</option>
+                            {customers.map(c => (
+                              <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                          </select>
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-slate-700 mb-1">Nhà máy / Site</label>
@@ -4317,6 +6040,7 @@ export default function App() {
                   {selectedEqType === 'Máy biến áp' && renderTransformerParams()}
                   {selectedEqType === 'Động cơ' && renderMotorParams()}
                   {selectedEqType === 'Tủ điện' && renderSwitchgearParams()}
+                  {selectedEqType === 'Inverter' && renderInverterParams()}
 
                   {/* Real-time Health Index Display */}
                   <div className="mt-8 p-5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -4515,9 +6239,143 @@ export default function App() {
                 </div>
               </div>
 
+              {/* RELIABILITY KPIs */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTBF</p>
+                    <TrendingUp size={14} className="text-emerald-400" />
+                  </div>
+                  <div className="mt-1">
+                    <p className="text-xl font-bold">{reliabilityKpis.mtbf.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian giữa các sự cố</p>
+                  </div>
+                </div>
+                
+                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTTR</p>
+                    <TrendingDown size={14} className="text-emerald-400" />
+                  </div>
+                  <div className="mt-1">
+                    <p className="text-xl font-bold">{reliabilityKpis.mttr} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian sửa chữa TB</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTTF</p>
+                    <Activity size={14} className="text-blue-400" />
+                  </div>
+                  <div className="mt-1">
+                    <p className="text-xl font-bold">{reliabilityKpis.mttf.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian đến khi hỏng</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MWT</p>
+                    <Clock size={14} className="text-amber-400" />
+                  </div>
+                  <div className="mt-1">
+                    <p className="text-xl font-bold">{reliabilityKpis.mwt} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian chờ bảo trì</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Downtime</p>
+                    <AlertTriangle size={14} className="text-rose-400" />
+                  </div>
+                  <div className="mt-1">
+                    <p className="text-xl font-bold">{reliabilityKpis.totalBreakdownTime.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">Tổng thời gian dừng máy</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Cost</p>
+                    <Zap size={14} className="text-emerald-400" />
+                  </div>
+                  <div className="mt-1">
+                    <p className="text-xl font-bold">${reliabilityKpis.totalCost.toLocaleString()}</p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">Chi phí bảo trì tổng cộng</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
+                      <ClipboardList size={20} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Backlog</p>
+                      <p className="text-lg font-bold text-slate-900">{reliabilityKpis.backlog} phiếu</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] text-slate-400">Công việc tồn đọng</p>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                      <CheckCircle size={20} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Compliance</p>
+                      <p className="text-lg font-bold text-slate-900">{reliabilityKpis.compliance}%</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] text-slate-400">Tuân thủ kế hoạch</p>
+                  </div>
+                </div>
+              </div>
+
               {/* MIDDLE SECTION: MAP & RISK LIST */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
+                {/* Maintenance Strategy Chart */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <BarChart2 size={18} className="text-blue-500" />
+                      Chiến lược bảo trì
+                    </h3>
+                  </div>
+                  <div className="p-4 h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={reliabilityKpis.typeDist}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {reliabilityKpis.typeDist.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend verticalAlign="bottom" height={36}/>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="mt-2 text-center">
+                      <p className="text-xs text-slate-500 italic">* Phân bổ giữa Bảo trì phòng ngừa và Bảo trì khắc phục</p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* GEOGRAPHICAL MAP */}
                 <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
                   <div className="p-5 border-b border-slate-100 flex items-center justify-between z-10 bg-white">
@@ -4749,6 +6607,10 @@ export default function App() {
                           <Line type="monotone" dataKey="c2h6" name="C2H6 (ppm)" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                           <Line type="monotone" dataKey="c2h4" name="C2H4 (ppm)" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                           <Line type="monotone" dataKey="c2h2" name="C2H2 (ppm)" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                          <Line type="monotone" dataKey="co" name="CO (ppm)" stroke="#64748b" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                          <Line type="monotone" dataKey="co2" name="CO2 (ppm)" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                          <Line type="monotone" dataKey="o2" name="O2 (ppm)" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                          <Line type="monotone" dataKey="n2" name="N2 (ppm)" stroke="#94a3b8" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                         </LineChart>
                       ) : trendingChartType === 'ir' ? (
                         <AreaChart data={dynamicTrendData.ir} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
@@ -5072,15 +6934,40 @@ export default function App() {
                           </td>
                           <td className="p-4 text-slate-600">{eq.type}</td>
                           <td className="p-4">
+                            <span className={`px-2 py-1 rounded-md text-xs font-bold ${
+                              eq.criticality === 'A' ? 'bg-rose-100 text-rose-700 border border-rose-200' :
+                              eq.criticality === 'B' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                              'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}>
+                              {eq.criticality || 'B'}
+                            </span>
+                          </td>
+                          <td className="p-4">
                             <StatusBadge status={eq.status} />
                           </td>
                           <td className="p-4">
                             <HealthBar value={eq.health} status={eq.status} />
                           </td>
                           <td className="p-4 text-right">
-                            <button className="p-1 text-slate-400 hover:text-blue-600 transition-colors rounded">
-                              <MoreVertical size={18} />
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button 
+                                onClick={() => handleViewEquipmentProfile(eq)}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                                title="Xem chi tiết"
+                              >
+                                <Eye size={18} />
+                              </button>
+                              <button 
+                                onClick={() => { setSelectedEqForQR(eq); setShowQRModal(true); }}
+                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors" 
+                                title="Tạo mã QR"
+                              >
+                                <QrCode size={18} />
+                              </button>
+                              <button className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition-colors">
+                                <MoreVertical size={18} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -5116,10 +7003,29 @@ export default function App() {
             <div className="max-w-7xl mx-auto space-y-6">
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px] lg:h-[calc(100vh-8rem)]">
                 <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                    <Server className="text-blue-500" size={20} />
-                    Quản lý Thiết bị
-                  </h2>
+                  <div className="flex flex-col gap-1">
+                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <Server className="text-blue-500" size={20} />
+                      Quản lý Thiết bị
+                    </h2>
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <span>Hệ thống</span>
+                      <ChevronRight size={12} />
+                      <span className={selectedCustomer === 'all' ? 'text-blue-500 font-medium' : ''}>Tất cả khách hàng</span>
+                      {selectedCustomer !== 'all' && (
+                        <>
+                          <ChevronRight size={12} />
+                          <span className={selectedFactory === 'all' ? 'text-blue-500 font-medium' : ''}>{selectedCustomer}</span>
+                        </>
+                      )}
+                      {selectedFactory !== 'all' && (
+                        <>
+                          <ChevronRight size={12} />
+                          <span className="text-blue-500 font-medium">{dynamicSiteData.find(s => s.id === selectedFactory)?.name}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
                   <div className="flex items-center gap-3">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -5166,6 +7072,7 @@ export default function App() {
                     <option value="Động cơ">Động cơ điện</option>
                     <option value="Máy phát">Máy phát điện</option>
                     <option value="Tủ điện">Tủ điện</option>
+                    <option value="Inverter">Inverter Solar/Wind</option>
                   </select>
                   <select 
                     className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
@@ -5188,6 +7095,7 @@ export default function App() {
                         <th className="p-4">Tên thiết bị</th>
                         <th className="p-4">Nhà máy / Vị trí</th>
                         <th className="p-4">Loại</th>
+                        <th className="p-4">Criticality</th>
                         <th className="p-4">Trạng thái</th>
                         <th className="p-4 w-48">Chỉ số sức khỏe</th>
                         <th className="p-4">Kiểm tra lần cuối</th>
@@ -5204,6 +7112,15 @@ export default function App() {
                             <div className="text-xs text-slate-500">{eq.location}</div>
                           </td>
                           <td className="p-4 text-slate-600">{eq.type}</td>
+                          <td className="p-4">
+                            <span className={`px-2 py-1 rounded-md text-xs font-bold ${
+                              eq.criticality === 'A' ? 'bg-rose-100 text-rose-700 border border-rose-200' :
+                              eq.criticality === 'B' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                              'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}>
+                              {eq.criticality || 'B'}
+                            </span>
+                          </td>
                           <td className="p-4">
                             <StatusBadge status={eq.status} />
                           </td>
@@ -5249,10 +7166,17 @@ export default function App() {
                                 <FileText size={16} />
                               </button>
                               <button 
-                                onClick={() => setShowEquipmentProfile(true)}
+                                onClick={() => handleViewEquipmentProfile(eq)}
                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Hồ sơ thiết bị"
                               >
                                 <History size={16} />
+                              </button>
+                              <button 
+                                onClick={() => { setSelectedEqForQR(eq); setShowQRModal(true); }}
+                                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors" 
+                                title="Tạo mã QR"
+                              >
+                                <QrCode size={16} />
                               </button>
                               <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Chỉnh sửa">
                                 <Settings size={16} />
@@ -5368,6 +7292,7 @@ export default function App() {
                     <option value="Máy biến áp">Máy biến áp</option>
                     <option value="Động cơ">Động cơ điện</option>
                     <option value="Tủ điện">Tủ điện</option>
+                    <option value="Inverter">Inverter Solar/Wind</option>
                   </select>
                   <select 
                     value={reportFilterStatus}
@@ -5506,12 +7431,36 @@ export default function App() {
           {activeTab === 'deep-analysis' && (
             <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
               <div className="max-w-5xl mx-auto space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Phân tích chuyên sâu</h2>
-                    <p className="text-slate-500 mt-1">Phân tích tình trạng máy biến áp dựa trên dữ liệu DGA</p>
+                    <p className="text-slate-500 mt-1">
+                      {deepAnalysisSubTab === 'dga' && 'Phân tích tình trạng máy biến áp dựa trên dữ liệu DGA'}
+                      {deepAnalysisSubTab === 'pv-cell' && 'Phân tích tình trạng tấm pin năng lượng mặt trời (PV Cell)'}
+                      {deepAnalysisSubTab === 'wind-turbine' && 'Phân tích tình trạng cánh quạt điện gió (Wind Turbine Blade)'}
+                    </p>
                   </div>
-                  {dgaAnalysisResult && (
+                  <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+                    <button 
+                      onClick={() => setDeepAnalysisSubTab('dga')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${deepAnalysisSubTab === 'dga' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      DGA MBA
+                    </button>
+                    <button 
+                      onClick={() => setDeepAnalysisSubTab('pv-cell')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${deepAnalysisSubTab === 'pv-cell' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      PV Cell
+                    </button>
+                    <button 
+                      onClick={() => setDeepAnalysisSubTab('wind-turbine')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${deepAnalysisSubTab === 'wind-turbine' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      Wind Blade
+                    </button>
+                  </div>
+                  {deepAnalysisSubTab === 'dga' && dgaAnalysisResult && (
                     <button 
                       onClick={exportToPDF}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
@@ -5522,7 +7471,8 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {deepAnalysisSubTab === 'dga' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Input Form */}
                   <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
                     <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -5829,9 +7779,875 @@ export default function App() {
                     )}
                   </div>
                 </div>
+              )}
+
+                {deepAnalysisSubTab === 'pv-cell' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                      <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Sun size={20} className="text-amber-500" />
+                        Thông số vận hành
+                      </h3>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Nhiệt độ tấm pin (°C)</label>
+                          <input type="number" value={pvCellData.temp} onChange={(e) => setPvCellData({...pvCellData, temp: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Cường độ bức xạ (W/m²)</label>
+                          <input type="number" value={pvCellData.irradiance} onChange={(e) => setPvCellData({...pvCellData, irradiance: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Điện áp hở mạch Voc (V)</label>
+                          <input type="number" value={pvCellData.voc} onChange={(e) => setPvCellData({...pvCellData, voc: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Dòng ngắn mạch Isc (A)</label>
+                          <input type="number" value={pvCellData.isc} onChange={(e) => setPvCellData({...pvCellData, isc: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Hiệu suất hiện tại (%)</label>
+                          <input type="number" value={pvCellData.efficiency} onChange={(e) => setPvCellData({...pvCellData, efficiency: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
+                        </div>
+                        <button 
+                          onClick={analyzePVCell}
+                          className="w-full mt-6 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
+                        >
+                          Phân tích hệ thống
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="lg:col-span-2 space-y-6">
+                      {pvAnalysisResult ? (
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                          <div className="flex justify-between items-start mb-8 border-b border-slate-100 pb-6">
+                            <div>
+                              <h3 className="text-xl font-bold text-slate-900">Kết quả phân tích PV Cell</h3>
+                              <p className="text-slate-500 mt-1">Thời gian: {pvAnalysisResult.timestamp}</p>
+                            </div>
+                            <div className={`px-4 py-2 rounded-full font-bold text-sm ${pvAnalysisResult.bgColor} ${pvAnalysisResult.color}`}>
+                              {pvAnalysisResult.condition}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
+                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Chỉ số hiệu suất</h4>
+                              <div className="flex items-end gap-2">
+                                <span className="text-4xl font-bold text-slate-900">{pvCellData.efficiency}%</span>
+                                <span className="text-slate-500 mb-1">/ 20% (Lý tưởng)</span>
+                              </div>
+                            </div>
+                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
+                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Nhiệt độ vận hành</h4>
+                              <div className="flex items-end gap-2">
+                                <span className={`text-4xl font-bold ${parseFloat(pvCellData.temp) > 55 ? 'text-rose-600' : 'text-slate-900'}`}>{pvCellData.temp}°C</span>
+                                <span className="text-slate-500 mb-1">/ 25°C (STC)</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                              <CheckCircle size={20} className="text-blue-500" />
+                              Khuyến cáo kỹ thuật
+                            </h4>
+                            <ul className="space-y-3">
+                              {pvAnalysisResult.recommendations.map((rec: string, idx: number) => (
+                                <li key={idx} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                                  <div className={`mt-1 w-2 h-2 rounded-full ${pvAnalysisResult.bgColor.replace('bg-', 'bg-').replace('50', '500')}`} />
+                                  <span className="text-slate-700">{rec}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 flex flex-col items-center justify-center text-center h-full min-h-[400px]">
+                          <Sun size={48} className="text-slate-200 mb-4" />
+                          <h3 className="text-xl font-bold text-slate-800 mb-2">Sẵn sàng phân tích PV Cell</h3>
+                          <p className="text-slate-500 max-w-md">
+                            Nhập các thông số vận hành của chuỗi pin mặt trời để đánh giá hiệu suất và phát hiện sớm các lỗi vật lý.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {deepAnalysisSubTab === 'wind-turbine' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                      <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Wind size={20} className="text-blue-500" />
+                        Dữ liệu cảm biến
+                      </h3>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Độ rung cánh (mm/s)</label>
+                          <input type="number" value={windBladeData.vibration} onChange={(e) => setWindBladeData({...windBladeData, vibration: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Phát xạ âm thanh (dB)</label>
+                          <input type="number" value={windBladeData.acoustic} onChange={(e) => setWindBladeData({...windBladeData, acoustic: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Tốc độ quay (RPM)</label>
+                          <input type="number" value={windBladeData.rotationSpeed} onChange={(e) => setWindBladeData({...windBladeData, rotationSpeed: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Tốc độ gió (m/s)</label>
+                          <input type="number" value={windBladeData.windSpeed} onChange={(e) => setWindBladeData({...windBladeData, windSpeed: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">Ghi chú kiểm tra trực quan</label>
+                          <textarea value={windBladeData.visualNotes} onChange={(e) => setWindBladeData({...windBladeData, visualNotes: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none h-24" placeholder="Nhập các quan sát về vết nứt, xói mòn..." />
+                        </div>
+                        <button 
+                          onClick={analyzeWindBlade}
+                          className="w-full mt-6 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
+                        >
+                          Phân tích cánh quạt
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="lg:col-span-2 space-y-6">
+                      {windAnalysisResult ? (
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                          <div className="flex justify-between items-start mb-8 border-b border-slate-100 pb-6">
+                            <div>
+                              <h3 className="text-xl font-bold text-slate-900">Kết quả phân tích Cánh quạt</h3>
+                              <p className="text-slate-500 mt-1">Thời gian: {windAnalysisResult.timestamp}</p>
+                            </div>
+                            <div className={`px-4 py-2 rounded-full font-bold text-sm ${windAnalysisResult.bgColor} ${windAnalysisResult.color}`}>
+                              {windAnalysisResult.condition}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
+                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Mức độ rung động</h4>
+                              <div className="flex items-end gap-2">
+                                <span className={`text-4xl font-bold ${parseFloat(windBladeData.vibration) > 0.8 ? 'text-amber-600' : 'text-slate-900'}`}>{windBladeData.vibration}</span>
+                                <span className="text-slate-500 mb-1">mm/s RMS</span>
+                              </div>
+                            </div>
+                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
+                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Phát xạ âm thanh</h4>
+                              <div className="flex items-end gap-2">
+                                <span className={`text-4xl font-bold ${parseFloat(windBladeData.acoustic) > 40 ? 'text-amber-600' : 'text-slate-900'}`}>{windBladeData.acoustic}</span>
+                                <span className="text-slate-500 mb-1">dB</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                              <AlertCircle size={20} className="text-blue-500" />
+                              Kết luận & Hành động
+                            </h4>
+                            <ul className="space-y-3">
+                              {windAnalysisResult.recommendations.map((rec: string, idx: number) => (
+                                <li key={idx} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                                  <div className={`mt-1 w-2 h-2 rounded-full ${windAnalysisResult.bgColor.replace('bg-', 'bg-').replace('50', '500')}`} />
+                                  <span className="text-slate-700">{rec}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 flex flex-col items-center justify-center text-center h-full min-h-[400px]">
+                          <Wind size={48} className="text-slate-200 mb-4" />
+                          <h3 className="text-xl font-bold text-slate-800 mb-2">Sẵn sàng phân tích Cánh quạt</h3>
+                          <p className="text-slate-500 max-w-md">
+                            Nhập dữ liệu từ cảm biến rung động và âm thanh để phát hiện các hư hỏng cấu trúc tiềm ẩn trên cánh quạt.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
+          {/* --- CMMS VIEW --- */}
+          {activeTab === 'cmms' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Quản lý CMMS (Solar & Wind)</h2>
+                  <p className="text-slate-500">Quản lý phiếu công việc, bảo trì định kỳ và sửa chữa.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => {
+                      setNewWorkOrder({
+                        title: '',
+                        description: '',
+                        equipmentId: [],
+                        customerId: '',
+                        priority: 'medium',
+                        type: 'preventive',
+                        status: 'initiated',
+                        assignedTo: '',
+                        dueDate: '',
+                        usedMaterials: [],
+                        responsibleApprove: 'TM',
+                        responsibleDo: 'Everybody',
+                        blockingRequired: false,
+                        workPermitId: generateWorkPermitId(),
+                        isUnplanned: false,
+                        failureCode: '',
+                        rootCause: '',
+                        actualTimeSpent: 0,
+                        pmFrequency: '',
+                        estimatedTime: 0,
+                        laborCount: 0,
+                        laborCost: 0,
+                        partCost: 0,
+                        attachments: [],
+                        downtimeStart: '',
+                        repairStart: '',
+                        repairEnd: '',
+                        restartTime: ''
+                      });
+                      setSelectedWorkOrder(null);
+                      setShowWorkOrderModal(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                  >
+                    <Plus size={18} />
+                    Tạo phiếu mới
+                  </button>
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase">Tổng số phiếu</span>
+                    <ClipboardList className="text-blue-500" size={16} />
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900">{workOrders.length}</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase">Đang thực hiện</span>
+                    <Activity className="text-amber-500" size={16} />
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900">
+                    {workOrders.filter(o => o.status === 'in-progress').length}
+                  </div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase">Đã hoàn thành</span>
+                    <CheckCircle className="text-emerald-500" size={16} />
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900">
+                    {workOrders.filter(o => o.status === 'completed').length}
+                  </div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase">Quá hạn</span>
+                    <AlertCircle className="text-rose-600" size={16} />
+                  </div>
+                  <div className="text-2xl font-bold text-rose-600">
+                    {workOrders.filter(o => o.status === 'overdue' || (o.dueDate && new Date(o.dueDate) < new Date() && o.status !== 'completed')).length}
+                  </div>
+                </div>
+              </div>
+
+              {/* Work Orders Table */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-slate-800">Danh sách Phiếu công việc</h3>
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="Tìm kiếm phiếu..." 
+                          value={woSearchQuery}
+                          onChange={(e) => setWoSearchQuery(e.target.value)}
+                          className="pl-9 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Filters */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select 
+                      value={woTypeFilter} 
+                      onChange={(e) => setWoTypeFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Tất cả Loại</option>
+                      <option value="preventive">Định kỳ</option>
+                      <option value="corrective">Sửa chữa</option>
+                      <option value="inspection">Kiểm tra</option>
+                      <option value="emergency">Khẩn cấp</option>
+                    </select>
+                    <select 
+                      value={woPriorityFilter} 
+                      onChange={(e) => setWoPriorityFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Tất cả Ưu tiên</option>
+                      <option value="low">Thấp</option>
+                      <option value="medium">Trung bình</option>
+                      <option value="high">Cao</option>
+                      <option value="urgent">Khẩn cấp</option>
+                    </select>
+                    <select 
+                      value={woStatusFilter} 
+                      onChange={(e) => setWoStatusFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Tất cả Trạng thái</option>
+                      <option value="initiated">Khởi tạo</option>
+                      <option value="approved">Đã duyệt</option>
+                      <option value="planned">Đã lên kế hoạch</option>
+                      <option value="scheduled">Đã lên lịch</option>
+                      <option value="in-progress">Đang thực hiện</option>
+                      <option value="completed">Hoàn thành</option>
+                      <option value="overdue">Quá hạn</option>
+                      <option value="cancelled">Đã hủy</option>
+                    </select>
+                    <select 
+                      value={woAssigneeFilter} 
+                      onChange={(e) => setWoAssigneeFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Tất cả Người thực hiện</option>
+                      {Array.from(new Set(workOrders.map(wo => wo.assignedTo).filter(Boolean))).map(assignee => (
+                        <option key={assignee} value={assignee}>{assignee}</option>
+                      ))}
+                    </select>
+                    {(woTypeFilter || woPriorityFilter || woStatusFilter || woAssigneeFilter || woSearchQuery) && (
+                      <button 
+                        onClick={() => {
+                          setWoTypeFilter('');
+                          setWoPriorityFilter('');
+                          setWoStatusFilter('');
+                          setWoAssigneeFilter('');
+                          setWoSearchQuery('');
+                        }}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Xóa bộ lọc
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
+                        <th className="p-4">Mã WP</th>
+                        <th className="p-4">Tiêu đề / Thiết bị</th>
+                        <th className="p-4">Loại</th>
+                        <th className="p-4">Ưu tiên</th>
+                        <th className="p-4">Trạng thái</th>
+                        <th className="p-4">Người thực hiện</th>
+                        <th className="p-4">Ngày tạo</th>
+                        <th className="p-4 text-right">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm divide-y divide-slate-50">
+                      {isWorkOrdersLoading ? (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-500">Đang tải dữ liệu...</td>
+                        </tr>
+                      ) : (() => {
+                        const filteredWorkOrders = workOrders.filter(order => {
+                          if (woTypeFilter && order.type !== woTypeFilter) return false;
+                          if (woPriorityFilter && order.priority !== woPriorityFilter) return false;
+                          if (woStatusFilter && order.status !== woStatusFilter) return false;
+                          if (woAssigneeFilter && order.assignedTo !== woAssigneeFilter) return false;
+                          if (woSearchQuery) {
+                            const q = woSearchQuery.toLowerCase();
+                            return (
+                              (order.title && order.title.toLowerCase().includes(q)) ||
+                              (Array.isArray(order.equipmentId) ? order.equipmentId.some(id => id.toLowerCase().includes(q)) : (order.equipmentId && order.equipmentId.toLowerCase().includes(q))) ||
+                              (order.workPermitId && order.workPermitId.toLowerCase().includes(q))
+                            );
+                          }
+                          return true;
+                        });
+
+                        if (filteredWorkOrders.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={8} className="p-8 text-center text-slate-500">Không tìm thấy phiếu công việc nào phù hợp.</td>
+                            </tr>
+                          );
+                        }
+
+                        return filteredWorkOrders.map((order) => (
+                          <tr key={order.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-4 font-mono text-xs font-bold text-blue-600 bg-blue-50/50 rounded-lg">
+                              {order.workPermitId || 'N/A'}
+                            </td>
+                            <td className="p-4">
+                              <div className="font-bold text-slate-900">{order.title}</div>
+                              <div className="text-xs text-slate-500 font-mono">
+                                {Array.isArray(order.equipmentId) ? order.equipmentId.join(', ') : order.equipmentId}
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-600 border border-slate-200">
+                                {order.type === 'preventive' ? 'Định kỳ' : order.type === 'corrective' ? 'Sửa chữa' : order.type === 'inspection' ? 'Kiểm tra' : 'Khẩn cấp'}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                order.priority === 'urgent' ? 'bg-rose-100 text-rose-700 border border-rose-200' :
+                                order.priority === 'high' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                                order.priority === 'medium' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                                'bg-slate-100 text-slate-600 border border-slate-200'
+                              }`}>
+                                {order.priority}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${
+                                  order.status === 'completed' ? 'bg-emerald-500' :
+                                  order.status === 'in-progress' ? 'bg-amber-500' :
+                                  order.status === 'overdue' ? 'bg-rose-600' :
+                                  order.status === 'cancelled' ? 'bg-slate-400' : 'bg-blue-500'
+                                }`}></span>
+                                <span className={`font-medium capitalize ${
+                                  order.status === 'overdue' ? 'text-rose-600 font-bold' : 'text-slate-700'
+                                }`}>
+                                  {order.status === 'overdue' ? 'Quá hạn' : 
+                                   order.status === 'pending' ? 'Chờ xử lý' :
+                                   order.status === 'in-progress' ? 'Đang làm' :
+                                   order.status === 'completed' ? 'Hoàn thành' :
+                                   order.status === 'initiated' ? 'Khởi tạo' :
+                                   order.status === 'approved' ? 'Đã duyệt' :
+                                   order.status === 'planned' ? 'Đã lên KH' :
+                                   order.status === 'scheduled' ? 'Đã lên lịch' : 'Đã hủy'}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-4 text-slate-600">{order.assignedTo || 'Chưa phân công'}</td>
+                            <td className="p-4 text-slate-500 text-xs">
+                              <div>Tạo: {order.createdAt ? new Date(order.createdAt).toLocaleDateString('vi-VN') : 'N/A'}</div>
+                              {order.dueDate && (
+                                <div className={`mt-1 font-medium ${new Date(order.dueDate) < new Date() && order.status !== 'completed' ? 'text-rose-500' : 'text-slate-400'}`}>
+                                  Hạn: {new Date(order.dueDate).toLocaleDateString('vi-VN')}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button 
+                                  onClick={() => generateWorkOrderPDF(order)}
+                                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Xuất PDF"
+                                >
+                                  <Download size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteWorkOrder(order.id)}
+                                  className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                  title="Xóa"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    setSelectedWorkOrder(order);
+                                    setNewWorkOrder({
+                                      title: order.title,
+                                      description: order.description || '',
+                                      equipmentId: Array.isArray(order.equipmentId) ? order.equipmentId : (order.equipmentId ? [order.equipmentId] : []),
+                                      customerId: order.customerId,
+                                      priority: order.priority,
+                                      type: order.type,
+                                      status: order.status,
+                                      assignedTo: order.assignedTo || '',
+                                      dueDate: order.dueDate || '',
+                                      usedMaterials: order.usedMaterials || [],
+                                      responsibleApprove: order.responsibleApprove || 'TM',
+                                      responsibleDo: order.responsibleDo || 'Everybody',
+                                      blockingRequired: order.blockingRequired || false,
+                                      workPermitId: order.workPermitId || '',
+                                      isUnplanned: order.isUnplanned || false,
+                                      failureCode: order.failureCode || '',
+                                      rootCause: order.rootCause || '',
+                                      actualTimeSpent: order.actualTimeSpent || 0,
+                                      pmFrequency: order.pmFrequency || '',
+                                      estimatedTime: order.estimatedTime || 0,
+                                      laborCount: order.laborCount || 0,
+                                      laborCost: order.laborCost || 0,
+                                      partCost: order.partCost || 0,
+                                      attachments: order.attachments || [],
+                                      downtimeStart: order.downtimeStart || '',
+                                      repairStart: order.repairStart || '',
+                                      repairEnd: order.repairEnd || '',
+                                      restartTime: order.restartTime || ''
+                                    });
+                                    setShowWorkOrderModal(true);
+                                  }}
+                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Chỉnh sửa"
+                                >
+                                  <Settings size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- PM SCHEDULE VIEW --- */}
+          {activeTab === 'pm-schedule' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Lịch bảo trì định kỳ (PM)</h2>
+                  <p className="text-slate-500">Theo dõi và lên kế hoạch bảo trì cho các thiết bị.</p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
+                        <th className="p-4">Thiết bị</th>
+                        <th className="p-4">Tần suất PM</th>
+                        <th className="p-4">Lần bảo trì cuối</th>
+                        <th className="p-4">Lần bảo trì tiếp theo</th>
+                        <th className="p-4">Trạng thái</th>
+                        <th className="p-4 text-right">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm divide-y divide-slate-50">
+                      {allEquipment.map(eq => {
+                        // Find the latest completed PM work order for this equipment
+                        const eqPmOrders = workOrders.filter(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.status === 'completed');
+                        eqPmOrders.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+                        const latestPm = eqPmOrders[0];
+                        
+                        // If no PM order exists, we might not know the frequency unless it's stored on the equipment.
+                        // For now, we'll look for ANY PM order (even not completed) to get the frequency.
+                        const anyPmOrder = workOrders.find(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency);
+                        const frequency = anyPmOrder?.pmFrequency || '';
+                        
+                        if (!frequency) return null; // Skip equipment without PM schedule
+
+                        const lastDateStr = latestPm ? (latestPm.updatedAt || latestPm.createdAt) : null;
+                        const nextDate = lastDateStr ? calculateNextPMDate(lastDateStr, frequency) : null;
+                        const isOverdue = nextDate ? nextDate < new Date() : false;
+                        const isDueSoon = nextDate ? (nextDate.getTime() - new Date().getTime()) / (1000 * 3600 * 24) <= 7 : false;
+
+                        return (
+                          <tr key={eq.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-4">
+                              <div className="font-bold text-slate-900">{eq.name}</div>
+                              <div className="text-xs text-slate-500 font-mono">{eq.id}</div>
+                            </td>
+                            <td className="p-4 text-slate-600">
+                              {frequency === 'daily' ? 'Hàng ngày' :
+                               frequency === 'weekly' ? 'Hàng tuần' :
+                               frequency === 'bi-monthly' ? 'Nửa tháng' :
+                               frequency === 'monthly' ? 'Hàng tháng' :
+                               frequency === '3-months' ? '3 tháng' :
+                               frequency === '6-months' ? '6 tháng' :
+                               frequency === '1-year' ? '1 năm' :
+                               frequency === '3-years' ? '3 năm' :
+                               frequency === '6-years' ? '6 năm' : frequency}
+                            </td>
+                            <td className="p-4 text-slate-600">
+                              {lastDateStr ? new Date(lastDateStr).toLocaleDateString('vi-VN') : 'Chưa có dữ liệu'}
+                            </td>
+                            <td className="p-4 font-medium">
+                              {nextDate ? (
+                                <span className={isOverdue ? 'text-rose-600 font-bold' : isDueSoon ? 'text-amber-600 font-bold' : 'text-slate-900'}>
+                                  {nextDate.toLocaleDateString('vi-VN')}
+                                </span>
+                              ) : 'Chưa xác định'}
+                            </td>
+                            <td className="p-4">
+                              {isOverdue ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200">Quá hạn</span>
+                              ) : isDueSoon ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-700 border border-amber-200">Sắp đến hạn</span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-200">Bình thường</span>
+                              )}
+                            </td>
+                            <td className="p-4 text-right">
+                              <button 
+                                onClick={() => {
+                                  setNewWorkOrder({
+                                    title: `Bảo trì định kỳ - ${eq.name}`,
+                                    description: '',
+                                    equipmentId: [eq.id],
+                                    customerId: eq.customer || '',
+                                    priority: 'medium',
+                                    type: 'preventive',
+                                    status: 'initiated',
+                                    assignedTo: '',
+                                    dueDate: nextDate ? nextDate.toISOString().split('T')[0] : '',
+                                    usedMaterials: [],
+                                    responsibleApprove: 'TM',
+                                    responsibleDo: 'Everybody',
+                                    blockingRequired: false,
+                                    workPermitId: generateWorkPermitId(),
+                                    isUnplanned: false,
+                                    failureCode: '',
+                                    pmFrequency: frequency,
+                                    estimatedTime: 0,
+                                    laborCount: 0,
+                                    laborCost: 0,
+                                    partCost: 0,
+                                    attachments: [],
+                                    downtimeStart: '',
+                                    repairStart: '',
+                                    repairEnd: '',
+                                    restartTime: ''
+                                  });
+                                  setSelectedWorkOrder(null);
+                                  setShowWorkOrderModal(true);
+                                }}
+                                className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors"
+                              >
+                                Tạo phiếu PM
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {allEquipment.filter(eq => workOrders.some(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency)).length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-500">
+                            Chưa có thiết bị nào được thiết lập lịch bảo trì định kỳ (PM).<br/>
+                            Hãy tạo một phiếu công việc loại "Bảo trì định kỳ" và chọn tần suất để thiết lập.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- INVENTORY VIEW --- */}
+          {activeTab === 'inventory' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Quản lý Kho vật tư</h2>
+                  <p className="text-slate-500">Theo dõi tồn kho phụ tùng, thiết bị thay thế.</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setNewInventoryItem({
+                      name: '',
+                      sku: '',
+                      category: '',
+                      quantity: 0,
+                      unit: 'pcs',
+                      minStock: 5,
+                      location: '',
+                      price: 0
+                    });
+                    setSelectedInventoryItem(null);
+                    setShowInventoryModal(true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  <Plus size={18} />
+                  Thêm vật tư
+                </button>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
+                        <th className="p-4">Tên vật tư / SKU</th>
+                        <th className="p-4">Danh mục</th>
+                        <th className="p-4">Số lượng</th>
+                        <th className="p-4">Đơn vị</th>
+                        <th className="p-4">Vị trí kho</th>
+                        <th className="p-4">Trạng thái</th>
+                        <th className="p-4 text-right">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm divide-y divide-slate-50">
+                      {isInventoryLoading ? (
+                        <tr><td colSpan={7} className="p-8 text-center text-slate-500">Đang tải...</td></tr>
+                      ) : inventory.length === 0 ? (
+                        <tr><td colSpan={7} className="p-8 text-center text-slate-500">Kho trống.</td></tr>
+                      ) : inventory.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4">
+                            <div className="font-bold text-slate-900">{item.name}</div>
+                            <div className="text-xs text-slate-500 font-mono">{item.sku}</div>
+                          </td>
+                          <td className="p-4 text-slate-600">{item.category || 'N/A'}</td>
+                          <td className="p-4 font-bold text-slate-900">{item.quantity}</td>
+                          <td className="p-4 text-slate-500">{item.unit}</td>
+                          <td className="p-4 text-slate-500">{item.location || 'N/A'}</td>
+                          <td className="p-4">
+                            {item.quantity <= item.minStock ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200">
+                                Sắp hết hàng
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                Sẵn sàng
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-4 text-right">
+                            <button 
+                              onClick={() => {
+                                setSelectedInventoryItem(item);
+                                setNewInventoryItem({ ...item });
+                                setShowInventoryModal(true);
+                              }}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            >
+                              <Settings size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- CUSTOMERS VIEW --- */}
+          {activeTab === 'customers' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Quản lý Khách hàng</h2>
+                  <p className="text-slate-500">Danh sách khách hàng và đối tác.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => handleFetchFromSheets()}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg font-medium hover:bg-slate-50 transition-colors shadow-sm disabled:opacity-50"
+                  >
+                    <Download size={18} className={isSyncing ? 'animate-spin' : ''} />
+                    Tải từ Sheets
+                  </button>
+                  <button 
+                    onClick={() => handleSyncToSheets()}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg font-medium hover:bg-slate-50 transition-colors shadow-sm disabled:opacity-50"
+                  >
+                    <Upload size={18} className={isSyncing ? 'animate-spin' : ''} />
+                    Đồng bộ lên Sheets
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setNewCustomer({ name: '', email: '', phone: '', address: '', factories: [] });
+                      setEditingCustomer(null);
+                      setShowCustomerModal(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                  >
+                    <Plus size={18} />
+                    Thêm khách hàng
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
+                        <th className="p-4">Tên khách hàng</th>
+                        <th className="p-4">Nhà máy</th>
+                        <th className="p-4">Email</th>
+                        <th className="p-4">Số điện thoại</th>
+                        <th className="p-4">Địa chỉ</th>
+                        <th className="p-4 text-right">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm divide-y divide-slate-50">
+                      {isCustomersLoading ? (
+                        <tr><td colSpan={6} className="p-8 text-center text-slate-500">Đang tải...</td></tr>
+                      ) : customers.length === 0 ? (
+                        <tr><td colSpan={6} className="p-8 text-center text-slate-500">Chưa có khách hàng nào.</td></tr>
+                      ) : customers.map((customer) => {
+                        const customerFactories = customer.factories || [];
+                        return (
+                        <tr key={customer.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4 font-bold text-slate-900">{customer.name}</td>
+                          <td className="p-4">
+                            {customerFactories.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {customerFactories.map((factory, idx) => (
+                                  <span key={idx} className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-md text-xs">
+                                    {factory}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-xs italic">Chưa có dữ liệu</span>
+                            )}
+                          </td>
+                          <td className="p-4 text-slate-600">{customer.email || 'N/A'}</td>
+                          <td className="p-4 text-slate-600">{customer.phone || 'N/A'}</td>
+                          <td className="p-4 text-slate-500">{customer.address || 'N/A'}</td>
+                          <td className="p-4 text-right space-x-2">
+                            <button 
+                              onClick={() => {
+                                setEditingCustomer(customer);
+                                setNewCustomer({ ...customer });
+                                setShowCustomerModal(true);
+                              }}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            >
+                              <Settings size={16} />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteCustomer(customer.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* --- SETTINGS VIEW --- */}
           {activeTab === 'settings' && (
             <div className="max-w-4xl mx-auto space-y-6">
@@ -5948,6 +8764,82 @@ export default function App() {
                       </div>
                     </section>
                   )}
+
+                  {/* Google Sheets Synchronization Section */}
+                  <section className="space-y-4">
+                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Đồng bộ dữ liệu Google Sheets</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                        <div className="flex items-center gap-2 text-slate-900 font-bold">
+                          <ClipboardList size={18} className="text-emerald-500" />
+                          Phiếu công việc (CMMS)
+                        </div>
+                        <p className="text-xs text-slate-500">Đồng bộ toàn bộ lịch sử phiếu công việc và bảo trì.</p>
+                        <button 
+                          disabled={isSyncing}
+                          onClick={async () => {
+                            if (!isGoogleConnected) { alert('Vui lòng kết nối Google Drive trước.'); return; }
+                            if (workOrders.length === 0) { alert('Không có dữ liệu phiếu công việc để đồng bộ.'); return; }
+                            try {
+                              setIsSyncing(true);
+                              const allRows = workOrders.map(wo => [
+                                wo.id, wo.workPermitId || '', wo.title, (Array.isArray(wo.equipmentId) ? wo.equipmentId.join(', ') : wo.equipmentId), wo.customer, wo.type, wo.status, wo.priority, wo.assignedTo, wo.description, wo.failureCode || '', wo.pmFrequency || '', wo.estimatedTime || 0, wo.laborCount || 0, wo.laborCost || 0, wo.partCost || 0, (wo.attachments || []).join(', '), wo.createdAt, wo.updatedAt
+                              ]);
+                              await syncToSheet('CMMS', allRows);
+                              alert('Đồng bộ CMMS thành công!');
+                            } catch (err: any) { 
+                              alert(`Lỗi đồng bộ: ${err.message}`); 
+                            } finally {
+                              setIsSyncing(false);
+                            }
+                          }}
+                          className={`w-full py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                            !isGoogleConnected 
+                              ? 'bg-slate-100 text-slate-400 hover:bg-slate-200' 
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          } ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                          {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
+                        </button>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                        <div className="flex items-center gap-2 text-slate-900 font-bold">
+                          <Package size={18} className="text-amber-500" />
+                          Quản lý Kho
+                        </div>
+                        <p className="text-xs text-slate-500">Đồng bộ toàn bộ danh mục vật tư và số lượng tồn kho.</p>
+                        <button 
+                          disabled={isSyncing}
+                          onClick={async () => {
+                            if (!isGoogleConnected) { alert('Vui lòng kết nối Google Drive trước.'); return; }
+                            if (inventory.length === 0) { alert('Không có dữ liệu kho để đồng bộ.'); return; }
+                            try {
+                              setIsSyncing(true);
+                              const allRows = inventory.map(item => [
+                                item.id, item.name, item.sku, item.category, item.quantity, item.minStock, item.unit, item.location, item.price, item.lastRestocked || '', item.updatedAt
+                              ]);
+                              await syncToSheet('QuanLyKho', allRows);
+                              alert('Đồng bộ Kho thành công!');
+                            } catch (err: any) { 
+                              alert(`Lỗi đồng bộ: ${err.message}`); 
+                            } finally {
+                              setIsSyncing(false);
+                            }
+                          }}
+                          className={`w-full py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                            !isGoogleConnected 
+                              ? 'bg-slate-100 text-slate-400 hover:bg-slate-200' 
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          } ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                          {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
+                        </button>
+                      </div>
+                    </div>
+                  </section>
                 </div>
               </div>
             </div>
@@ -6150,6 +9042,73 @@ export default function App() {
         </div>
       )}
 
+      {showQRModal && selectedEqForQR && (
+        <div className="fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <QrCode size={20} className="text-blue-600" />
+                Mã QR Thiết bị
+              </h3>
+              <button onClick={() => setShowQRModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 flex flex-col items-center text-center">
+              <div className="bg-white p-4 rounded-2xl border-4 border-slate-100 shadow-inner mb-6">
+                <QRCodeSVG 
+                  value={`${window.location.origin}${window.location.pathname}?eqId=${selectedEqForQR.id}`}
+                  size={200}
+                  level="H"
+                  includeMargin={true}
+                />
+              </div>
+              <h4 className="text-lg font-bold text-slate-900 mb-1">{selectedEqForQR.name}</h4>
+              <p className="text-sm text-slate-500 font-mono mb-6">{selectedEqForQR.id}</p>
+              
+              <div className="w-full grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => {
+                    const svg = document.querySelector('.p-8 svg');
+                    if (svg) {
+                      const svgData = new XMLSerializer().serializeToString(svg);
+                      const canvas = document.createElement('canvas');
+                      const ctx = canvas.getContext('2d');
+                      const img = new Image();
+                      img.onload = () => {
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        ctx?.drawImage(img, 0, 0);
+                        const pngFile = canvas.toDataURL('image/png');
+                        const downloadLink = document.createElement('a');
+                        downloadLink.download = `QR_${selectedEqForQR.id}.png`;
+                        downloadLink.href = pngFile;
+                        downloadLink.click();
+                      };
+                      img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  <Download size={16} />
+                  Tải ảnh
+                </button>
+                <button 
+                  onClick={() => window.print()}
+                  className="flex items-center justify-center gap-2 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors"
+                >
+                  <FileText size={16} />
+                  In mã
+                </button>
+              </div>
+              <p className="mt-6 text-[10px] text-slate-400 italic">
+                Quét mã này để truy cập nhanh hồ sơ thiết bị và lịch sử bảo trì
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showEquipmentProfile && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -6192,6 +9151,19 @@ export default function App() {
                     <div className="text-base font-medium text-slate-800">Nhiệt độ dầu cao</div>
                   </div>
                 </div>
+              </div>
+
+              {/* Maintenance Analytics */}
+              <div>
+                <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <TrendingUp size={18} className="text-blue-500" />
+                  Phân tích & Xu hướng Bảo trì
+                </h3>
+                <MaintenanceCharts 
+                  equipment={allEquipment.find(e => e.id === equipmentCode) || { id: equipmentCode, health: 50, status: 'healthy' }} 
+                  workOrders={workOrders} 
+                  reports={allReports} 
+                />
               </div>
 
               {/* Past Reports */}
@@ -6274,11 +9246,61 @@ export default function App() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Khách hàng</label>
-                <input type="text" value={newEqData.customer} onChange={(e) => setNewEqData({...newEqData, customer: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="VD: Công ty Điện lực A" />
+                {customers.length > 0 ? (
+                  <div className="space-y-2">
+                    <select 
+                      value={customers.find(c => c.name === newEqData.customer) ? newEqData.customer : (newEqData.customer ? "other" : "")} 
+                      onChange={(e) => {
+                        if (e.target.value === "other") {
+                          setNewEqData({...newEqData, customer: ""});
+                        } else {
+                          setNewEqData({...newEqData, customer: e.target.value});
+                        }
+                      }} 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">-- Chọn khách hàng --</option>
+                      {customers.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                      <option value="other">-- Khác (Nhập tay) --</option>
+                    </select>
+                    {(!customers.find(c => c.name === newEqData.customer) && newEqData.customer !== "" || !customers.length) && (
+                      <input 
+                        type="text" 
+                        value={newEqData.customer} 
+                        onChange={(e) => setNewEqData({...newEqData, customer: e.target.value})} 
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        placeholder="Nhập tên khách hàng mới..." 
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input 
+                    type="text" 
+                    value={newEqData.customer} 
+                    onChange={(e) => setNewEqData({...newEqData, customer: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="Nhập tên khách hàng..." 
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nhà máy</label>
-                <input type="text" value={newEqData.factory} onChange={(e) => setNewEqData({...newEqData, factory: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="VD: Nhà máy Bắc Ninh" />
+                {newEqData.customer && customers.find(c => c.name === newEqData.customer)?.factories?.length > 0 ? (
+                  <select 
+                    value={newEqData.factory} 
+                    onChange={(e) => setNewEqData({...newEqData, factory: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">-- Chọn nhà máy --</option>
+                    {customers.find(c => c.name === newEqData.customer).factories.map((f, idx) => (
+                      <option key={idx} value={f}>{f}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input type="text" value={newEqData.factory} onChange={(e) => setNewEqData({...newEqData, factory: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="VD: Nhà máy Bắc Ninh" />
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Vị trí</label>
@@ -6290,6 +9312,7 @@ export default function App() {
                   <option value="Máy biến áp">Máy biến áp</option>
                   <option value="Tủ điện trung thế">Tủ điện trung thế</option>
                   <option value="Động cơ">Động cơ</option>
+                  <option value="Inverter">Inverter Solar/Wind</option>
                 </select>
               </div>
             </div>
@@ -6366,6 +9389,796 @@ export default function App() {
                 className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 transition-colors"
               >
                 Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWorkOrderModal && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h3 className="font-bold text-slate-800 text-lg">
+                {selectedWorkOrder ? 'Chi tiết Phiếu công việc' : 'Tạo Phiếu công việc mới'}
+              </h3>
+              <button onClick={() => setShowWorkOrderModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tiêu đề công việc</label>
+                  <input 
+                    type="text" 
+                    value={newWorkOrder.title} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, title: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="VD: Kiểm tra định kỳ Inverter 01" 
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mô tả chi tiết</label>
+                  <textarea 
+                    value={newWorkOrder.description} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, description: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-24" 
+                    placeholder="Mô tả các bước thực hiện..."
+                  />
+                </div>
+                <div className="md:col-span-2 relative">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mã thiết bị (Asset ID) - Có thể chọn nhiều</label>
+                  <div className="min-h-[42px] p-1.5 border border-slate-300 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 bg-white flex flex-wrap gap-2">
+                    {newWorkOrder.equipmentId.map(id => (
+                      <div key={id} className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-sm border border-blue-100">
+                        <span>{id}</span>
+                        <button 
+                          onClick={() => setNewWorkOrder({
+                            ...newWorkOrder, 
+                            equipmentId: newWorkOrder.equipmentId.filter(item => item !== id)
+                          })}
+                          className="hover:text-blue-900"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    <input 
+                      type="text" 
+                      value={equipmentSearch}
+                      onFocus={() => setShowEqDropdown(true)}
+                      onChange={(e) => {
+                        setEquipmentSearch(e.target.value);
+                        setShowEqDropdown(true);
+                      }}
+                      className="flex-1 min-w-[120px] outline-none text-sm py-1"
+                      placeholder={newWorkOrder.equipmentId.length === 0 ? "Tìm và chọn thiết bị..." : ""}
+                    />
+                  </div>
+                  
+                  {showEqDropdown && (
+                    <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                      <div className="p-2 border-b border-slate-100 sticky top-0 bg-white flex justify-between items-center">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Danh sách thiết bị</span>
+                        <button onClick={() => setShowEqDropdown(false)} className="text-slate-400 hover:text-slate-600">
+                          <X size={14} />
+                        </button>
+                      </div>
+                      {allEquipment
+                        .filter(eq => 
+                          !newWorkOrder.equipmentId.includes(eq.id) && 
+                          (eq.id.toLowerCase().includes(equipmentSearch.toLowerCase()) || 
+                           eq.name.toLowerCase().includes(equipmentSearch.toLowerCase()))
+                        )
+                        .slice(0, 50)
+                        .map(eq => (
+                          <button
+                            key={eq.id}
+                            onClick={() => {
+                              setNewWorkOrder({
+                                ...newWorkOrder,
+                                equipmentId: [...newWorkOrder.equipmentId, eq.id]
+                              });
+                              setEquipmentSearch('');
+                              setShowEqDropdown(false);
+                            }}
+                            className="w-full text-left px-4 py-2 hover:bg-slate-50 flex flex-col transition-colors border-b border-slate-50 last:border-0"
+                          >
+                            <span className="font-bold text-slate-800 text-sm">{eq.id}</span>
+                            <span className="text-xs text-slate-500">{eq.name} - {eq.factory}</span>
+                          </button>
+                        ))}
+                      {allEquipment.filter(eq => 
+                        !newWorkOrder.equipmentId.includes(eq.id) && 
+                        (eq.id.toLowerCase().includes(equipmentSearch.toLowerCase()) || 
+                         eq.name.toLowerCase().includes(equipmentSearch.toLowerCase()))
+                      ).length === 0 && (
+                        <div className="p-4 text-center text-slate-400 text-sm">Không tìm thấy thiết bị nào</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Khách hàng</label>
+                  <select 
+                    value={newWorkOrder.customerId} 
+                    onChange={(e) => {
+                      const custId = e.target.value;
+                      setNewWorkOrder({...newWorkOrder, customerId: custId, factory: ''});
+                    }} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">-- Chọn khách hàng --</option>
+                    {customers.map(customer => (
+                      <option key={customer.id} value={customer.id}>{customer.name}</option>
+                    ))}
+                    {customers.length === 0 && !isCustomersLoading && (
+                      <option disabled>Chưa có dữ liệu khách hàng</option>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nhà máy</label>
+                  {newWorkOrder.customerId && customers.find(c => c.id === newWorkOrder.customerId)?.factories?.length > 0 ? (
+                    <select 
+                      value={newWorkOrder.factory} 
+                      onChange={(e) => setNewWorkOrder({...newWorkOrder, factory: e.target.value})} 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">-- Chọn nhà máy --</option>
+                      {customers.find(c => c.id === newWorkOrder.customerId).factories.map((f, idx) => (
+                        <option key={idx} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input 
+                      type="text" 
+                      value={newWorkOrder.factory} 
+                      onChange={(e) => setNewWorkOrder({...newWorkOrder, factory: e.target.value})} 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                      placeholder="VD: Nhà máy Bắc Ninh" 
+                    />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Loại công việc</label>
+                  <select 
+                    value={newWorkOrder.type} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, type: e.target.value, isUnplanned: e.target.value === 'unplanned'})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="preventive">Bảo trì định kỳ (PM)</option>
+                    <option value="corrective">Sửa chữa khắc phục (CM)</option>
+                    <option value="inspection">Kiểm tra hiện trường</option>
+                    <option value="emergency">Xử lý khẩn cấp</option>
+                    <option value="unplanned">Ngoài kế hoạch (Unplanned)</option>
+                  </select>
+                </div>
+                {newWorkOrder.type === 'preventive' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Tần suất PM</label>
+                    <select 
+                      value={newWorkOrder.pmFrequency} 
+                      onChange={(e) => setNewWorkOrder({...newWorkOrder, pmFrequency: e.target.value})} 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">-- Chọn tần suất --</option>
+                      <option value="daily">Hàng ngày (Daily)</option>
+                      <option value="weekly">Hàng tuần (Weekly)</option>
+                      <option value="bi-monthly">Nửa tháng (Bi-monthly)</option>
+                      <option value="monthly">Hàng tháng (Monthly)</option>
+                      <option value="3-months">3 tháng (3 months)</option>
+                      <option value="6-months">6 tháng (6 months)</option>
+                      <option value="1-year">1 năm (1 year)</option>
+                      <option value="3-years">3 năm (3 years)</option>
+                      <option value="6-years">6 năm (6 years)</option>
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mã lỗi sự cố (Failure Code)</label>
+                  <select 
+                    value={newWorkOrder.failureCode} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, failureCode: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">-- Chọn mã lỗi --</option>
+                    <option value="connection error">Connection error</option>
+                    <option value="control failure">Control failure</option>
+                    <option value="corrosion">Corrosion</option>
+                    <option value="crack">Crack</option>
+                    <option value="deformation">Deformation</option>
+                    <option value="display error">Display error</option>
+                    <option value="leakage">Leakage</option>
+                    <option value="looseen">Looseen</option>
+                    <option value="low performanace">Low performanace</option>
+                    <option value="noise">Noise</option>
+                    <option value="overheat">Overheat</option>
+                    <option value="power failure">Power failure</option>
+                    <option value="shorted circuit">Shorted circuit</option>
+                    <option value="vibration">Vibration</option>
+                    <option value="worn out">Worn out</option>
+                    <option value="jammed stuck">Jammed stuck</option>
+                    <option value="other">Khác...</option>
+                  </select>
+                  {newWorkOrder.failureCode === 'other' && (
+                    <input 
+                      type="text" 
+                      onChange={(e) => setNewWorkOrder({...newWorkOrder, failureCode: e.target.value})} 
+                      className="w-full px-3 py-2 mt-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                      placeholder="Nhập mã lỗi khác" 
+                    />
+                  )}
+                </div>
+                {newWorkOrder.status === 'completed' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Nguyên nhân gốc rễ (Root Cause)</label>
+                      <textarea 
+                        value={newWorkOrder.rootCause} 
+                        onChange={(e) => setNewWorkOrder({...newWorkOrder, rootCause: e.target.value})} 
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        placeholder="Phân tích nguyên nhân gây ra sự cố..."
+                        rows={2}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Thời gian thực tế (Giờ)</label>
+                      <input 
+                        type="number" 
+                        value={newWorkOrder.actualTimeSpent} 
+                        onChange={(e) => setNewWorkOrder({...newWorkOrder, actualTimeSpent: parseFloat(e.target.value) || 0})} 
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        placeholder="VD: 3.5" 
+                      />
+                    </div>
+                  </>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mức độ ưu tiên</label>
+                  <select 
+                    value={newWorkOrder.priority} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, priority: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="low">Thấp</option>
+                    <option value="medium">Trung bình</option>
+                    <option value="high">Cao</option>
+                    <option value="urgent">Khẩn cấp (P1)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Trạng thái (Phase)</label>
+                  <select 
+                    value={newWorkOrder.status} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, status: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="initiated">1. Khởi tạo (Initiated/WR)</option>
+                    <option value="approved">2. Đã duyệt (Approved)</option>
+                    <option value="planned">3. Đã lập kế hoạch (Planned)</option>
+                    <option value="scheduled">4. Đã lập lịch (Scheduled)</option>
+                    <option value="in-progress">5. Đang thực hiện (In Progress)</option>
+                    <option value="completed">6. Hoàn thành (Completed)</option>
+                    <option value="overdue">Quá hạn (Overdue)</option>
+                    <option value="cancelled">Đã hủy</option>
+                  </select>
+                </div>
+
+                {/* Timestamps Section */}
+                <div className="md:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Bắt đầu dừng máy</label>
+                    <div className="text-xs font-medium text-slate-600">
+                      {newWorkOrder.downtimeStart ? new Date(newWorkOrder.downtimeStart).toLocaleString('vi-VN') : '---'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Bắt đầu sửa chữa</label>
+                    <div className="text-xs font-medium text-slate-600">
+                      {newWorkOrder.repairStart ? new Date(newWorkOrder.repairStart).toLocaleString('vi-VN') : '---'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Kết thúc sửa chữa</label>
+                    <div className="text-xs font-medium text-slate-600">
+                      {newWorkOrder.repairEnd ? new Date(newWorkOrder.repairEnd).toLocaleString('vi-VN') : '---'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Chạy lại máy</label>
+                    <div className="text-xs font-medium text-slate-600">
+                      {newWorkOrder.restartTime ? new Date(newWorkOrder.restartTime).toLocaleString('vi-VN') : '---'}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Người thực hiện / PIC</label>
+                  <select 
+                    value={newWorkOrder.assignedTo} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, assignedTo: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">-- Chọn người thực hiện --</option>
+                    <option value="Nguyen Van A">Nguyen Van A</option>
+                    <option value="Tran Van B">Tran Van B</option>
+                    <option value="Le Thi C">Le Thi C</option>
+                    <option value="Pham Van D">Pham Van D</option>
+                    <option value="Vu Van E">Vu Van E</option>
+                    <option value="Khác">Khác...</option>
+                  </select>
+                  {newWorkOrder.assignedTo === 'Khác' && (
+                    <input 
+                      type="text" 
+                      onChange={(e) => setNewWorkOrder({...newWorkOrder, assignedTo: e.target.value})} 
+                      className="w-full px-3 py-2 mt-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                      placeholder="Nhập tên người thực hiện" 
+                    />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Vai trò Phê duyệt (Approve)</label>
+                  <select 
+                    value={newWorkOrder.responsibleApprove} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, responsibleApprove: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="TM">TM (Technical Manager)</option>
+                    <option value="PE">PE (Plant Engineer)</option>
+                    <option value="MS">MS (Maintenance Supervisor)</option>
+                    <option value="OSL">OSL (Operation Shift Leader)</option>
+                    <option value="SO">SO (Safety Officer)</option>
+                    <option value="DTM">DTM (Deputy Technical Manager)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Vai trò Thực hiện (Do)</label>
+                  <select 
+                    value={newWorkOrder.responsibleDo} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, responsibleDo: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="Everybody">Everybody</option>
+                    <option value="ME">ME (Maintenance Engineer)</option>
+                    <option value="PE">PE (Plant Engineer)</option>
+                    <option value="OSL">OSL (Operation Shift Leader)</option>
+                    <option value="OSE">OSE (Operation Shift Engineer)</option>
+                    <option value="Subcontractor">Subcontractor</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-4 mt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={newWorkOrder.blockingRequired} 
+                      onChange={(e) => setNewWorkOrder({...newWorkOrder, blockingRequired: e.target.checked})}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    <span className="text-sm font-medium text-slate-700">Yêu cầu Cô lập (Blocking)</span>
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mã Work Permit (nếu có)</label>
+                  <input 
+                    type="text" 
+                    value={newWorkOrder.workPermitId} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, workPermitId: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="VD: WP-2024-001" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Hạn hoàn thành</label>
+                  <input 
+                    type="date" 
+                    value={newWorkOrder.dueDate} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, dueDate: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  />
+                </div>
+                
+                <div className="md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <h4 className="text-sm font-bold text-slate-700 mb-4">Nguồn lực & Chi phí</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Thời gian (Giờ)</label>
+                      <input 
+                        type="number" 
+                        value={newWorkOrder.estimatedTime} 
+                        onChange={(e) => setNewWorkOrder({...newWorkOrder, estimatedTime: parseFloat(e.target.value) || 0})} 
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" 
+                        placeholder="VD: 2.5"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Số người (Labor)</label>
+                      <input 
+                        type="number" 
+                        value={newWorkOrder.laborCount} 
+                        onChange={(e) => setNewWorkOrder({...newWorkOrder, laborCount: parseInt(e.target.value) || 0})} 
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" 
+                        placeholder="VD: 2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Chi phí nhân công ($)</label>
+                      <input 
+                        type="number" 
+                        value={newWorkOrder.laborCost} 
+                        onChange={(e) => setNewWorkOrder({...newWorkOrder, laborCost: parseFloat(e.target.value) || 0})} 
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" 
+                        placeholder="VD: 150"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Chi phí vật tư ($)</label>
+                      <input 
+                        type="number" 
+                        value={newWorkOrder.partCost} 
+                        onChange={(e) => setNewWorkOrder({...newWorkOrder, partCost: parseFloat(e.target.value) || 0})} 
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" 
+                        placeholder="VD: 500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-bold text-slate-700">Đính kèm tài liệu / Hình ảnh</label>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center justify-center w-full h-24 px-4 transition bg-white border-2 border-slate-300 border-dashed rounded-xl appearance-none cursor-pointer hover:border-blue-400 focus:outline-none">
+                      <span className="flex items-center space-x-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span className="font-medium text-slate-600">
+                          Nhấn để tải lên hoặc kéo thả file
+                        </span>
+                      </span>
+                      <input 
+                        type="file" 
+                        name="file_upload" 
+                        className="hidden" 
+                        accept="image/*,.pdf,.doc,.docx"
+                        multiple
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            const files = Array.from(e.target.files) as File[];
+                            const newAttachments = files.map(f => URL.createObjectURL(f));
+                            setNewWorkOrder(prev => ({
+                              ...prev,
+                              attachments: [...(prev.attachments || []), ...newAttachments]
+                            }));
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {newWorkOrder.attachments && newWorkOrder.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {newWorkOrder.attachments.map((url, idx) => (
+                        <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
+                          {url.startsWith('blob:') ? (
+                            <img src={url} alt="Attachment" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-slate-100 text-xs text-slate-500">File</div>
+                          )}
+                          <button 
+                            className="absolute top-0 right-0 bg-red-500 text-white p-0.5 rounded-bl-lg"
+                            onClick={() => {
+                              const newAtt = [...newWorkOrder.attachments];
+                              newAtt.splice(idx, 1);
+                              setNewWorkOrder({...newWorkOrder, attachments: newAtt});
+                            }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="md:col-span-2 border-t border-slate-100 pt-4 mt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-bold text-slate-700">Vật tư sử dụng</label>
+                  </div>
+                  <div className="flex gap-2 mb-4">
+                    <input 
+                      type="text" 
+                      id="newMaterialName"
+                      placeholder="Tên vật tư" 
+                      className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input 
+                      type="number" 
+                      id="newMaterialQty"
+                      placeholder="SL" 
+                      defaultValue="1"
+                      className="w-20 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button 
+                      onClick={() => {
+                        const nameInput = document.getElementById('newMaterialName') as HTMLInputElement;
+                        const qtyInput = document.getElementById('newMaterialQty') as HTMLInputElement;
+                        if (nameInput && qtyInput && nameInput.value) {
+                          setNewWorkOrder({
+                            ...newWorkOrder,
+                            usedMaterials: [...(newWorkOrder.usedMaterials || []), { 
+                              name: nameInput.value, 
+                              quantity: parseFloat(qtyInput.value) || 1, 
+                              unit: 'pcs' 
+                            }]
+                          });
+                          nameInput.value = '';
+                          qtyInput.value = '1';
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-slate-100 text-blue-600 font-medium rounded-lg hover:bg-blue-50 border border-slate-200 transition-colors flex items-center gap-1 text-sm"
+                    >
+                      <Plus size={14} /> Thêm
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {(newWorkOrder.usedMaterials || []).map((m, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg text-sm">
+                        <span>{m.name} - {m.quantity} {m.unit}</span>
+                        <button 
+                          onClick={() => {
+                            const updated = [...newWorkOrder.usedMaterials];
+                            updated.splice(idx, 1);
+                            setNewWorkOrder({...newWorkOrder, usedMaterials: updated});
+                          }}
+                          className="text-rose-500 hover:text-rose-700"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    {(newWorkOrder.usedMaterials || []).length === 0 && (
+                      <p className="text-xs text-slate-400 italic">Chưa có vật tư nào được thêm.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-col gap-3">
+              {woError && (
+                <div className="text-sm text-rose-600 font-medium bg-rose-50 p-2 rounded-lg border border-rose-100">
+                  {woError}
+                </div>
+              )}
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowWorkOrderModal(false)} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors">Hủy</button>
+                <button 
+                  onClick={handleSaveWorkOrder}
+                  className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  {selectedWorkOrder ? 'Cập nhật phiếu' : 'Lưu phiếu mới'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+            <div className="p-6">
+              <h3 className="font-bold text-slate-800 text-lg mb-2">Xác nhận</h3>
+              <p className="text-slate-600">{confirmDialog.message}</p>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+              <button 
+                onClick={() => setConfirmDialog(null)} 
+                className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={confirmDialog.onConfirm}
+                className="px-4 py-2 bg-rose-600 text-white font-medium rounded-lg hover:bg-rose-700 transition-colors shadow-sm"
+              >
+                Đồng ý
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInventoryModal && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h3 className="font-bold text-slate-800 text-lg">
+                {selectedInventoryItem ? 'Cập nhật vật tư' : 'Thêm vật tư mới'}
+              </h3>
+              <button onClick={() => setShowInventoryModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tên vật tư</label>
+                <input 
+                  type="text" 
+                  value={newInventoryItem.name} 
+                  onChange={(e) => setNewInventoryItem({...newInventoryItem, name: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  placeholder="VD: Cầu chì 10A" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mã SKU</label>
+                <input 
+                  type="text" 
+                  value={newInventoryItem.sku} 
+                  onChange={(e) => setNewInventoryItem({...newInventoryItem, sku: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  placeholder="VD: FUSE-10A-001" 
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Số lượng</label>
+                  <input 
+                    type="number" 
+                    value={newInventoryItem.quantity} 
+                    onChange={(e) => setNewInventoryItem({...newInventoryItem, quantity: parseInt(e.target.value) || 0})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Đơn vị</label>
+                  <input 
+                    type="text" 
+                    value={newInventoryItem.unit} 
+                    onChange={(e) => setNewInventoryItem({...newInventoryItem, unit: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="pcs, m, l..." 
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Vị trí kho</label>
+                <input 
+                  type="text" 
+                  value={newInventoryItem.location} 
+                  onChange={(e) => setNewInventoryItem({...newInventoryItem, location: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  placeholder="VD: Kệ A1, Ngăn 2" 
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => setShowInventoryModal(false)} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors">Hủy</button>
+              <button 
+                onClick={handleSaveInventoryItem}
+                className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                Lưu vật tư
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CUSTOMER MODAL --- */}
+      {showCustomerModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h3 className="font-bold text-slate-800 text-lg">
+                {editingCustomer ? 'Cập nhật khách hàng' : 'Thêm khách hàng mới'}
+              </h3>
+              <button onClick={() => setShowCustomerModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mã khách hàng</label>
+                <input 
+                  type="text" 
+                  value={editingCustomer ? editingCustomer.id : generateNextCustomerId()} 
+                  disabled
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500 cursor-not-allowed" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tên khách hàng</label>
+                <input 
+                  type="text" 
+                  value={newCustomer.name} 
+                  onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  placeholder="VD: Công ty Điện lực A" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Danh sách nhà máy</label>
+                <div className="flex gap-2 mb-2">
+                  <input 
+                    type="text" 
+                    id="new-factory-input"
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="Nhập tên nhà máy..." 
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const input = e.currentTarget;
+                        if (input.value.trim()) {
+                          setNewCustomer({...newCustomer, factories: [...(newCustomer.factories || []), input.value.trim()]});
+                          input.value = '';
+                        }
+                      }
+                    }}
+                  />
+                  <button 
+                    onClick={() => {
+                      const input = document.getElementById('new-factory-input') as HTMLInputElement;
+                      if (input.value.trim()) {
+                        setNewCustomer({...newCustomer, factories: [...(newCustomer.factories || []), input.value.trim()]});
+                        input.value = '';
+                      }
+                    }}
+                    className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"
+                  >
+                    Thêm
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(newCustomer.factories || []).map((f, i) => (
+                    <span key={i} className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs border border-blue-100">
+                      {f}
+                      <button onClick={() => setNewCustomer({...newCustomer, factories: newCustomer.factories.filter((_, idx) => idx !== i)})}>
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <input 
+                  type="email" 
+                  value={newCustomer.email} 
+                  onChange={(e) => setNewCustomer({...newCustomer, email: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  placeholder="VD: contact@company.com" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Số điện thoại</label>
+                <input 
+                  type="text" 
+                  value={newCustomer.phone} 
+                  onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  placeholder="VD: 0901234567" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Địa chỉ</label>
+                <textarea 
+                  value={newCustomer.address} 
+                  onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                  placeholder="VD: Số 1, Đường A, TP. HCM" 
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => setShowCustomerModal(false)} className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors">Hủy</button>
+              <button 
+                onClick={handleSaveCustomer}
+                className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                Lưu khách hàng
               </button>
             </div>
           </div>

@@ -113,11 +113,18 @@ app.get(['/auth/callback', '/auth/callback/', '/api/auth/callback', '/api/auth/c
 
 // 3. Check Auth Status
 app.get('/api/auth/status', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return res.json({ isAuthenticated: true });
+  try {
+    console.log('Received auth status check request');
+    const authHeader = req.headers.authorization;
+    console.log('Auth status check. Header present:', !!authHeader);
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return res.json({ isAuthenticated: true });
+    }
+    res.json({ isAuthenticated: !!globalTokens });
+  } catch (error) {
+    console.error('Error in auth status check:', error);
+    res.status(500).json({ isAuthenticated: false, error: 'Internal server error' });
   }
-  res.json({ isAuthenticated: !!globalTokens });
 });
 
 // Helper to get tokens from request
@@ -161,7 +168,7 @@ app.post('/api/sheets/append', async (req, res) => {
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
     const existingSheetTitles = spreadsheet.data.sheets?.map(s => s.properties?.title) || [];
     
-    const requiredSheets = ['Máy biến áp', 'Tủ điện trung thế', 'Động cơ'];
+    const requiredSheets = ['Máy biến áp', 'Tủ điện trung thế', 'Động cơ', 'CMMS', 'QuanLyKho'];
     const missingSheets = requiredSheets.filter(title => !existingSheetTitles.includes(title));
     
     if (missingSheets.length > 0) {
@@ -182,14 +189,17 @@ app.post('/api/sheets/append', async (req, res) => {
       range: range || 'Máy biến áp!A:Z',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [values]
+        values: Array.isArray(values[0]) ? values : [values]
       }
     });
 
     res.json({ success: true, data: response.data });
   } catch (error: any) {
     console.error('Error appending to sheet:', error);
-    if (error.code === 401 || error.status === 401) {
+    const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
+    if (isAuthError) {
+      console.log('Clearing globalTokens due to auth error');
+      globalTokens = null;
       return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
     }
     res.status(500).json({ error: error.message || 'Failed to save to Google Sheets' });
@@ -279,7 +289,10 @@ app.get('/api/sheets/get', async (req, res) => {
     res.json({ success: true, data: categorizedData });
   } catch (error: any) {
     console.error('Error getting data from sheet:', error);
-    if (error.code === 401 || error.status === 401) {
+    const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
+    if (isAuthError) {
+      console.log('Clearing globalTokens due to auth error');
+      globalTokens = null;
       return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
     }
     res.status(500).json({ error: error.message || 'Failed to get data from Google Sheets' });
@@ -293,7 +306,7 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
-  const { transformers, switchgears, motors } = req.body;
+  const { transformers, switchgears, motors, cmmsData, customersData, inventoryData } = req.body;
   const spreadsheetId = process.env.SPREADSHEET_ID;
 
   if (!spreadsheetId) {
@@ -313,11 +326,14 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
     const existingSheetTitles = spreadsheet.data.sheets?.map(s => s.properties?.title) || [];
     
-    const requiredSheets = ['Máy biến áp', 'Tủ điện trung thế', 'Động cơ'];
+    const requiredSheets = ['Máy biến áp', 'Tủ điện trung thế', 'Động cơ', 'TEV Service Flatform', 'QuanLyKho', 'KhachHang'];
     const keywords = [
       ['biến áp'],
       ['tủ điện', 'tev'],
-      ['động cơ']
+      ['động cơ'],
+      ['tev service flatform', 'cmms', 'work order'],
+      ['quanlykho', 'kho', 'inventory'],
+      ['khachhang', 'khách hàng', 'customer']
     ];
 
     const finalSheetNames = requiredSheets.map((title, i) => {
@@ -367,6 +383,15 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     }
     if (motors && motors.length > 0) {
       data.push({ range: `${finalSheetNames[2]}!A1`, values: motors });
+    }
+    if (cmmsData && cmmsData.length > 0) {
+      data.push({ range: `${finalSheetNames[3]}!A1`, values: cmmsData });
+    }
+    if (inventoryData && inventoryData.length > 0) {
+      data.push({ range: `${finalSheetNames[4]}!A1`, values: inventoryData });
+    }
+    if (customersData && customersData.length > 0) {
+      data.push({ range: `${finalSheetNames[5]}!A1`, values: customersData });
     }
 
     if (data.length > 0) {
@@ -423,7 +448,7 @@ app.post('/api/sheets/sync-export', async (req, res) => {
                 sheetId: id,
                 dimension: 'COLUMNS',
                 startIndex: 0,
-                endIndex: 21
+                endIndex: 50
               }
             }
           });
@@ -443,7 +468,10 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     res.json({ success: true, message: 'Data synced successfully' });
   } catch (error: any) {
     console.error('Error syncing to sheet:', error);
-    if (error.code === 401 || error.status === 401) {
+    const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
+    if (isAuthError) {
+      console.log('Clearing globalTokens due to auth error');
+      globalTokens = null;
       return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
     }
     res.status(500).json({ error: error.message || 'Failed to sync to Google Sheets' });
@@ -527,7 +555,10 @@ app.post('/api/drive/upload', upload.array('files'), async (req, res) => {
     res.json({ success: true, links: uploadedLinks });
   } catch (error: any) {
     console.error('Drive upload error:', error);
-    if (error.code === 401 || error.status === 401) {
+    const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
+    if (isAuthError) {
+      console.log('Clearing globalTokens due to auth error');
+      globalTokens = null;
       return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
     }
     res.status(500).json({ error: error.message || 'Failed to upload files to Google Drive' });

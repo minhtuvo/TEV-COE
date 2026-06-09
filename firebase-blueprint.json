@@ -39,7 +39,19 @@
           "type": "string",
           "description": "Name of the customer company"
         },
+        "factories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of factories associated with this customer"
+        },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
         "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
           "type": "string",
           "format": "date-time"
         }
@@ -153,6 +165,74 @@
         }
       },
       "required": ["equipmentId", "customerId", "date", "createdAt"]
+    },
+    "WorkOrder": {
+      "title": "WorkOrder",
+      "description": "Represents a maintenance work order for an asset.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "equipmentId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "factory": { "type": "string" },
+        "assignedTo": { "type": "string", "description": "User ID of the assigned technician" },
+        "status": {
+          "type": "string",
+          "enum": ["initiated", "approved", "planned", "scheduled", "in-progress", "completed", "cancelled", "overdue"]
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "urgent"]
+        },
+        "type": {
+          "type": "string",
+          "enum": ["preventive", "corrective", "inspection", "emergency", "unplanned"]
+        },
+        "responsibleApprove": { "type": "string", "description": "Role required to approve current phase" },
+        "responsibleDo": { "type": "string", "description": "Role required to perform current phase" },
+        "workPermitId": { "type": "string" },
+        "blockingRequired": { "type": "boolean" },
+        "isUnplanned": { "type": "boolean" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "usedMaterials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "itemId": { "type": "string" },
+              "name": { "type": "string" },
+              "quantity": { "type": "number" },
+              "unit": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "equipmentId", "customerId", "status", "priority", "type", "createdAt"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Represents a spare part or material in the warehouse.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "category": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "minStock": { "type": "number" },
+        "location": { "type": "string" },
+        "price": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "sku", "quantity", "unit", "createdAt"]
     }
   },
   "firestore": {
@@ -171,6 +251,14 @@
     "dgaReports/{reportId}": {
       "schema": { "$ref": "#/entities/DgaReport" },
       "description": "Stores DGA analysis reports."
+    },
+    "workOrders/{orderId}": {
+      "schema": { "$ref": "#/entities/WorkOrder" },
+      "description": "Stores maintenance work orders."
+    },
+    "inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Stores inventory items and spare parts."
     }
   }
 }

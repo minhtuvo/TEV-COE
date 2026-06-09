@@ -1,6 +1,6 @@
 {
-  "name": "TEV Service Flatform",
-  "description": "",
+  "name": "Renewable CMMS & Analytics",
+  "description": "Hệ thống quản lý bảo trì (CMMS) và phân tích rủi ro chuyên sâu cho ngành năng lượng tái tạo (Solar & Wind).",
   "requestFramePermissions": [
     "camera"
   ]

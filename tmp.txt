@@ -1,2 +1,0 @@
-  // "default" to the CommonJS "module.exports" for node compatibility.
-module.exports = app;
