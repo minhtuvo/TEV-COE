@@ -253,9 +253,19 @@ service cloud.firestore {
 
     match /inventory/{itemId} {
       allow read: if isAuthenticated();
-      allow create: if isAdmin() && isValidInventoryItem(request.resource.data);
-      allow update: if isAdmin() && isValidInventoryItem(request.resource.data);
+      allow create: if isAuthenticated() && isValidInventoryItem(request.resource.data);
+      allow update: if isAuthenticated() && isValidInventoryItem(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
 
     match /_connection_test_/ping {

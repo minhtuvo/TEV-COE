@@ -3,5 +3,8 @@
   "description": "Hệ thống quản lý bảo trì (CMMS) và phân tích rủi ro chuyên sâu cho ngành năng lượng tái tạo (Solar & Wind).",
   "requestFramePermissions": [
     "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

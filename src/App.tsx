@@ -44,6 +44,7 @@ import {
   Droplets,
   Gauge,
   RefreshCw,
+  RotateCcw,
   LogOut,
   User,
   Users,
@@ -54,7 +55,14 @@ import {
   Copy,
   Package,
   Trash2,
-  ShieldCheck
+  ShieldCheck,
+  Mail,
+  BarChart3,
+  Globe,
+  Navigation,
+  Layers,
+  FileSpreadsheet,
+  ClipboardCheck
 } from 'lucide-react';
 import {
   LineChart,
@@ -79,7 +87,7 @@ import {
   PolarAngleAxis,
   PolarRadiusAxis
 } from 'recharts';
-import { MapContainer, TileLayer, Marker, Popup, Tooltip as LeafletTooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip as LeafletTooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -98,6 +106,50 @@ import {
   MotorDiagnosticTests,
   MotorPhaseData
 } from './lib/healthCalculator';
+import { NetaDryTypeChecklist } from './components/NetaDryTypeChecklist';
+import { NetaLargeDryTypeChecklist } from './components/NetaLargeDryTypeChecklist';
+import { NetaBessChecklist } from './components/NetaBessChecklist';
+import { NetaPvChecklist } from './components/NetaPvChecklist';
+import { PvCellDeepThermalAnalyzer } from './components/PvCellDeepThermalAnalyzer';
+import { NetaEvseChecklist } from './components/NetaEvseChecklist';
+import { NetaCableChecklist } from './components/NetaCableChecklist';
+import { NetaCableLvChecklist } from './components/NetaCableLvChecklist';
+import { NetaLvBreakerChecklist } from './components/NetaLvBreakerChecklist';
+import { NetaGroundingChecklist } from './components/NetaGroundingChecklist';
+import { NetaDcMotorChecklist } from './components/NetaDcMotorChecklist';
+import { NetaSf6SwitchChecklist } from './components/NetaSf6SwitchChecklist';
+import { NetaThermographyChecklist } from './components/NetaThermographyChecklist';
+import { NetaPartialDischargeChecklist } from './components/NetaPartialDischargeChecklist';
+import { NetaMotorChecklist } from './components/NetaMotorChecklist';
+import { NetaLiquidTransformerChecklist } from './components/NetaLiquidTransformerChecklist';
+import { DgaHistoricalTrendChart } from './components/DgaHistoricalTrendChart';
+import { DgaAdvancedDiagnosticsDashboard } from './components/DgaAdvancedDiagnosticsDashboard';
+import { DgaParamTrendInput } from './components/dga/DgaParamTrendInput';
+import { getLastRecordedDgaValues } from './utils/dgaHistoryService';
+import { NetaRelayChecklist } from './components/NetaRelayChecklist';
+import { NetaUpsChecklist } from './components/NetaUpsChecklist';
+import { NetaSyncMachineryChecklist } from './components/NetaSyncMachineryChecklist';
+import { NetaBatteryFloodedChecklist } from './components/NetaBatteryFloodedChecklist';
+import { NetaBatteryVrlaChecklist } from './components/NetaBatteryVrlaChecklist';
+import { NetaAtsChecklist } from './components/NetaAtsChecklist';
+import { NetaEngineGeneratorChecklist } from './components/NetaEngineGeneratorChecklist';
+import { NetaSwitchgearChecklist } from './components/NetaSwitchgearChecklist';
+import { PmScheduleDashboard } from './components/PmScheduleDashboard';
+import { EquipmentChecklistSelector, FieldEntryMode } from './components/EquipmentChecklistSelector';
+import { 
+  FseFieldDataEntryStation,
+  CustomerItem,
+  EquipmentItem,
+  WorkOrderItem 
+} from './components/FseFieldDataEntryStation';
+import {
+  compareVersionsBetweenFirestoreAndSheets,
+  ReconciliationReport,
+  ReconciliationItem,
+  formatVersionDate,
+  parseVersionTimestamp
+} from './utils/syncReconciliationService';
+import { SyncReconciliationModal } from './components/SyncReconciliationModal';
 
 enum OperationType {
   CREATE = 'create',
@@ -1030,6 +1082,39 @@ const createCustomIcon = (status: string, count: number) => {
   });
 };
 
+const MapBoundsHandler = ({ 
+  sites, 
+  viewTrigger 
+}: { 
+  sites: any[]; 
+  viewTrigger: { type: 'auto' | 'fit-all' | 'global' | 'sea' | 'vn'; timestamp: number } 
+}) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+    if (viewTrigger.type === 'global') {
+      map.setView([20, 15], 2);
+    } else if (viewTrigger.type === 'sea') {
+      map.setView([13.0, 105.0], 5);
+    } else if (viewTrigger.type === 'vn') {
+      map.setView([16.047079, 108.206230], 5.5);
+    } else if (viewTrigger.type === 'fit-all' || viewTrigger.type === 'auto') {
+      const validPoints = (sites || []).filter(s => typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng));
+      if (validPoints.length === 1) {
+        map.setView([validPoints[0].lat, validPoints[0].lng], 8);
+      } else if (validPoints.length > 1) {
+        const bounds = L.latLngBounds(validPoints.map(s => [s.lat, s.lng]));
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+      } else {
+        map.setView([16.047079, 108.206230], 5);
+      }
+    }
+  }, [sites, viewTrigger, map]);
+
+  return null;
+};
+
 const initialAllEquipment: any[] = [];
 const initialAllReports: any[] = [];
 
@@ -1110,7 +1195,7 @@ const getLabelPos = (points: number[][]) => {
   return pt.split(',').map(Number);
 };
 
-const regionsT1: { id: string, label?: string, color: string, points: number[][] }[] = [
+export const regionsT1: { id: string, label?: string, color: string, points: number[][] }[] = [
   { id: 'PD', color: '#bbf7d0', points: [[100,0,0], [98,2,0], [98,0,2]] },
   { id: 'T1', color: '#fde047', points: [[98,2,0], [80,20,0], [76,20,4], [96,0,4], [98,0,2]] },
   { id: 'T2', color: '#f97316', points: [[80,20,0], [50,50,0], [46,50,4], [76,20,4]] },
@@ -1514,6 +1599,8 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [mapLayer, setMapLayer] = useState<'streets' | 'light' | 'satellite' | 'topo'>('streets');
+  const [mapViewTrigger, setMapViewTrigger] = useState<{ type: 'auto' | 'fit-all' | 'global' | 'sea' | 'vn'; timestamp: number }>({ type: 'auto', timestamp: Date.now() });
   const [equipmentSearch, setEquipmentSearch] = useState('');
   const [showEqDropdown, setShowEqDropdown] = useState(false);
   const [workOrders, setWorkOrders] = useState<any[]>([]);
@@ -1605,6 +1692,114 @@ export default function App() {
   const [selectedEqForQR, setSelectedEqForQR] = useState<any>(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [allEquipment, setAllEquipment] = useState(initialAllEquipment);
+  const [showPMNotificationModal, setShowPMNotificationModal] = useState(false);
+  const [pmNotificationLoading, setPmNotificationLoading] = useState(false);
+  const [pmNotificationResult, setPmNotificationResult] = useState<any>(null);
+  const [pmUpcomingTasks, setPmUpcomingTasks] = useState<any[]>([]);
+  const [testEmailRecipient, setTestEmailRecipient] = useState('sgm1707@gmail.com');
+  const [pmNotificationConfig, setPmNotificationConfig] = useState<any>(null);
+  const [pmSubTab, setPmSubTab] = useState<'dashboard' | 'schedule' | 'alerts'>('dashboard');
+
+  // Sync Reconciliation State (Kiểm tra phiên bản & Đối soát Firestore ↔ Google Sheets)
+  const [isReconciling, setIsReconciling] = useState<boolean>(false);
+  const [showReconciliationModal, setShowReconciliationModal] = useState<boolean>(false);
+  const [reconciliationReport, setReconciliationReport] = useState<ReconciliationReport | null>(null);
+
+  const handleQuickUpdateWorkOrderStatus = async (woId: string, newStatus: string) => {
+    const now = new Date().toISOString();
+    setWorkOrders(prev => prev.map(wo => wo.id === woId ? { ...wo, status: newStatus, completedAt: newStatus === 'completed' ? now : wo.completedAt } : wo));
+    try {
+      const docRef = doc(db, 'workOrders', woId);
+      await updateDoc(docRef, {
+        status: newStatus,
+        updatedAt: now,
+        completedAt: newStatus === 'completed' ? now : null
+      });
+    } catch (e) {
+      console.warn('Updated local work order status:', woId, newStatus);
+    }
+  };
+
+  const checkUpcomingPMAlerts = async () => {
+    try {
+      setPmNotificationLoading(true);
+      const res = await fetch('/api/notifications/pm-upcoming', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workOrders, allEquipment, targetDays: 3 })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPmUpcomingTasks(data.tasks || []);
+      }
+    } catch (err) {
+      console.error('Failed to check upcoming PM tasks:', err);
+    } finally {
+      setPmNotificationLoading(false);
+    }
+  };
+
+  const fetchPMNotificationConfig = async () => {
+    try {
+      const res = await fetch('/api/notifications/pm-config');
+      const data = await res.json();
+      setPmNotificationConfig(data);
+    } catch (err) {
+      console.error('Failed to load PM notification config:', err);
+    }
+  };
+
+  const handleSendPMAlerts = async (force: boolean = false) => {
+    try {
+      setPmNotificationLoading(true);
+      const res = await fetch('/api/notifications/send-pm-alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workOrders, allEquipment, forceSend: force })
+      });
+      const data = await res.json();
+      setPmNotificationResult(data);
+      if (data.success) {
+        alert(data.message || 'Đã gửi thông báo bảo trì PM thành công!');
+        checkUpcomingPMAlerts();
+      } else {
+        alert('Lỗi: ' + (data.error || 'Không thể gửi thông báo.'));
+      }
+    } catch (err: any) {
+      alert('Lỗi gửi thông báo: ' + err.message);
+    } finally {
+      setPmNotificationLoading(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    try {
+      setPmNotificationLoading(true);
+      const res = await fetch('/api/notifications/test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient: testEmailRecipient })
+      });
+      const data = await res.json();
+      setPmNotificationResult(data);
+      if (data.success) {
+        alert(data.message || 'Đã gửi email thử nghiệm!');
+      } else {
+        alert('Lỗi: ' + (data.error || 'Gửi thất bại.'));
+      }
+    } catch (err: any) {
+      alert('Lỗi gửi email thử nghiệm: ' + err.message);
+    } finally {
+      setPmNotificationLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'pm-schedule') {
+      checkUpcomingPMAlerts();
+      fetchPMNotificationConfig();
+    }
+  }, [activeTab, workOrders.length]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -2495,6 +2690,463 @@ export default function App() {
   const [reportCurrentPage, setReportCurrentPage] = useState(1);
   const reportsPerPage = 15;
 
+  // Field Entry Mode: NETA ATS-2025 Liquid Transformers, Solar PV, BESS, Dry-Type, vs Standard
+  const [fieldEntryMode, setFieldEntryMode] = useState<FieldEntryMode>('neta-liquid-transformer');
+  const [fieldEntrySubTab, setFieldEntrySubTab] = useState<'station' | 'checklists'>('station');
+
+  const handleSaveNetaReport = async (reportPayload: any) => {
+    try {
+      const { data: netaData, analysisResult, equipmentId, date, type: payloadType } = reportPayload;
+      const reportId = `REP-NETA-${Date.now()}`;
+      const statusMap = {
+        PASS: 'healthy' as const,
+        INVESTIGATE: 'warning' as const,
+        REPAIR_SCHEDULED: 'warning' as const,
+        MONITOR: 'warning' as const,
+        REPAIR_PRACTICAL: 'warning' as const,
+        REPAIR_IMMEDIATELY: 'critical' as const,
+        REPAIR_URGENT: 'critical' as const,
+        NORMAL_TRENDING: 'healthy' as const,
+        FAIL: 'critical' as const,
+      };
+      const calculatedStatus = statusMap[analysisResult?.overall_status as keyof typeof statusMap] || 'warning';
+
+      const isGenerator = payloadType?.includes('ENGINE_GENERATOR') || payloadType?.includes('GENERATOR') || Boolean(netaData?.site_info?.generator_tag);
+      const isSwitchgear = !isGenerator && (payloadType?.includes('Switchgear') || payloadType?.includes('Sec 7.1.1') || Boolean(netaData?.site_info?.switchgear_tag));
+      const isAts = !isGenerator && !isSwitchgear && (payloadType?.includes('AUTOMATIC_TRANSFER_SWITCH') || payloadType?.includes('ATS') || Boolean(netaData?.site_info?.ats_tag));
+      const isBatteryVrla = payloadType?.includes('BATTERY_VRLA') || payloadType?.includes('VRLA') || (Boolean(netaData?.site_info?.battery_bank_tag) && (netaData?.electrical_tests?.negative_post_temperature_c !== undefined || netaData?.site_info?.battery_type?.includes('VRLA')));
+      const isBatteryFlooded = !isBatteryVrla && (payloadType?.includes('BATTERY_FLOODED') || payloadType?.includes('Flooded') || Boolean(netaData?.site_info?.battery_bank_tag));
+      const isLiquidTransformer = payloadType?.includes('Liquid-Filled') || payloadType?.includes('Sec 7.2.2') || Boolean(netaData?.electrical_tests?.oil_sample_tests_astm_d923);
+      const isDcMotor = payloadType?.includes('DC') || payloadType?.includes('Sec 7.15.3') || Boolean(netaData?.electrical_tests?.armature_bar_to_bar_resistance_micro_ohms);
+      const isMotor = !isDcMotor && (payloadType?.includes('Rotating') || payloadType?.includes('Motor') || Boolean(netaData?.site_info?.motor_tag));
+      const isPd = payloadType?.includes('Partial Discharge') || payloadType?.includes('PD') || Boolean(netaData?.pd_sensor_measurements);
+      const isThermography = payloadType?.includes('Thermograph') || Boolean(netaData?.site_info?.survey_tag);
+      const isSf6Switch = payloadType?.includes('SF6') || Boolean(netaData?.site_info?.switch_tag);
+      const isGrounding = payloadType?.includes('Grounding') || payloadType?.includes('Sec 7.13') || Boolean(netaData?.site_info?.grounding_system_tag) || Boolean(netaData?.electrical_tests?.fall_of_potential_ground_resistance_ieee_81_ohms);
+      const isLvBreaker = payloadType?.includes('Circuit Breakers') || payloadType?.includes('ACB') || payloadType?.includes('Sec 7.6.1.2') || (Boolean(netaData?.site_info?.breaker_tag) && Boolean(netaData?.electrical_tests?.secondary_injection_trip_unit_test));
+      const isCableLv = payloadType?.includes('Low-Voltage') || payloadType?.includes('Sec 7.3.2') || (Boolean(netaData?.site_info?.cable_tag) && Boolean(netaData?.electrical_tests?.parallel_conductors_dc_resistance_milli_ohms));
+      const isCable = !isCableLv && (payloadType?.includes('Cable') || Boolean(netaData?.site_info?.cable_tag));
+      const isEvse = payloadType?.includes('Electric Vehicle') || payloadType?.includes('EVSE') || Boolean(netaData?.site_info?.evse_tag);
+      const isPv = payloadType?.includes('Solar') || Boolean(netaData?.site_info?.pv_array_tag);
+      const isBess = payloadType?.includes('BESS') || Boolean(netaData?.site_info?.bess_container_tag);
+      const isLarge = payloadType?.includes('Large') || Boolean(netaData?.electrical_tests?.core_insulation_resistance_500v_dc_megohms !== undefined);
+
+      const equipTag = equipmentId || netaData?.site_info?.grounding_system_tag || netaData?.site_info?.breaker_tag || netaData?.site_info?.switchgear_tag || netaData?.site_info?.generator_tag || netaData?.site_info?.ats_tag || netaData?.site_info?.battery_bank_tag || netaData?.site_info?.motor_tag || netaData?.site_info?.equipment_tag || netaData?.site_info?.survey_tag || netaData?.site_info?.switch_tag || netaData?.site_info?.cable_tag || netaData?.site_info?.evse_tag || netaData?.site_info?.pv_array_tag || netaData?.site_info?.bess_container_tag || netaData?.site_info?.transformer_tag || 'EQ-01';
+      let equipName = `Thiết bị ${equipTag}`;
+      let equipType = 'Máy biến áp';
+      let testStandard = 'ANSI/NETA ATS-2025';
+      let reportNotes = `[${testStandard}] ${analysisResult?.status_reason || 'Đã phân tích kỹ thuật'}`;
+
+      if (isGrounding) {
+        equipName = `Hệ thống tiếp địa & nối đất ${equipTag}`;
+        equipType = 'Grounding Systems (NETA ATS-2025 Mục 7.13 & IEEE Std 81)';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.13 & IEEE Std 81';
+        reportNotes = `[Tiếp Địa Sec 7.13 & IEEE 81] ${analysisResult?.status_reason || 'Đã phân tích'}. Fall-of-Potential: ${netaData?.electrical_tests?.fall_of_potential_ground_resistance_ieee_81_ohms || 7.8} Ω (Chuẩn Trạm ≤ 1.0 Ω / CN ≤ 5.0 Ω), Cổng hàng rào: ${netaData?.electrical_tests?.point_to_point_continuity_milli_ohms?.main_bus_to_substation_fence_gate || 680} mΩ (Chuẩn ≤ 0.5 Ω)`;
+      } else if (isLvBreaker) {
+        equipName = `Máy cắt không khí hạ áp ${equipTag}`;
+        equipType = 'Low-Voltage Power Circuit Breakers (ACB)';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.6.1.2';
+        reportNotes = `[ACB Sec 7.6.1.2] ${analysisResult?.status_reason || 'Đã phân tích'}. Tiếp điểm Pole C: ${netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.pole_c} µΩ (Lệch ${analysisResult?.evaluations?.contact_resistance?.max_deviation_percent || 131.3}%), Trip Unit Ground Fault: ${netaData?.electrical_tests?.secondary_injection_trip_unit_test?.ground_fault_pickup_status}, Cách điện ĐK: ${netaData?.electrical_tests?.control_wiring_ir_megohms} MΩ`;
+      } else if (isCableLv) {
+        equipName = `Cáp điện hạ áp ${equipTag}`;
+        equipType = 'Low-Voltage Cable (1,000V Max)';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.3.2';
+        reportNotes = `[Cáp Hạ Áp Sec 7.3.2] ${analysisResult?.status_reason || 'Đã phân tích'}. Cách điện Pha C: ${netaData?.electrical_tests?.insulation_resistance_1000v_1min_megohms?.phase_c_to_ground} MΩ (Chuẩn ≥ 100 MΩ), Dây song song Pha C: Run 1 ${netaData?.electrical_tests?.parallel_conductors_dc_resistance_milli_ohms?.phase_c_run1} mΩ / Run 2 ${netaData?.electrical_tests?.parallel_conductors_dc_resistance_milli_ohms?.phase_c_run2} mΩ, Thông mạch: Đạt`;
+      } else if (isSwitchgear) {
+        equipName = `Tủ điện phân phối & tủ đóng cắt ${equipTag}`;
+        equipType = 'Switchgear & Switchboard Assemblies';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.1.1';
+        reportNotes = `[Switchgear Sec 7.1.1] ${analysisResult?.status_reason || 'Đã phân tích'}. Cách điện ĐK: ${netaData?.electrical_tests?.control_wiring_ir_1000v_megohms} MΩ (Chuẩn ≥ 2.0 MΩ), Thanh cái IR: ${netaData?.electrical_tests?.bus_insulation_resistance_2500v_1min_megohms?.phase_a_to_ground} MΩ, CPT Turns Ratio: ±${netaData?.electrical_tests?.cpt_tests?.turns_ratio_error_percent}%, TEV PD: ${netaData?.electrical_tests?.online_partial_discharge_tev_db} dB`;
+      } else if (isGenerator) {
+        equipName = `Tổ máy phát điện khẩn cấp ${equipTag}`;
+        equipType = 'Emergency Engine Generator';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.22.1 & NFPA 110';
+        reportNotes = `[Generator Sec 7.22.1 & NFPA 110] ${analysisResult?.status_reason || 'Đã phân tích'}. Quá tốc độ: ${analysisResult?.overspeed_status || 'Fail'}, PI Stator: ${analysisResult?.insulation_analysis?.pi_value || 1.7} (Chuẩn ≥ 2.0), Thời gian nhận tải: ${analysisResult?.nfpa_110_analysis?.start_time_sec || 8.5}s (NFPA 110 Class 10 ≤ 10s)`;
+      } else if (isAts) {
+        equipName = `Bộ chuyển nguồn tự động ATS ${equipTag}`;
+        equipType = 'Automatic Transfer Switch (ATS)';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.22.3';
+        reportNotes = `[ATS Sec 7.22.3] ${analysisResult?.status_reason || 'Đã phân tích'}. Tiếp điểm Normal C: ${netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.normal_source_pole_c || 68.4} µΩ (Lệch ${analysisResult?.contact_resistance_analysis?.normal_max_deviation_percent || 209.5}%), Cách điện ĐK: ${netaData?.electrical_tests?.control_wiring_ir_megohms || 45} MΩ, Trình tự tự động: Đạt`;
+      } else if (isBatteryVrla) {
+        equipName = `Giàn ắc quy VRLA AGM/GEL ${equipTag}`;
+        equipType = 'Valve-Regulated Lead-Acid (VRLA) Battery';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.18.1.3 & IEEE 1188';
+        reportNotes = `[Battery VRLA Sec 7.18.1.3] ${analysisResult?.status_reason || 'Đã phân tích'}. Nhiệt độ cực âm: ${netaData?.electrical_tests?.negative_post_temperature_c?.max_temp_monoblock_12_c || 41.2}°C (Avg ${netaData?.electrical_tests?.negative_post_temperature_c?.avg_temp_c || 26.5}°C), Biến động ôm: ${netaData?.electrical_tests?.internal_ohmic_measurement_resistance_mohm?.variance_percent || 45.3}%, Cân bằng đất: (+) ${netaData?.electrical_tests?.system_voltage_to_ground_v?.positive_to_ground_v}V / (-) ${netaData?.electrical_tests?.system_voltage_to_ground_v?.negative_to_ground_v}V`;
+      } else if (isBatteryFlooded) {
+        equipName = `Giàn ắc quy Flooded Lead-Acid ${equipTag}`;
+        equipType = 'Flooded Lead-Acid Battery';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.18.1.1 & IEEE 450';
+        reportNotes = `[Battery Flooded Sec 7.18.1.1] ${analysisResult?.status_reason || 'Đã phân tích'}. Lệch áp float: ${netaData?.electrical_tests?.cell_voltages_float_mode_v?.voltage_spread_v || 0.08}V, Biến động ôm: ${netaData?.electrical_tests?.internal_ohmic_measurement_resistance_mohm?.variance_percent || 37.7}%, Điện áp đất: (+) ${netaData?.electrical_tests?.system_voltage_to_ground_v?.positive_to_ground_v}V / (-) ${netaData?.electrical_tests?.system_voltage_to_ground_v?.negative_to_ground_v}V`;
+      } else if (isLiquidTransformer) {
+        equipName = `Máy biến áp ngâm dầu ${equipTag}`;
+        equipType = 'Liquid-Filled Transformer';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.2.2';
+        reportNotes = `[Liquid-Filled Sec 7.2.2] ${analysisResult?.status_reason || 'Đã phân tích'}. Đánh thủng dầu: ${netaData?.electrical_tests?.oil_sample_tests_astm_d923?.dielectric_breakdown_d1816_1mm_kv || 21}kV, Ẩm: ${netaData?.electrical_tests?.oil_sample_tests_astm_d923?.water_content_d1533_ppm || 32}ppm, DGA C2H2: ${netaData?.electrical_tests?.dga_test_ieee_c57_104?.acetylene_c2h2_ppm || 6.8}ppm`;
+      } else if (isDcMotor) {
+        equipName = `Động cơ / Máy phát điện một chiều DC ${equipTag}`;
+        equipType = 'DC Motors & Generators (NETA ATS-2025 Mục 7.15.3)';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.15.3 & IEEE Std 43';
+        reportNotes = `[DC Motor Sec 7.15.3] ${analysisResult?.status_reason || 'Đã phân tích'}. Rating: ${netaData?.site_info?.motor_rating || '250kW 440V DC'}, Bar-to-Bar: ${netaData?.electrical_tests?.armature_bar_to_bar_resistance_micro_ohms?.max_deviation_percent || 8.7}% (Chuẩn ≤ 5.0%), Sụt áp cực từ: ${analysisResult?.evaluations?.field_pole_voltage_drop?.max_deviation_percent || 0.8}% (Chuẩn ≤ 10%), Armature PI: ${netaData?.electrical_tests?.insulation_resistance_40c_megohms?.armature_pi_value || 2.78} (Chuẩn ≥ 2.0)`;
+      } else if (isMotor) {
+        equipName = `Động cơ / Máy phát điện quay ${equipTag}`;
+        equipType = 'Rotating Machinery (AC Induction Motor)';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.15.1';
+        reportNotes = `[Rotating Machinery Sec 7.15.1] ${analysisResult?.status_reason || 'Đã phân tích'}. Rating: ${netaData?.site_info?.motor_rating || '4160V 500HP'}, Rung: ${netaData?.electrical_tests?.vibration_test_table_100_10?.velocity_in_sec_pk || 0.22} in./s, MCSA: ${netaData?.electrical_tests?.current_signature_analysis_mcsa?.broken_bar_sideband_db || 35.2} dB`;
+      } else if (isPd) {
+        equipName = `Khảo sát phóng điện cục bộ online ${equipTag}`;
+        equipType = 'Online Partial Discharge';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 11 & Bảng 100.23';
+        reportNotes = `[Online PD Table 100.23] ${analysisResult?.status_reason || 'Đã phân tích'}. Điện áp: ${netaData?.survey_conditions?.system_voltage_kv || 22}kV, Dòng: ${netaData?.survey_conditions?.operating_current_amp || 410}A, Số cảm biến: ${netaData?.pd_sensor_measurements?.length || 3}`;
+      } else if (isThermography) {
+        equipName = `Khảo sát nhiệt độ hồng ngoại ${equipTag}`;
+        equipType = 'Thermographic Survey';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 9 & Bảng 100.18';
+        reportNotes = `[Thermography Table 100.18] ${analysisResult?.status_reason || 'Đã phân tích'}. Tải: ${netaData?.survey_conditions?.load_percentage || 78}%, Môi trường: ${netaData?.survey_conditions?.ambient_temperature_c || 32}°C`;
+      } else if (isSf6Switch) {
+        equipName = `Cầu dao ngắt mạch trung áp SF6 ${equipTag}`;
+        equipType = 'SF6 Switch';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.5.4';
+        reportNotes = `[SF6 Switch Sec 7.5.4] ${analysisResult?.status_reason || 'Đã phân tích'}. Khí SO2: ${netaData?.electrical_tests?.sf6_gas_quality_test?.so2_decomposition_ppmv || 18.5} ppmv, Purity: ${netaData?.electrical_tests?.sf6_gas_quality_test?.sf6_purity_percent || 96.2}%, Pole C: ${netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.pole_c || 82.5}µΩ`;
+      } else if (isCable) {
+        equipName = `Cáp trung/cao áp có màn chắn ${equipTag}`;
+        equipType = 'Shielded Cable';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.3.3';
+        reportNotes = `[Cable Sec 7.3.3] ${analysisResult?.status_reason || 'Đã phân tích'}. Màn chắn Pha A: ${netaData?.electrical_tests?.shield_resistance_ohms?.phase_a_shield || 8.2}Ω, Pha B: ${netaData?.electrical_tests?.shield_resistance_ohms?.phase_b_shield || 8.5}Ω, Pha C: ${netaData?.electrical_tests?.shield_resistance_ohms?.phase_c_shield || 24.6}Ω, VLF: ${netaData?.electrical_tests?.vlf_withstand_test_0_1hz_30min?.test_voltage_kv_rms || 28}kV`;
+      } else if (isEvse) {
+        equipName = `Trạm sạc xe điện EVSE ${equipTag}`;
+        equipType = 'EVSE';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.26';
+        reportNotes = `[EVSE Sec 7.26] ${analysisResult?.status_reason || 'Đã phân tích'}. Súng 1 PE: ${netaData?.electrical_tests?.protective_conductor_resistance_ohms?.gun_1_pe_resistance || 0.18}Ω, Súng 2 PE: ${netaData?.electrical_tests?.protective_conductor_resistance_ohms?.gun_2_pe_resistance || 0.68}Ω, V_DC: ${netaData?.electrical_tests?.charger_output_voltage_v_dc || 402}V, Ripple: ${netaData?.electrical_tests?.dc_voltage_ripple_percent || 0.8}%`;
+      } else if (isPv) {
+        equipName = `Hệ thống Điện mặt trời PV ${equipTag}`;
+        equipType = 'Solar PV';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.29';
+        reportNotes = `[Solar PV Sec 7.29] ${analysisResult?.status_reason || 'Đã phân tích'}. Voc Chuỗi 3: ${netaData?.electrical_tests?.open_circuit_voltage_voc?.measured_voc_v?.[2] || 850}V, IR Chuỗi 3: ${netaData?.electrical_tests?.dry_insulation_resistance_megohms?.string_03_to_ground || 12}MΩ, Nối đất: ${netaData?.electrical_tests?.ground_resistance_section_7_13_ohms || 2.1}Ω`;
+      } else if (isBess) {
+        equipName = `Hệ thống Pin Lưu Trữ BESS ${equipTag}`;
+        equipType = 'BESS';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.28 & IEEE 1547';
+        reportNotes = `[BESS Sec 7.28] ${analysisResult?.status_reason || 'Đã phân tích'}. V_DC: ${netaData?.electrical_and_subsystem_tests?.measured_total_dc_voltage_v}V, THDu: ${netaData?.electrical_and_subsystem_tests?.power_quality_at_poi_ieee_1547?.voltage_thd_percent}%, PCCC: ${netaData?.visual_inspection?.fire_suppression_installed ? 'Đạt' : 'Lỗi'}`;
+      } else if (isLarge) {
+        equipName = `Máy biến áp khô dung lượng lớn ${equipTag}`;
+        equipType = 'Máy biến áp';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.2.1.2';
+        reportNotes = `[MBA Khô Lớn Sec 7.2.1.2] ${analysisResult?.status_reason || 'Đã phân tích'}. Core IR: ${netaData?.electrical_tests?.core_insulation_resistance_500v_dc_megohms}MΩ, PI: ${netaData?.electrical_tests?.pi_value}`;
+      } else {
+        equipName = `Máy biến áp khô hạ áp ${equipTag}`;
+        equipType = 'Máy biến áp';
+        testStandard = 'ANSI/NETA ATS-2025 Mục 7.2.1.1';
+        reportNotes = `[MBA Khô Nhỏ Sec 7.2.1.1] ${analysisResult?.status_reason || 'Đã phân tích'}. IR: ${netaData?.electrical_tests?.insulation_resistance_1min_1000v_megohms?.pri_to_ground}MΩ, DAR: ${netaData?.electrical_tests?.dar_value}`;
+      }
+
+      const newReport = {
+        id: reportId,
+        equipmentId: equipTag,
+        equipmentName: equipName,
+        date: date || netaData?.site_info?.test_date || new Date().toISOString().split('T')[0],
+        inspector: netaData?.site_info?.fse_name || 'Kỹ sư FSE',
+        status: calculatedStatus,
+        notes: reportNotes,
+        factory: netaData?.site_info?.project_name || 'Nhà máy TEV Phase 2',
+        type: equipType,
+        testStandard: testStandard,
+        details: {
+          netaData,
+          analysisResult
+        }
+      };
+
+      setAllReports(prev => [newReport, ...prev]);
+
+      // Update equipment status if found in allEquipment
+      setAllEquipment(prev => prev.map(eq => {
+        if (eq.id === newReport.equipmentId) {
+          return {
+            ...eq,
+            lastCheck: newReport.date,
+            status: calculatedStatus
+          };
+        }
+        return eq;
+      }));
+
+      // Persist to firestore if authenticated
+      if (auth.currentUser) {
+        try {
+          await setDoc(doc(db, 'reports', reportId), newReport);
+        } catch (err) {
+          console.warn('Could not save to firestore:', err);
+        }
+      }
+
+      // Auto-sync field test result directly to Google Sheet "TEV Service Flatform" & the corresponding Equipment Sheet
+      try {
+        const tokens = localStorage.getItem('google_tokens');
+        const spreadsheetId = localStorage.getItem('tev_spreadsheet_id') || '';
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (tokens) headers['Authorization'] = `Bearer ${tokens}`;
+        if (spreadsheetId) headers['x-spreadsheet-id'] = spreadsheetId;
+
+        let targetRecordType = 'transformer';
+        if (isLvBreaker || equipType.includes('Breaker') || equipType.includes('máy cắt')) {
+          targetRecordType = 'breaker';
+        } else if (isMotor || isDcMotor || equipType.includes('Motor') || equipType.includes('động cơ')) {
+          targetRecordType = 'motor';
+        } else if (isGenerator || equipType.includes('Generator') || equipType.includes('máy phát')) {
+          targetRecordType = 'generator';
+        } else if (isSwitchgear || equipType.includes('Switchgear') || equipType.includes('tủ điện')) {
+          targetRecordType = 'switchgear';
+        } else if (isCable || isCableLv || equipType.includes('Cable') || equipType.includes('cáp')) {
+          targetRecordType = 'cable';
+        } else if (isBatteryVrla || isBatteryFlooded || isBess || equipType.includes('Battery') || equipType.includes('pin') || equipType.includes('UPS')) {
+          targetRecordType = 'battery';
+        } else if (equipType.includes('Relay') || equipType.includes('rơ le')) {
+          targetRecordType = 'relay';
+        }
+
+        // 1. Sync to Equipment-Specific Sheet (Máy cắt, Động cơ, Máy phát, Tủ điện, Máy biến áp, Cáp điện, Pin & UPS, Rơ le)
+        await fetch('/api/sheets/sync-record', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            recordType: targetRecordType,
+            spreadsheetId,
+            data: {
+              woId: reportId,
+              equipmentId: equipTag,
+              equipmentName: equipName,
+              customer: customerName || 'Khách hàng hiện trường',
+              location: newReport.factory || siteName || 'Hiện trường',
+              assessment: `${analysisResult?.overall_status || 'Hoàn thành'} - ${analysisResult?.status_reason || 'Đạt tiêu chuẩn'}`,
+              testDate: newReport.date,
+              inspector: newReport.inspector || auth.currentUser?.email || 'Kỹ sư FSE',
+              // Breaker
+              contactResistanceR: netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.pole_a || '',
+              contactResistanceY: netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.pole_b || '',
+              contactResistanceB: netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.pole_c || '',
+              insulationIrMo: netaData?.electrical_tests?.insulation_resistance_megohms?.pole_a_to_ground || '',
+              controlCircuitIrMo: netaData?.electrical_tests?.control_wiring_ir_megohms || '',
+              // Motor
+              motorIrMo: netaData?.electrical_tests?.insulation_resistance_1min_megohms || '',
+              motorPi: netaData?.electrical_tests?.polarization_index_pi || '',
+              vibrationDeMmS: netaData?.mechanical_tests?.vibration_de_mm_s || '',
+              vibrationNdeMmS: netaData?.mechanical_tests?.vibration_nde_mm_s || '',
+              // Generator
+              genPowerKva: netaData?.site_info?.rated_power_kva || '',
+              genStartSec: netaData?.operational_tests?.cranking_time_seconds || '',
+              genOilPressureBar: netaData?.operational_tests?.oil_pressure_psi || '',
+              // Switchgear
+              swgTevDbmv: netaData?.electrical_tests?.online_partial_discharge_tev_db || '',
+              swgUltrasonicDbuv: netaData?.electrical_tests?.airborne_ultrasound_dbuv || '',
+              // Transformer
+              trfPowerKva: netaData?.site_info?.rated_mva ? Number(netaData.site_info.rated_mva) * 1000 : '',
+              trfPriVoltageKv: netaData?.site_info?.primary_voltage_kv || '',
+              trfSecVoltageV: netaData?.site_info?.secondary_voltage_v || '',
+              trfOilTempC: netaData?.site_info?.top_oil_temperature_c || '',
+              trfDgaH2: netaData?.electrical_tests?.oil_sample_tests_astm_d923?.dga_h2_ppm || '',
+              trfDgaCh4: netaData?.electrical_tests?.oil_sample_tests_astm_d923?.dga_ch4_ppm || '',
+              trfDgaC2h2: netaData?.electrical_tests?.oil_sample_tests_astm_d923?.dga_c2h2_ppm || '',
+              trfBreakdownKv: netaData?.electrical_tests?.oil_sample_tests_astm_d923?.dielectric_breakdown_d1816_kv || '',
+              trfMoisturePpm: netaData?.electrical_tests?.oil_sample_tests_astm_d923?.water_content_d1533_ppm || '',
+              // Cable
+              irPhaseAGroundMo: netaData?.electrical_tests?.insulation_resistance_1000v_1min_megohms?.phase_a_to_ground || '',
+              irPhaseBGroundMo: netaData?.electrical_tests?.insulation_resistance_1000v_1min_megohms?.phase_b_to_ground || '',
+              irPhaseCGroundMo: netaData?.electrical_tests?.insulation_resistance_1000v_1min_megohms?.phase_c_to_ground || '',
+              // Battery
+              totalVoltageV: netaData?.electrical_tests?.battery_bank_voltage_v || '',
+              floatCurrentA: netaData?.electrical_tests?.float_current_ma ? (Number(netaData.electrical_tests.float_current_ma) / 1000).toFixed(2) : ''
+            }
+          })
+        });
+
+        // 2. Also sync to TEV Service Flatform (Work Order 23 columns)
+        await fetch('/api/sheets/sync-record', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            recordType: 'workOrder',
+            spreadsheetId,
+            data: {
+              id: reportId,
+              workPermitId: `WP-${Date.now().toString().slice(-6)}`,
+              title: `Kiểm tra ${equipName} (${testStandard})`,
+              description: reportNotes,
+              equipmentId: equipTag,
+              failureCode: calculatedStatus === 'critical' ? 'ELEC-01' : calculatedStatus === 'warning' ? 'THERM-01' : 'PM-ROUTINE',
+              customer: customerName || 'Khách hàng hiện trường',
+              type: 'Kiểm định thử nghiệm (Testing)',
+              isUnplanned: false,
+              priority: calculatedStatus === 'critical' ? 'urgent' : calculatedStatus === 'warning' ? 'high' : 'medium',
+              status: 'Hoàn thành',
+              assignedTo: newReport.inspector || auth.currentUser?.email || 'Kỹ sư FSE',
+              responsibleApprove: 'FSE Lead',
+              responsibleDo: 'FSE Onsite',
+              blockingRequired: false,
+              dueDate: newReport.date,
+              usedMaterials: '',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              downtimeStart: '',
+              repairStart: newReport.date,
+              repairEnd: newReport.date,
+              restartTime: ''
+            }
+          })
+        });
+      } catch (sheetSyncErr) {
+        console.warn('Google Sheet auto-sync error for NETA report:', sheetSyncErr);
+      }
+
+      alert(`✅ Đã lưu thành công biên bản kiểm tra ${reportId} cho thiết bị ${newReport.equipmentId} vào Kho Báo Cáo CMMS và đồng bộ lên file Google Sheet "TEV Service Flatform"!`);
+    } catch (err: any) {
+      alert('Lỗi lưu biên bản: ' + err.message);
+    }
+  };
+
+  // Handlers for FseFieldDataEntryStation with accurate version timestamps
+  const handleSaveCustomerFromField = async (customer: CustomerItem) => {
+    const nowIso = new Date().toISOString();
+    const customerWithTimestamp: CustomerItem = {
+      ...customer,
+      createdAt: customer.createdAt || nowIso,
+      updatedAt: nowIso
+    };
+
+    setCustomers(prev => {
+      const idx = prev.findIndex(c => c.id === customerWithTimestamp.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = customerWithTimestamp;
+        return next;
+      }
+      return [customerWithTimestamp, ...prev];
+    });
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'customers', customerWithTimestamp.id), customerWithTimestamp, { merge: true });
+      } catch (e) {
+        console.warn('Firestore customer save error:', e);
+      }
+    }
+
+    try {
+      const tokens = localStorage.getItem('google_tokens');
+      const spreadsheetId = localStorage.getItem('tev_spreadsheet_id') || '';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (tokens) headers['Authorization'] = `Bearer ${tokens}`;
+      if (spreadsheetId) headers['x-spreadsheet-id'] = spreadsheetId;
+
+      await fetch('/api/sheets/sync-record', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          recordType: 'customer',
+          spreadsheetId,
+          data: customerWithTimestamp
+        })
+      });
+    } catch (e) {
+      console.warn('Sheet customer sync error:', e);
+    }
+  };
+
+  const handleSaveEquipmentFromField = async (equipment: EquipmentItem) => {
+    const nowIso = new Date().toISOString();
+    const equipmentWithTimestamp: EquipmentItem = {
+      ...equipment,
+      createdAt: equipment.createdAt || nowIso,
+      updatedAt: nowIso
+    };
+
+    setAllEquipment(prev => {
+      const idx = prev.findIndex(e => e.id === equipmentWithTimestamp.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = equipmentWithTimestamp;
+        return next;
+      }
+      return [equipmentWithTimestamp, ...prev];
+    });
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'equipment', equipmentWithTimestamp.id), equipmentWithTimestamp, { merge: true });
+      } catch (e) {
+        console.warn('Firestore equipment save error:', e);
+      }
+    }
+
+    try {
+      const tokens = localStorage.getItem('google_tokens');
+      const spreadsheetId = localStorage.getItem('tev_spreadsheet_id') || '';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (tokens) headers['Authorization'] = `Bearer ${tokens}`;
+      if (spreadsheetId) headers['x-spreadsheet-id'] = spreadsheetId;
+
+      await fetch('/api/sheets/sync-record', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          recordType: 'equipment',
+          spreadsheetId,
+          data: equipmentWithTimestamp
+        })
+      });
+    } catch (e) {
+      console.warn('Sheet equipment sync error:', e);
+    }
+  };
+
+  const handleSaveWorkOrderFromField = async (wo: WorkOrderItem, syncToSheetsImmediately: boolean = true) => {
+    const nowIso = new Date().toISOString();
+    const woWithTimestamp: WorkOrderItem = {
+      ...wo,
+      createdAt: wo.createdAt || nowIso,
+      updatedAt: nowIso
+    };
+
+    setWorkOrders(prev => {
+      const idx = prev.findIndex(w => w.id === woWithTimestamp.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = woWithTimestamp;
+        return next;
+      }
+      return [woWithTimestamp, ...prev];
+    });
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'workOrders', woWithTimestamp.id), woWithTimestamp, { merge: true });
+      } catch (e) {
+        console.warn('Firestore WO save error:', e);
+      }
+    }
+
+    if (syncToSheetsImmediately) {
+      try {
+        const tokens = localStorage.getItem('google_tokens');
+        const spreadsheetId = localStorage.getItem('tev_spreadsheet_id') || '';
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (tokens) headers['Authorization'] = `Bearer ${tokens}`;
+        if (spreadsheetId) headers['x-spreadsheet-id'] = spreadsheetId;
+
+        await fetch('/api/sheets/sync-record', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            recordType: 'workOrder',
+            spreadsheetId,
+            data: woWithTimestamp
+          })
+        });
+      } catch (e) {
+        console.warn('Sheet workOrder sync error:', e);
+      }
+    }
+  };
+
   // Deep Analysis State
   const [dgaData, setDgaData] = useState({
     h2: '',
@@ -2515,6 +3167,88 @@ export default function App() {
     loadFactor: '50'
   });
   const [dgaAnalysisResult, setDgaAnalysisResult] = useState<any>(null);
+  const [dgaViewMode, setDgaViewMode] = useState<'dashboard' | 'both' | 'trend' | 'diagnostic'>('dashboard');
+
+  const handleLoadDgaSampleToForm = (sample: any) => {
+    setDgaData(prev => ({
+      ...prev,
+      h2: sample.h2 !== undefined ? String(sample.h2) : prev.h2,
+      ch4: sample.ch4 !== undefined ? String(sample.ch4) : prev.ch4,
+      c2h6: sample.c2h6 !== undefined ? String(sample.c2h6) : prev.c2h6,
+      c2h4: sample.c2h4 !== undefined ? String(sample.c2h4) : prev.c2h4,
+      c2h2: sample.c2h2 !== undefined ? String(sample.c2h2) : prev.c2h2,
+      co: sample.co !== undefined ? String(sample.co) : prev.co,
+      co2: sample.co2 !== undefined ? String(sample.co2) : prev.co2
+    }));
+  };
+
+  // Last recorded DGA values from historical database for trend comparison
+  const lastDgaRecord = useMemo(() => {
+    return getLastRecordedDgaValues(equipmentCode, allReports);
+  }, [equipmentCode, allReports]);
+
+  const handleLoadLastRecordedDga = () => {
+    setDgaData({
+      h2: String(lastDgaRecord.gases.h2 ?? '68'),
+      ch4: String(lastDgaRecord.gases.ch4 ?? '82'),
+      c2h6: String(lastDgaRecord.gases.c2h6 ?? '48'),
+      c2h4: String(lastDgaRecord.gases.c2h4 ?? '35'),
+      c2h2: String(lastDgaRecord.gases.c2h2 ?? '0.7'),
+      co: String(lastDgaRecord.gases.co ?? '420'),
+      co2: String(lastDgaRecord.gases.co2 ?? '3250'),
+      o2: String(lastDgaRecord.gases.o2 ?? '520'),
+      n2: String(lastDgaRecord.gases.n2 ?? '44000'),
+      moisture: String(lastDgaRecord.otherParams.moisture ?? '14'),
+      bdStrength: String(lastDgaRecord.otherParams.bdStrength ?? '52'),
+      acidity: String(lastDgaRecord.otherParams.acidity ?? '0.06'),
+      ffa: String(lastDgaRecord.otherParams.ffa ?? '1.5'),
+      estDp: String(lastDgaRecord.otherParams.estDp ?? '680'),
+      age: String(lastDgaRecord.otherParams.age ?? '20'),
+      loadFactor: String(lastDgaRecord.otherParams.loadFactor ?? '65'),
+    });
+  };
+
+  const handleLoadElevatedDgaSample = () => {
+    setDgaData({
+      h2: '125',
+      ch4: '148',
+      c2h6: '75',
+      c2h4: '62',
+      c2h2: '2.6',
+      co: '520',
+      co2: '3850',
+      o2: '490',
+      n2: '43000',
+      moisture: '24',
+      bdStrength: '35',
+      acidity: '0.15',
+      ffa: '2.9',
+      estDp: '440',
+      age: '20',
+      loadFactor: '85'
+    });
+  };
+
+  const handleLoadDecreasingDgaSample = () => {
+    setDgaData({
+      h2: '22',
+      ch4: '28',
+      c2h6: '16',
+      c2h4: '11',
+      c2h2: '0.1',
+      co: '195',
+      co2: '1850',
+      o2: '560',
+      n2: '45500',
+      moisture: '8',
+      bdStrength: '68',
+      acidity: '0.02',
+      ffa: '0.7',
+      estDp: '780',
+      age: '20',
+      loadFactor: '50'
+    });
+  };
 
   const [deepAnalysisSubTab, setDeepAnalysisSubTab] = useState<'dga' | 'pv-cell' | 'wind-turbine'>('dga');
 
@@ -2545,28 +3279,95 @@ export default function App() {
       ? allEquipment.filter(eq => eq.factory?.trim().toLowerCase() === userFactory.trim().toLowerCase())
       : allEquipment;
     
-    // Known coordinates for nice map display
-    const knownCoords: Record<string, {lat: number, lng: number}> = {
-      'Thủy điện Sơn La': { lat: 21.496, lng: 103.995 },
-      'Thủy điện Lai Châu': { lat: 22.140, lng: 102.980 },
-      'Thủy điện Hòa Bình': { lat: 20.808, lng: 105.328 },
-      'Nhiệt điện Phả Lại': { lat: 21.111, lng: 106.315 },
-      'Nhiệt điện Mông Dương': { lat: 21.070, lng: 107.350 },
-      'Nhiệt điện Nghi Sơn': { lat: 19.330, lng: 105.780 },
-      'Thủy điện Bản Vẽ': { lat: 19.320, lng: 104.480 },
-      'Nhiệt điện Vũng Áng': { lat: 18.120, lng: 106.350 },
-      'Thủy điện Quảng Trị': { lat: 16.650, lng: 106.750 },
-      'Thủy điện A Lưới': { lat: 16.250, lng: 107.250 },
-      'Thủy điện Sông Tranh 2': { lat: 15.350, lng: 108.150 },
-      'Thủy điện Ialy': { lat: 14.220, lng: 107.750 },
-      'Thủy điện Sê San 4': { lat: 13.950, lng: 107.550 },
-      'Điện gió Phương Mai': { lat: 13.850, lng: 109.250 },
-      'Điện mặt trời Trung Nam': { lat: 11.650, lng: 108.950 },
-      'Nhiệt điện Vĩnh Tân': { lat: 11.320, lng: 108.850 },
-      'Thủy điện Trị An': { lat: 11.120, lng: 107.020 },
-      'Nhiệt điện Phú Mỹ': { lat: 10.580, lng: 107.050 },
-      'Điện gió Bạc Liêu': { lat: 9.250, lng: 105.820 },
-      'Nhiệt điện Cà Mau': { lat: 9.180, lng: 104.920 }
+    // Helper to detect country & flag based on lat/lng or factory name
+    const getCountryInfo = (lat: number, lng: number, factoryName: string) => {
+      const lower = factoryName.toLowerCase();
+      if (lower.includes('laos') || lower.includes('lào') || lower.includes('nam theun') || lower.includes('xekaman') || lower.includes('vientiane') || lower.includes('nam ngum')) {
+        return { country: 'Lào', flag: '🇱🇦' };
+      }
+      if (lower.includes('cambodia') || lower.includes('campuchia') || lower.includes('phnom penh') || lower.includes('sesan 2') || lower.includes('bavet')) {
+        return { country: 'Campuchia', flag: '🇰🇭' };
+      }
+      if (lower.includes('thái lan') || lower.includes('thailand') || lower.includes('bangkok') || lower.includes('chonburi') || lower.includes('rayong')) {
+        return { country: 'Thái Lan', flag: '🇹🇭' };
+      }
+      if (lower.includes('singapore') || lower.includes('jurong')) {
+        return { country: 'Singapore', flag: '🇸🇬' };
+      }
+      if (lower.includes('indonesia') || lower.includes('jakarta') || lower.includes('cikarang')) {
+        return { country: 'Indonesia', flag: '🇮🇩' };
+      }
+      if (lower.includes('malaysia') || lower.includes('kuala lumpur') || lower.includes('penang')) {
+        return { country: 'Malaysia', flag: '🇲🇾' };
+      }
+      if (lower.includes('nhật') || lower.includes('japan') || lower.includes('tokyo') || lower.includes('osaka')) {
+        return { country: 'Nhật Bản', flag: '🇯🇵' };
+      }
+      if (lower.includes('đức') || lower.includes('germany') || lower.includes('frankfurt') || lower.includes('munich')) {
+        return { country: 'Đức', flag: '🇩🇪' };
+      }
+      if (lower.includes('mỹ') || lower.includes('usa') || lower.includes('california') || lower.includes('texas')) {
+        return { country: 'Hoa Kỳ', flag: '🇺🇸' };
+      }
+      if (lower.includes('úc') || lower.includes('australia') || lower.includes('sydney')) {
+        return { country: 'Úc', flag: '🇦🇺' };
+      }
+      if (lat >= 8.0 && lat <= 24.0 && lng >= 102.0 && lng <= 110.0) {
+        return { country: 'Việt Nam', flag: '🇻🇳' };
+      }
+      return { country: 'Quốc tế', flag: '🌐' };
+    };
+
+    // Known coordinates for nice map display (Domestic and International sites)
+    const knownCoords: Record<string, {lat: number, lng: number, country?: string, flag?: string}> = {
+      // VIETNAM SITES
+      'Thủy điện Sơn La': { lat: 21.496, lng: 103.995, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Lai Châu': { lat: 22.140, lng: 102.980, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Hòa Bình': { lat: 20.808, lng: 105.328, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhiệt điện Phả Lại': { lat: 21.111, lng: 106.315, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhiệt điện Mông Dương': { lat: 21.070, lng: 107.350, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhiệt điện Nghi Sơn': { lat: 19.330, lng: 105.780, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Bản Vẽ': { lat: 19.320, lng: 104.480, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhiệt điện Vũng Áng': { lat: 18.120, lng: 106.350, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Quảng Trị': { lat: 16.650, lng: 106.750, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện A Lưới': { lat: 16.250, lng: 107.250, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Sông Tranh 2': { lat: 15.350, lng: 108.150, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Ialy': { lat: 14.220, lng: 107.750, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Sê San 4': { lat: 13.950, lng: 107.550, country: 'Việt Nam', flag: '🇻🇳' },
+      'Điện gió Phương Mai': { lat: 13.850, lng: 109.250, country: 'Việt Nam', flag: '🇻🇳' },
+      'Điện mặt trời Trung Nam': { lat: 11.650, lng: 108.950, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhiệt điện Vĩnh Tân': { lat: 11.320, lng: 108.850, country: 'Việt Nam', flag: '🇻🇳' },
+      'Thủy điện Trị An': { lat: 11.120, lng: 107.020, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhiệt điện Phú Mỹ': { lat: 10.580, lng: 107.050, country: 'Việt Nam', flag: '🇻🇳' },
+      'Điện gió Bạc Liêu': { lat: 9.250, lng: 105.820, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhiệt điện Cà Mau': { lat: 9.180, lng: 104.920, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhà máy Điện Gió Mũi Né': { lat: 10.933, lng: 108.287, country: 'Việt Nam', flag: '🇻🇳' },
+      'Tòa nhà TEV Office Tower': { lat: 10.776, lng: 106.700, country: 'Việt Nam', flag: '🇻🇳' },
+      'Bệnh Viện TEV General Hospital': { lat: 10.755, lng: 106.665, country: 'Việt Nam', flag: '🇻🇳' },
+      'Trung Tâm Dữ Liệu TEV Tier-III': { lat: 10.840, lng: 106.810, country: 'Việt Nam', flag: '🇻🇳' },
+      'Khu Công Nghiệp VSIP 1': { lat: 10.925, lng: 106.710, country: 'Việt Nam', flag: '🇻🇳' },
+      'Nhà máy Sản xuất TEV Tân Uyên': { lat: 11.080, lng: 106.790, country: 'Việt Nam', flag: '🇻🇳' },
+      'Trạm Sạc Cao Tốc Long Thành': { lat: 10.740, lng: 106.980, country: 'Việt Nam', flag: '🇻🇳' },
+
+      // INTERNATIONAL SITES (Lào, Campuchia, Thái Lan, Singapore, Nhật Bản, Đức, Mỹ,...)
+      'Thủy điện Nam Theun 2 (Lào)': { lat: 17.830, lng: 104.970, country: 'Lào', flag: '🇱🇦' },
+      'Thủy điện Xekaman 1 (Lào)': { lat: 14.980, lng: 107.150, country: 'Lào', flag: '🇱🇦' },
+      'Thủy điện Xekaman 3 (Lào)': { lat: 15.220, lng: 107.450, country: 'Lào', flag: '🇱🇦' },
+      'Trạm biến áp Vientiane (Lào)': { lat: 17.970, lng: 102.630, country: 'Lào', flag: '🇱🇦' },
+      'Thủy điện Lower Sesan 2 (Campuchia)': { lat: 13.550, lng: 106.270, country: 'Campuchia', flag: '🇰🇭' },
+      'Trạm biến áp Phnom Penh (Campuchia)': { lat: 11.550, lng: 104.920, country: 'Campuchia', flag: '🇰🇭' },
+      'Điện mặt trời Bavet (Campuchia)': { lat: 11.080, lng: 106.140, country: 'Campuchia', flag: '🇰🇭' },
+      'Bangkok Energy & Data Hub (Thái Lan)': { lat: 13.750, lng: 100.520, country: 'Thái Lan', flag: '🇹🇭' },
+      'Rayong Petrochemical Complex (Thái Lan)': { lat: 12.680, lng: 101.280, country: 'Thái Lan', flag: '🇹🇭' },
+      'Singapore Jurong Island Substation': { lat: 1.270, lng: 103.710, country: 'Singapore', flag: '🇸🇬' },
+      'Singapore Tier-IV Data Center': { lat: 1.350, lng: 103.820, country: 'Singapore', flag: '🇸🇬' },
+      'Kuala Lumpur High-Tech Plant (Malaysia)': { lat: 3.140, lng: 101.690, country: 'Malaysia', flag: '🇲🇾' },
+      'Jakarta Cikarang Industrial Power (Indonesia)': { lat: -6.300, lng: 107.160, country: 'Indonesia', flag: '🇮🇩' },
+      'Tokyo Advanced Energy Plant (Nhật Bản)': { lat: 35.680, lng: 139.760, country: 'Nhật Bản', flag: '🇯🇵' },
+      'Frankfurt Mission Critical Substation (Đức)': { lat: 50.110, lng: 8.680, country: 'Đức', flag: '🇩🇪' },
+      'California Solar & BESS Hub (Hoa Kỳ)': { lat: 34.050, lng: -118.250, country: 'Hoa Kỳ', flag: '🇺🇸' },
+      'Texas Wind & Substation (Hoa Kỳ)': { lat: 31.960, lng: -99.900, country: 'Hoa Kỳ', flag: '🇺🇸' },
+      'Sydney Renewable Power Site (Úc)': { lat: -33.860, lng: 151.200, country: 'Úc', flag: '🇦🇺' }
     };
 
     equipmentToProcess.forEach(eq => {
@@ -2575,15 +3376,72 @@ export default function App() {
       const id = factory.toLowerCase().replace(/\s+/g, '-');
       
       if (!siteMap.has(id)) {
-        // Generate some pseudo-random coordinates in VN if unknown
-        const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-        
-        // Case-insensitive coordinate matching
+        let lat: number | null = null;
+        let lng: number | null = null;
+
+        // 1. Direct coordinates on equipment if present
+        if (typeof eq.lat === 'number' && typeof eq.lng === 'number' && !isNaN(eq.lat) && !isNaN(eq.lng)) {
+          lat = eq.lat;
+          lng = eq.lng;
+        } else if (typeof eq.latitude === 'number' && typeof eq.longitude === 'number' && !isNaN(eq.latitude) && !isNaN(eq.longitude)) {
+          lat = eq.latitude;
+          lng = eq.longitude;
+        } else if (eq.coordinates && typeof eq.coordinates.lat === 'number' && typeof eq.coordinates.lng === 'number') {
+          lat = eq.coordinates.lat;
+          lng = eq.coordinates.lng;
+        } else if (typeof eq.locationCoord === 'string' && eq.locationCoord.includes(',')) {
+          const parts = eq.locationCoord.split(',').map((p: string) => parseFloat(p.trim()));
+          if (!isNaN(parts[0]) && !isNaN(parts[1])) {
+            lat = parts[0];
+            lng = parts[1];
+          }
+        }
+
+        // 2. Case-insensitive coordinate matching against known locations (domestic & global)
         const normalizedFactory = factory.toLowerCase();
-        const coordKey = Object.keys(knownCoords).find(k => k.toLowerCase() === normalizedFactory);
+        const coordKey = Object.keys(knownCoords).find(k => 
+          k.toLowerCase() === normalizedFactory || 
+          normalizedFactory.includes(k.toLowerCase()) || 
+          k.toLowerCase().includes(normalizedFactory)
+        );
         
-        const lat = (coordKey ? knownCoords[coordKey].lat : null) || (10 + (hash % 10) + (hash % 100) / 100);
-        const lng = (coordKey ? knownCoords[coordKey].lng : null) || (105 + (hash % 5) + (hash % 100) / 100);
+        if (lat === null && coordKey) {
+          lat = knownCoords[coordKey].lat;
+          lng = knownCoords[coordKey].lng;
+        }
+
+        // 3. Fallback: Smart regional coordinate assignment if site name mentions country
+        if (lat === null || lng === null) {
+          const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          if (normalizedFactory.includes('laos') || normalizedFactory.includes('lào')) {
+            lat = 17.5 + (hash % 10) * 0.1;
+            lng = 104.5 + (hash % 10) * 0.1;
+          } else if (normalizedFactory.includes('cambodia') || normalizedFactory.includes('campuchia')) {
+            lat = 11.5 + (hash % 10) * 0.1;
+            lng = 104.5 + (hash % 10) * 0.1;
+          } else if (normalizedFactory.includes('thái lan') || normalizedFactory.includes('thailand')) {
+            lat = 13.5 + (hash % 10) * 0.1;
+            lng = 100.5 + (hash % 10) * 0.1;
+          } else if (normalizedFactory.includes('singapore')) {
+            lat = 1.30 + (hash % 10) * 0.01;
+            lng = 103.80 + (hash % 10) * 0.01;
+          } else if (normalizedFactory.includes('japan') || normalizedFactory.includes('nhật')) {
+            lat = 35.5 + (hash % 10) * 0.1;
+            lng = 139.5 + (hash % 10) * 0.1;
+          } else if (normalizedFactory.includes('đức') || normalizedFactory.includes('germany')) {
+            lat = 50.0 + (hash % 10) * 0.1;
+            lng = 9.0 + (hash % 10) * 0.1;
+          } else if (normalizedFactory.includes('mỹ') || normalizedFactory.includes('usa')) {
+            lat = 34.0 + (hash % 10) * 0.1;
+            lng = -118.0 + (hash % 10) * 0.1;
+          } else {
+            // General VN pseudo-random coordinate
+            lat = 10 + (hash % 10) + (hash % 100) / 100;
+            lng = 105 + (hash % 5) + (hash % 100) / 100;
+          }
+        }
+
+        const countryInfo = getCountryInfo(lat, lng, factory);
 
         siteMap.set(id, {
           id,
@@ -2591,6 +3449,8 @@ export default function App() {
           customer: customer,
           lat,
           lng,
+          country: countryInfo.country,
+          flag: countryInfo.flag,
           count: 0,
           healthy: 0,
           warning: 0,
@@ -3529,10 +4389,230 @@ export default function App() {
     // Removed to prevent overwriting real data with mock data
   };
 
-  const handleSyncToSheets = async (equipmentListToSync?: any[], silent: boolean = false) => {
+  /**
+   * Kiểm tra phiên bản dữ liệu (updatedAt / version timestamp) giữa Firestore và Google Sheets qua Sheets API
+   * Đảm bảo tính nhất quán (Sync Reconciliation) trước khi thực hiện ghi đè dữ liệu.
+   */
+  const checkDataVersionReconciliation = async (options?: { silent?: boolean }): Promise<ReconciliationReport | null> => {
+    const silent = options?.silent ?? false;
+    if (!isGoogleConnected) {
+      if (!silent) alert('Vui lòng kết nối Google Drive trước khi kiểm tra đối soát.');
+      return null;
+    }
+
+    setIsReconciling(true);
+    try {
+      const spreadsheetId = localStorage.getItem('tev_spreadsheet_id') || '';
+      const response = await fetch('/api/sheets/get', {
+        headers: {
+          ...getAuthHeaders(),
+          ...(spreadsheetId ? { 'x-spreadsheet-id': spreadsheetId } : {})
+        }
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to fetch from Google Sheets API');
+      }
+
+      const resJson = await response.json();
+      const allSheets = resJson.data?.allSheets || {};
+
+      // Đối soát giữa dữ liệu Firestore trong state với các hàng trong Google Sheets
+      const report = compareVersionsBetweenFirestoreAndSheets({
+        firestoreData: {
+          workOrders,
+          customers,
+          equipment: allEquipment,
+          inventory
+        },
+        sheetsData: {
+          allSheets
+        }
+      });
+
+      setReconciliationReport(report);
+      return report;
+    } catch (error: any) {
+      console.error('Error in checkDataVersionReconciliation:', error);
+      if (!silent) {
+        alert('Lỗi kiểm tra phiên bản Google Sheets: ' + (error.message || String(error)));
+      }
+      return null;
+    } finally {
+      setIsReconciling(false);
+    }
+  };
+
+  const handleOpenReconciliation = async () => {
+    setShowReconciliationModal(true);
+    await checkDataVersionReconciliation({ silent: true });
+  };
+
+  /**
+   * Hòa giải phiên bản thông minh (Newer Wins):
+   * - Bản ghi nào trên Google Sheets có timestamp mới hơn -> nạp về Cloud Firestore.
+   * - Bản ghi nào trên Firestore có timestamp mới hơn -> đẩy lên Google Sheets.
+   * - Tuyệt đối không làm mất dữ liệu của cả 2 phía.
+   */
+  const handleResolveNewerWins = async () => {
+    if (!reconciliationReport) return;
+    setIsReconciling(true);
+    try {
+      let pulledCount = 0;
+      let pushedCount = 0;
+
+      // 1. Kéo các bản ghi mà Sheets mới hơn hoặc chỉ có ở Sheets về Firestore
+      const sheetsItemsToPull = reconciliationReport.items.filter(i => 
+        i.status === 'sheets_newer' || i.status === 'only_in_sheets'
+      );
+
+      for (const item of sheetsItemsToPull) {
+        if (item.entityType === 'customer' && item.sheetsData) {
+          const row = item.sheetsData;
+          const custId = String(row[0] || item.id).trim();
+          const custName = String(row[1] || item.name).trim();
+          const factories = row[2] ? String(row[2]).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const email = String(row[3] || '');
+          const phone = String(row[4] || '');
+          const address = String(row[5] || '');
+          const createdAt = String(row[6] || new Date().toISOString());
+          const updatedAt = String(row[7] || row[6] || new Date().toISOString());
+          
+          const updatedCust = { id: custId, name: custName, factories, email, phone, address, createdAt, updatedAt };
+          setCustomers(prev => {
+            const idx = prev.findIndex(c => c.id.toLowerCase() === custId.toLowerCase());
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = updatedCust;
+              return next;
+            }
+            return [...prev, updatedCust];
+          });
+          if (auth.currentUser) {
+            await setDoc(doc(db, 'customers', custId), updatedCust, { merge: true });
+          }
+          pulledCount++;
+        } else if (item.entityType === 'workOrder' && item.sheetsData) {
+          const row = item.sheetsData;
+          const woId = String(row[0] || item.id).trim();
+          const updatedWo: any = {
+            id: woId,
+            workPermitId: String(row[1] || ''),
+            title: String(row[2] || item.name),
+            description: String(row[3] || ''),
+            equipmentId: String(row[4] || ''),
+            failureCode: String(row[5] || ''),
+            customer: String(row[6] || ''),
+            type: String(row[7] || ''),
+            isUnplanned: String(row[8] || '').toLowerCase() === 'có',
+            priority: String(row[9] || 'Medium'),
+            status: String(row[10] || 'open'),
+            assignedTo: String(row[11] || ''),
+            responsibleApprove: String(row[12] || ''),
+            responsibleDo: String(row[13] || ''),
+            blockingRequired: String(row[14] || '').toLowerCase() === 'có',
+            dueDate: String(row[15] || ''),
+            usedMaterials: String(row[16] || ''),
+            createdAt: String(row[17] || new Date().toISOString()),
+            updatedAt: String(row[18] || row[17] || new Date().toISOString()),
+            downtimeStart: String(row[19] || ''),
+            repairStart: String(row[20] || ''),
+            repairEnd: String(row[21] || ''),
+            restartTime: String(row[22] || '')
+          };
+          setWorkOrders(prev => {
+            const idx = prev.findIndex(w => w.id.toLowerCase() === woId.toLowerCase());
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = updatedWo;
+              return next;
+            }
+            return [updatedWo, ...prev];
+          });
+          if (auth.currentUser) {
+            await setDoc(doc(db, 'workOrders', woId), updatedWo, { merge: true });
+          }
+          pulledCount++;
+        } else if (item.entityType === 'inventory' && item.sheetsData) {
+          const row = item.sheetsData;
+          const invId = String(row[0] || item.id).trim();
+          const updatedInv = {
+            id: invId,
+            name: String(row[1] || item.name),
+            sku: String(row[2] || ''),
+            category: String(row[3] || ''),
+            quantity: parseFloat(String(row[4] || '0').replace(',', '.')) || 0,
+            unit: String(row[5] || ''),
+            minStock: parseFloat(String(row[6] || '0').replace(',', '.')) || 0,
+            location: String(row[7] || ''),
+            price: parseFloat(String(row[8] || '0').replace(',', '.')) || 0,
+            createdAt: String(row[9] || new Date().toISOString()),
+            updatedAt: String(row[10] || row[9] || new Date().toISOString())
+          };
+          setInventory(prev => {
+            const idx = prev.findIndex(i => i.id.toLowerCase() === invId.toLowerCase());
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = updatedInv;
+              return next;
+            }
+            return [...prev, updatedInv];
+          });
+          if (auth.currentUser) {
+            await setDoc(doc(db, 'inventory', invId), updatedInv, { merge: true });
+          }
+          pulledCount++;
+        }
+      }
+
+      // 2. Đẩy các bản ghi mà Firestore mới hơn lên Sheets
+      const firestoreItemsToPush = reconciliationReport.items.filter(i => 
+        i.status === 'firestore_newer' || i.status === 'only_in_firestore'
+      );
+      if (firestoreItemsToPush.length > 0) {
+        await handleSyncToSheets(undefined, true, true);
+        pushedCount = firestoreItemsToPush.length;
+      }
+
+      // 3. Cập nhật lại báo cáo đối soát
+      await checkDataVersionReconciliation({ silent: true });
+      alert(`✅ Hòa giải phiên bản (Newer Wins) hoàn tất!\n- Đã kéo ${pulledCount} mục mới hơn từ Google Sheets về Firestore.\n- Đã đồng bộ ${pushedCount} mục mới hơn từ Firestore lên Google Sheets.`);
+    } catch (e: any) {
+      console.error('Reconciliation error:', e);
+      alert('Lỗi hòa giải phiên bản: ' + (e.message || String(e)));
+    } finally {
+      setIsReconciling(false);
+    }
+  };
+
+  const handleForcePushToSheets = async () => {
+    setShowReconciliationModal(false);
+    await handleSyncToSheets(undefined, false, true);
+  };
+
+  const handlePullFromSheetsToFirestore = async () => {
+    setShowReconciliationModal(false);
+    await handleFetchFromSheets();
+  };
+
+  const handleSyncToSheets = async (equipmentListToSync?: any[], silent: boolean = false, force: boolean = false) => {
     if (!isGoogleConnected) {
       if (!silent) alert('Vui lòng kết nối Google Drive trước khi đồng bộ.');
       return;
+    }
+
+    // Kiểm tra phiên bản dữ liệu trước khi ghi đè nếu không phải lệnh bắt buộc (force)
+    if (!force) {
+      const report = await checkDataVersionReconciliation({ silent: true });
+      if (report && (report.sheetsNewerCount > 0 || report.conflictsCount > 0)) {
+        setIsSyncing(false);
+        setShowReconciliationModal(true);
+        if (!silent) {
+          alert(`⚠️ Phát hiện xung đột phiên bản dữ liệu (Sync Reconciliation):\n- Có ${report.sheetsNewerCount} mục trên Google Sheets được sửa đổi gần đây hơn Firestore.\n\nHệ thống đã mở bảng Đối Soát Phiên Bản để bạn chọn "Hòa giải thông minh (Newer Wins)", bảo vệ an toàn dữ liệu!`);
+        }
+        return;
+      }
     }
 
     setIsSyncing(true);
@@ -3551,9 +4631,38 @@ export default function App() {
       switchgears.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Chụp ảnh nhiệt (°C)', 'Điện trở tiếp xúc (μΩ)', 'TEV (dBmV)', 'Siêu âm (dBμV)', 'Xung TEV (pps)', 'Độ ẩm (%)', 'Áp suất khí SF6 (bar)', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
       motors.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Độ rung (mm/s)', 'Nhiệt độ Stator (°C)', 'Nhiệt độ vòng bi (°C)', 'Độ lệch điện áp (%)', 'Tan-delta R', 'Tan-delta Y', 'Tan-delta B', 'Tip-up R', 'Tip-up Y', 'Tip-up B', 'PD R', 'PD Y', 'PD B', 'IR R', 'IR Y', 'IR B', 'PI R', 'PI Y', 'PI B', 'DD R', 'DD Y', 'DD B', 'ELCID R', 'ELCID Y', 'ELCID B', 'Tuổi thọ (Age)', 'Hệ số làm việc (Duty Factor)', 'File đính kèm (Links)']);
       inverters.push(['Thời gian kiểm tra', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực', 'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Điểm sức khỏe (%)', 'Trạng thái', 'Điện áp DC (V)', 'Dải MPPT (V)', 'Dòng điện DC (A)', 'Điện áp AC (V)', 'Tần số AC (Hz)', 'Độ méo hài (%)', 'Hiệu suất tối đa (%)', 'Hiệu suất Châu Âu (%)', 'Chống hòa lưới', 'Dòng rò & Cách ly', 'Điện áp chịu đựng (kV)', 'Cách ly vật lý', 'Nhiệt độ vận hành (°C)', 'Bộ lọc khí', 'File đính kèm (Links)']);
-      cmmsData.push(['Mã WO', 'Mã Work Permit', 'Tiêu đề', 'Mô tả', 'Thiết bị', 'Khách hàng', 'Nhà máy', 'Loại công việc', 'Ngoài kế hoạch', 'Mức độ ưu tiên', 'Trạng thái', 'Người thực hiện (PIC)', 'Vai trò Phê duyệt', 'Vai trò Thực hiện', 'Yêu cầu Cô lập', 'Hạn hoàn thành', 'Vật tư sử dụng', 'Ngày tạo', 'Ngày cập nhật']);
+      cmmsData.push([
+        'Mã WO', 'Mã Work Permit', 'Tiêu đề', 'Mô tả', 'Thiết bị', 'Failure Code',
+        'Khách hàng', 'Loại công việc', 'Ngoài kế hoạch', 'Mức độ ưu tiên', 'Trạng thái',
+        'Người thực hiện (PIC)', 'Vai trò Phê duyệt', 'Vai trò Thực hiện', 'Yêu cầu Cô lập',
+        'Hạn hoàn thành', 'Vật tư sử dụng', 'Ngày tạo', 'Ngày cập nhật',
+        'Bắt đầu dừng máy', 'Bắt đầu sửa chữa', 'Kết thúc sửa chữa', 'Chạy lại máy'
+      ]);
       inventoryData.push(['Mã vật tư', 'Tên vật tư', 'SKU', 'Danh mục', 'Số lượng', 'Đơn vị', 'Tồn kho tối thiểu', 'Vị trí', 'Đơn giá', 'Ngày tạo', 'Ngày cập nhật']);
       customersData.push(['Mã khách hàng', 'Tên khách hàng', 'Danh sách nhà máy', 'Email', 'Số điện thoại', 'Địa chỉ', 'Ngày tạo', 'Ngày cập nhật']);
+
+      const equipmentData: any[] = [];
+      equipmentData.push([
+        'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực',
+        'Trạng thái', 'Điểm sức khỏe (HI %)', 'Thông số kỹ thuật (Specs)', 'Bảng tên Nameplate', 'Lần kiểm tra cuối', 'Ngày tạo', 'Ngày cập nhật'
+      ]);
+      allEquipment.forEach(eq => {
+        equipmentData.push([
+          eq.id || '',
+          eq.name || '',
+          eq.type || '',
+          eq.customer || '',
+          eq.factory || '',
+          eq.location || '',
+          eq.status || 'healthy',
+          eq.health !== undefined ? eq.health : 100,
+          typeof eq.technicalSpecs === 'object' ? JSON.stringify(eq.technicalSpecs) : (eq.technicalSpecs || ''),
+          typeof eq.nameplate === 'object' ? JSON.stringify(eq.nameplate) : (eq.nameplate || ''),
+          eq.lastCheck || '',
+          eq.createdAt || '',
+          eq.updatedAt || ''
+        ]);
+      });
 
       // Map existing data
       const listToSync = Array.isArray(equipmentListToSync) ? equipmentListToSync : allReports;
@@ -3652,17 +4761,20 @@ export default function App() {
         }
       });
 
-      // Map CMMS data
+      // Map CMMS data (23 columns TEV Service Flatform)
       workOrders.forEach(wo => {
-        const materialsStr = (wo.usedMaterials || []).map((m: any) => `${m.name} (${m.quantity} ${m.unit})`).join(', ');
+        const materialsStr = Array.isArray(wo.usedMaterials)
+          ? wo.usedMaterials.map((m: any) => `${m.name} (${m.quantity} ${m.unit})`).join(', ')
+          : (wo.usedMaterials || '');
+        const customerNameStr = customers.find(c => c.id === wo.customerId)?.name || wo.customer || wo.customerId || '';
         cmmsData.push([
-          wo.id,
+          wo.id || '',
           wo.workPermitId || '',
           wo.title || '',
           wo.description || '',
-          (Array.isArray(wo.equipmentId) ? wo.equipmentId.join(', ') : wo.equipmentId) || '',
-          wo.customerId || '',
-          wo.factory || '',
+          (Array.isArray(wo.equipmentId) ? wo.equipmentId.join(', ') : (wo.equipmentId || wo.equipmentName || '')) || '',
+          wo.failureCode || '',
+          customerNameStr,
           wo.type || '',
           wo.isUnplanned ? 'Có' : 'Không',
           wo.priority || '',
@@ -3671,10 +4783,14 @@ export default function App() {
           wo.responsibleApprove || '',
           wo.responsibleDo || '',
           wo.blockingRequired ? 'Có' : 'Không',
-          wo.dueDate ? new Date(wo.dueDate).toLocaleDateString('vi-VN') : '',
+          wo.dueDate ? (wo.dueDate.includes('T') ? new Date(wo.dueDate).toLocaleDateString('vi-VN') : wo.dueDate) : '',
           materialsStr,
           wo.createdAt ? new Date(wo.createdAt).toLocaleString('vi-VN') : '',
-          wo.updatedAt ? new Date(wo.updatedAt).toLocaleString('vi-VN') : ''
+          wo.updatedAt ? new Date(wo.updatedAt).toLocaleString('vi-VN') : '',
+          wo.downtimeStart || '',
+          wo.repairStart || '',
+          wo.repairEnd || '',
+          wo.restartTime || ''
         ]);
       });
 
@@ -3709,15 +4825,22 @@ export default function App() {
         ]);
       });
 
+      const spreadsheetId = localStorage.getItem('tev_spreadsheet_id') || '';
       const response = await fetch('/api/sheets/sync-export', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          ...(spreadsheetId ? { 'x-spreadsheet-id': spreadsheetId } : {})
+        },
         body: JSON.stringify({
+          spreadsheetId,
           transformers,
           switchgears,
           motors,
           inverters,
           cmmsData,
+          tevServiceFlatformData: cmmsData,
+          equipmentData,
           inventoryData,
           customersData
         })
@@ -3802,6 +4925,9 @@ export default function App() {
 
       let syncedCustomersCount = 0;
       let syncedInventoryCount = 0;
+      let syncedWoCount = 0;
+      let protectedRecordsCount = 0;
+
       for (const sheetName of sheetNames) {
         const rows = allSheetsData[sheetName];
         if (!rows || rows.length === 0) continue;
@@ -3813,7 +4939,77 @@ export default function App() {
         const idx = getCommonIndices(header);
         const lowerSheetName = sheetName.toLowerCase();
 
-        // Skip non-equipment sheets
+        // 1. Đồng bộ Work Orders (TEV Service Flatform / CMMS) có kiểm tra phiên bản
+        if (lowerSheetName.includes('tev service flatform') || lowerSheetName.includes('work order') || (lowerSheetName.includes('cmms') && !lowerSheetName.includes('dashboard'))) {
+          const dataRows = rows.slice(headerIdx + 1);
+          const newWoList: any[] = [];
+          for (const row of dataRows) {
+            if (!row || row.length < 3) continue;
+            const woId = row[0]?.toString().trim();
+            if (!woId || woId.toLowerCase().includes('mã wo')) continue;
+
+            const sheetUpdatedAt = row[18] || row[17] || '';
+            const sheetTimestamp = parseVersionTimestamp(sheetUpdatedAt);
+
+            // Kiểm tra phiên bản với Firestore / Local state
+            const existingWo = workOrders.find(w => w.id?.toLowerCase() === woId.toLowerCase());
+            const fsTimestamp = parseVersionTimestamp(existingWo?.updatedAt || existingWo?.createdAt);
+
+            if (existingWo && fsTimestamp > sheetTimestamp && (fsTimestamp - sheetTimestamp > 3000)) {
+              // Phiên bản trên Firestore mới hơn -> Bảo vệ Firestore, không ghi đè dữ liệu cũ từ Sheet
+              protectedRecordsCount++;
+              continue;
+            }
+
+            const woObj: any = {
+              id: woId,
+              workPermitId: row[1] || '',
+              title: row[2] || `Phiếu ${woId}`,
+              description: row[3] || '',
+              equipmentId: row[4] ? row[4].toString().split(',').map((s: string) => s.trim()) : [],
+              failureCode: row[5] || '',
+              customer: row[6] || '',
+              type: row[7] || '',
+              isUnplanned: String(row[8] || '').toLowerCase() === 'có',
+              priority: row[9] || 'Medium',
+              status: row[10] || 'open',
+              assignedTo: row[11] || '',
+              responsibleApprove: row[12] || '',
+              responsibleDo: row[13] || '',
+              blockingRequired: String(row[14] || '').toLowerCase() === 'có',
+              dueDate: row[15] || '',
+              usedMaterials: row[16] || '',
+              createdAt: row[17] || new Date().toISOString(),
+              updatedAt: sheetUpdatedAt || new Date().toISOString(),
+              downtimeStart: row[19] || '',
+              repairStart: row[20] || '',
+              repairEnd: row[21] || '',
+              restartTime: row[22] || ''
+            };
+            newWoList.push(woObj);
+            if (auth.currentUser) {
+              try {
+                await setDoc(doc(db, 'workOrders', woId), woObj, { merge: true });
+                syncedWoCount++;
+              } catch (err) {
+                console.warn(`Firestore sync error for WO ${woId}:`, err);
+              }
+            } else {
+              syncedWoCount++;
+            }
+          }
+
+          if (newWoList.length > 0) {
+            setWorkOrders(prev => {
+              const map = new Map(prev.map(w => [w.id?.toLowerCase(), w]));
+              newWoList.forEach(w => map.set(w.id?.toLowerCase(), w));
+              return Array.from(map.values());
+            });
+          }
+          continue;
+        }
+
+        // 2. Skip non-equipment sheets - Khách hàng có kiểm tra phiên bản
         if (lowerSheetName.includes('khachhang') || lowerSheetName.includes('khách hàng')) {
           const dataRows = rows.slice(headerIdx + 1);
           for (const row of dataRows) {
@@ -3827,23 +5023,38 @@ export default function App() {
             const phone = row[4] || '';
             const address = row[5] || '';
             const createdAt = row[6] || new Date().toISOString();
-            const updatedAt = row[7] || new Date().toISOString();
+            const updatedAt = row[7] || row[6] || new Date().toISOString();
 
-            try {
-              await setDoc(doc(db, 'customers', id), {
-                name, factories, email, phone, address, createdAt, updatedAt
-              }, { merge: true });
+            // Kiểm tra phiên bản đối soát: Nếu Firestore mới hơn thì bỏ qua ghi đè
+            const sheetTimestamp = parseVersionTimestamp(updatedAt || createdAt);
+            const existingCust = customers.find(c => c.id?.toLowerCase() === id.toLowerCase());
+            const fsTimestamp = parseVersionTimestamp(existingCust?.updatedAt || existingCust?.createdAt);
+            if (existingCust && fsTimestamp > sheetTimestamp && (fsTimestamp - sheetTimestamp > 3000)) {
+              protectedRecordsCount++;
+              continue;
+            }
+
+            if (auth.currentUser) {
+              try {
+                await setDoc(doc(db, 'customers', id), {
+                  name, factories, email, phone, address, createdAt, updatedAt
+                }, { merge: true });
+                syncedCustomersCount++;
+              } catch (err) {
+                console.warn(`Firestore sync error for customer ${id}:`, err);
+                syncedCustomersCount++;
+              }
+            } else {
               syncedCustomersCount++;
-            } catch (err) {
-              handleFirestoreError(err, OperationType.WRITE, `customers/${id}`);
             }
           }
           continue;
         }
 
-        // Handle Inventory sheets
+        // 3. Handle Inventory sheets có kiểm tra phiên bản
         if (lowerSheetName.includes('quanlykho') || lowerSheetName.includes('kho')) {
           const dataRows = rows.slice(headerIdx + 1);
+          const newInvList: any[] = [];
           for (const row of dataRows) {
             if (!row || row.length < 2) continue;
             const id = row[0]?.toString().trim();
@@ -3858,15 +5069,40 @@ export default function App() {
             const location = row[7] || '';
             const price = parseFloat(row[8]?.toString().replace(',', '.') || '0') || 0;
             const createdAt = row[9] || new Date().toISOString();
+            const updatedAt = row[10] || row[9] || new Date().toISOString();
 
-            try {
-              await setDoc(doc(db, 'inventory', id), {
-                name, sku, category, quantity, unit, minStock, location, price, createdAt
-              }, { merge: true });
-              syncedInventoryCount++;
-            } catch (err) {
-              handleFirestoreError(err, OperationType.WRITE, `inventory/${id}`);
+            // Kiểm tra phiên bản: Nếu Firestore mới hơn thì bảo vệ, không ghi đè
+            const sheetTimestamp = parseVersionTimestamp(updatedAt || createdAt);
+            const existingInv = inventory.find(i => i.id?.toLowerCase() === id.toLowerCase());
+            const fsTimestamp = parseVersionTimestamp(existingInv?.updatedAt || existingInv?.createdAt);
+            if (existingInv && fsTimestamp > sheetTimestamp && (fsTimestamp - sheetTimestamp > 3000)) {
+              protectedRecordsCount++;
+              continue;
             }
+
+            newInvList.push({ id, name, sku, category, quantity, unit, minStock, location, price, createdAt, updatedAt });
+
+            if (auth.currentUser) {
+              try {
+                await setDoc(doc(db, 'inventory', id), {
+                  name, sku, category, quantity, unit, minStock, location, price, createdAt, updatedAt
+                }, { merge: true });
+                syncedInventoryCount++;
+              } catch (err) {
+                console.warn(`Firestore sync error for inventory item ${id}:`, err);
+                syncedInventoryCount++;
+              }
+            } else {
+              syncedInventoryCount++;
+            }
+          }
+
+          if (newInvList.length > 0) {
+            setInventory(prev => {
+              const map = new Map(prev.map(i => [i.id, i]));
+              newInvList.forEach(i => map.set(i.id, i));
+              return Array.from(map.values());
+            });
           }
           continue;
         }
@@ -4393,14 +5629,29 @@ export default function App() {
         }
         setTimeout(() => setSyncSuccess(false), 3000);
         
-        alert('Đã tải dữ liệu từ Sheets thành công! Toàn bộ dữ liệu đã được đồng bộ.');
-      } else if (syncedCustomersCount > 0 || syncedInventoryCount > 0) {
+        let successMsg = 'Đã tải dữ liệu từ Google Sheets thành công!';
+        if (syncedWoCount > 0) successMsg += ` (${syncedWoCount} phiếu WO)`;
+        if (syncedCustomersCount > 0) successMsg += ` (${syncedCustomersCount} KH)`;
+        if (syncedInventoryCount > 0) successMsg += ` (${syncedInventoryCount} vật tư)`;
+        if (protectedRecordsCount > 0) {
+          successMsg += `\n🛡️ Đã bảo vệ an toàn ${protectedRecordsCount} bản ghi Firestore có phiên bản mới hơn, không bị ghi đè!`;
+        }
+        alert(successMsg);
+      } else if (syncedCustomersCount > 0 || syncedInventoryCount > 0 || syncedWoCount > 0) {
         let msg = '';
+        if (syncedWoCount > 0) msg += `Đã đồng bộ ${syncedWoCount} phiếu WO. `;
         if (syncedCustomersCount > 0) msg += `Đã đồng bộ ${syncedCustomersCount} khách hàng. `;
         if (syncedInventoryCount > 0) msg += `Đã đồng bộ ${syncedInventoryCount} vật tư kho. `;
+        if (protectedRecordsCount > 0) {
+          msg += `\n🛡️ Đã bảo vệ an toàn ${protectedRecordsCount} bản ghi Firestore có phiên bản mới hơn.`;
+        }
         alert(msg.trim());
       } else {
-        alert('Không tìm thấy dữ liệu thiết bị, khách hàng hoặc kho hợp lệ trong Google Sheets.');
+        let msg = 'Không tìm thấy dữ liệu mới trên Google Sheets.';
+        if (protectedRecordsCount > 0) {
+          msg = `Dữ liệu trên Firestore đã là mới nhất. Đã bảo vệ ${protectedRecordsCount} bản ghi không bị ghi đè dữ liệu cũ từ Sheet.`;
+        }
+        alert(msg);
       }
     } catch (error: any) {
       console.error('Fetch error:', error);
@@ -5781,7 +7032,188 @@ export default function App() {
           
           {/* --- FIELD ENTRY VIEW --- */}
           {activeTab === 'field-entry' && (
-            <div className="max-w-3xl mx-auto space-y-6 pb-12">
+            <div className="max-w-6xl mx-auto space-y-6 pb-12">
+              {/* Field Entry Navigation Mode Selector */}
+              <div className="bg-white rounded-2xl p-2 border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFieldEntrySubTab('station')}
+                  className={`flex-1 flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
+                    fieldEntrySubTab === 'station'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 ring-2 ring-blue-600/20'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <FileSpreadsheet size={18} className={fieldEntrySubTab === 'station' ? 'text-blue-200' : 'text-slate-400'} />
+                  <span>Trạm Nhập Liệu & Đồng Bộ 2 Chiều Google Sheet</span>
+                  <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold ${
+                    fieldEntrySubTab === 'station' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    TEV Flatform
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFieldEntrySubTab('checklists')}
+                  className={`flex-1 flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
+                    fieldEntrySubTab === 'checklists'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 ring-2 ring-blue-600/20'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <ClipboardCheck size={18} className={fieldEntrySubTab === 'checklists' ? 'text-blue-200' : 'text-slate-400'} />
+                  <span>23 Biên Bản Kiểm Định Chuyên Sâu NETA ATS</span>
+                  <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold ${
+                    fieldEntrySubTab === 'checklists' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    Tiêu Chuẩn Mỹ
+                  </span>
+                </button>
+              </div>
+
+              {fieldEntrySubTab === 'station' ? (
+                <FseFieldDataEntryStation
+                  customers={customers}
+                  allEquipment={allEquipment}
+                  workOrders={workOrders}
+                  isGoogleConnected={isGoogleConnected}
+                  onConnectGoogle={handleConnectGoogle}
+                  onSaveCustomer={handleSaveCustomerFromField}
+                  onSaveEquipment={handleSaveEquipmentFromField}
+                  onSaveWorkOrder={handleSaveWorkOrderFromField}
+                  onSyncAllToSheets={handleSyncToSheets}
+                  onFetchFromSheets={handleFetchFromSheets}
+                  isSyncing={isSyncing}
+                  userEmail={auth.currentUser?.email || 'sgm1707@gmail.com'}
+                />
+              ) : (
+                <>
+                  {/* Equipment Checklist Selection Hub */}
+                  <EquipmentChecklistSelector
+                    currentMode={fieldEntryMode}
+                    onSelectMode={(mode) => setFieldEntryMode(mode)}
+                    reportsCount={allReports.length}
+                    onNavigateToReports={() => setActiveTab('reports')}
+                  />
+
+              {fieldEntryMode === 'neta-dc-motor' ? (
+                <NetaDcMotorChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-grounding' ? (
+                <NetaGroundingChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-lv-breaker' ? (
+                <NetaLvBreakerChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-cable-lv' ? (
+                <NetaCableLvChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-switchgear' ? (
+                <NetaSwitchgearChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-generator' ? (
+                <NetaEngineGeneratorChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-ats' ? (
+                <NetaAtsChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-battery-vrla' ? (
+                <NetaBatteryVrlaChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-battery-flooded' ? (
+                <NetaBatteryFloodedChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-sync-machinery' ? (
+                <NetaSyncMachineryChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-ups' ? (
+                <NetaUpsChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-relay' ? (
+                <NetaRelayChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-liquid-transformer' ? (
+                <NetaLiquidTransformerChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-motor' ? (
+                <NetaMotorChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-pd' ? (
+                <NetaPartialDischargeChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-thermography' ? (
+                <NetaThermographyChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-sf6-switch' ? (
+                <NetaSf6SwitchChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-cable' ? (
+                <NetaCableChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-evse' ? (
+                <NetaEvseChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-pv' ? (
+                <NetaPvChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-bess' ? (
+                <NetaBessChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-dry-large' ? (
+                <NetaLargeDryTypeChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : fieldEntryMode === 'neta-dry-type' ? (
+                <NetaDryTypeChecklist
+                  onSaveReport={handleSaveNetaReport}
+                  onNavigateToReports={() => setActiveTab('reports')}
+                />
+              ) : (
+                <div className="max-w-3xl mx-auto space-y-6">
               
               {/* Step 1: Identify Equipment */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -6138,9 +7570,12 @@ export default function App() {
                   </button>
                 </div>
               </div>
-
             </div>
           )}
+        </>
+      )}
+    </div>
+  )}
 
           {/* --- DASHBOARD VIEW (Original) --- */}
           {activeTab === 'dashboard' && (
@@ -6378,18 +7813,145 @@ export default function App() {
 
                 {/* GEOGRAPHICAL MAP */}
                 <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-                  <div className="p-5 border-b border-slate-100 flex items-center justify-between z-10 bg-white">
-                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                      <MapPin className="text-blue-500" size={18} />
-                      Bản đồ phân bố thiết bị
-                    </h2>
+                  <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 z-10 bg-white">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                        <Globe size={18} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="font-bold text-slate-800 text-sm md:text-base">
+                            Bản đồ phân bố thiết bị & Dự án (Sites)
+                          </h2>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                            {filteredSiteData.length} Sites
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          Hỗ trợ định vị toàn cầu cho các dự án trong nước & quốc tế
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* View shortcuts */}
+                      <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs font-medium">
+                        <button
+                          type="button"
+                          onClick={() => setMapViewTrigger({ type: 'fit-all', timestamp: Date.now() })}
+                          className="px-2 py-1 rounded-md text-slate-700 hover:bg-white hover:shadow-xs transition-all flex items-center gap-1 text-[11px]"
+                          title="Căn chỉnh vừa vặn tất cả các site hiện có"
+                        >
+                          <Navigation size={12} className="text-blue-600" />
+                          <span>Gom tất cả ({filteredSiteData.length})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMapViewTrigger({ type: 'global', timestamp: Date.now() })}
+                          className="px-2 py-1 rounded-md text-slate-700 hover:bg-white hover:shadow-xs transition-all text-[11px]"
+                          title="Thu phóng toàn cầu"
+                        >
+                          🌍 Toàn cầu
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMapViewTrigger({ type: 'sea', timestamp: Date.now() })}
+                          className="px-2 py-1 rounded-md text-slate-700 hover:bg-white hover:shadow-xs transition-all text-[11px]"
+                          title="Khu vực Đông Nam Á"
+                        >
+                          🌏 Đông Nam Á
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMapViewTrigger({ type: 'vn', timestamp: Date.now() })}
+                          className="px-2 py-1 rounded-md text-slate-700 hover:bg-white hover:shadow-xs transition-all text-[11px]"
+                          title="Khu vực Việt Nam"
+                        >
+                          🇻🇳 Việt Nam
+                        </button>
+                      </div>
+
+                      {/* Map Tile Layers (OSM & Esri - No API Key Required) */}
+                      <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs font-medium">
+                        <button
+                          type="button"
+                          onClick={() => setMapLayer('streets')}
+                          className={`px-2 py-1 rounded-md transition-all text-[11px] ${
+                            mapLayer === 'streets' || (mapLayer as string) === 'voyager'
+                              ? 'bg-white text-blue-600 font-bold shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Đường bộ (OSM)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMapLayer('light')}
+                          className={`px-2 py-1 rounded-md transition-all text-[11px] ${
+                            mapLayer === 'light'
+                              ? 'bg-white text-blue-600 font-bold shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Nền sáng (Light)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMapLayer('satellite')}
+                          className={`px-2 py-1 rounded-md transition-all text-[11px] ${
+                            mapLayer === 'satellite'
+                              ? 'bg-white text-blue-600 font-bold shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Vệ tinh (Satellite)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMapLayer('topo')}
+                          className={`px-2 py-1 rounded-md transition-all text-[11px] ${
+                            mapLayer === 'topo'
+                              ? 'bg-white text-blue-600 font-bold shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          Địa hình (Topo)
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex-1 min-h-[400px] relative z-0">
+                  <div className="flex-1 min-h-[420px] relative z-0">
                     <MapContainer center={[16.047079, 108.206230]} zoom={5} style={{ height: '100%', width: '100%', zIndex: 0 }}>
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                      />
+                      <MapBoundsHandler sites={filteredSiteData} viewTrigger={mapViewTrigger} />
+                      {mapLayer === 'satellite' ? (
+                        <TileLayer
+                          key="satellite"
+                          attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+                          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                          maxZoom={18}
+                        />
+                      ) : mapLayer === 'light' ? (
+                        <TileLayer
+                          key="light"
+                          attribution='Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+                          url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+                          maxZoom={16}
+                        />
+                      ) : mapLayer === 'topo' ? (
+                        <TileLayer
+                          key="topo"
+                          attribution='Tiles &copy; Esri &mdash; USGS, Esri'
+                          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+                          maxZoom={18}
+                        />
+                      ) : (
+                        <TileLayer
+                          key="streets"
+                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors'
+                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                          maxZoom={19}
+                        />
+                      )}
                       {filteredSiteData.map((site) => (
                         <Marker 
                           key={site.id} 
@@ -6397,30 +7959,40 @@ export default function App() {
                           icon={createCustomIcon(site.status, site.count)}
                         >
                           <Popup className="custom-popup">
-                            <div className="p-1 min-w-[200px]">
-                              <h3 className="font-bold text-slate-800 mb-2 border-b pb-2">{site.name}</h3>
-                              <div className="space-y-2 text-sm">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-slate-500">Tổng thiết bị:</span>
-                                  <span className="font-bold">{site.count}</span>
+                            <div className="p-1 min-w-[210px]">
+                              <div className="flex items-center gap-1.5 mb-1.5 border-b pb-1.5">
+                                <span className="text-base">{site.flag || '🌐'}</span>
+                                <div>
+                                  <h3 className="font-bold text-slate-800 text-sm leading-tight">{site.name}</h3>
+                                  <span className="text-[10px] text-slate-500 font-medium">{site.country || 'Quốc tế'}</span>
                                 </div>
-                                <div className="flex justify-between items-center">
-                                  <span className="flex items-center gap-1 text-emerald-600"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Khỏe mạnh:</span>
-                                  <span className="font-medium">{site.healthy}</span>
+                              </div>
+                              <div className="space-y-1.5 text-xs">
+                                <div className="flex justify-between items-center text-slate-600">
+                                  <span>Tổng thiết bị:</span>
+                                  <span className="font-bold text-slate-900">{site.count}</span>
                                 </div>
-                                <div className="flex justify-between items-center">
-                                  <span className="flex items-center gap-1 text-amber-500"><div className="w-2 h-2 rounded-full bg-amber-500"></div> Cảnh báo:</span>
-                                  <span className="font-medium">{site.warning}</span>
+                                <div className="flex justify-between items-center text-emerald-700">
+                                  <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Khỏe mạnh:</span>
+                                  <span className="font-semibold">{site.healthy}</span>
                                 </div>
-                                <div className="flex justify-between items-center">
-                                  <span className="flex items-center gap-1 text-rose-500"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Nguy hiểm:</span>
-                                  <span className="font-medium">{site.critical}</span>
+                                <div className="flex justify-between items-center text-amber-700">
+                                  <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-amber-500"></div> Cảnh báo:</span>
+                                  <span className="font-semibold">{site.warning}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-rose-700">
+                                  <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Nguy hiểm:</span>
+                                  <span className="font-semibold">{site.critical}</span>
+                                </div>
+                                <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                                  <span>Tọa độ:</span>
+                                  <span>{site.lat.toFixed(3)}, {site.lng.toFixed(3)}</span>
                                 </div>
                               </div>
                             </div>
                           </Popup>
                           <LeafletTooltip direction="top" offset={[0, -20]} opacity={1}>
-                            <span className="font-semibold">{site.name}</span>
+                            <span className="font-semibold">{site.flag || ''} {site.name}</span>
                           </LeafletTooltip>
                         </Marker>
                       ))}
@@ -7430,13 +9002,13 @@ export default function App() {
           )}
           {activeTab === 'deep-analysis' && (
             <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
-              <div className="max-w-5xl mx-auto space-y-6">
+              <div className={`${deepAnalysisSubTab === 'pv-cell' || deepAnalysisSubTab === 'dga' ? 'max-w-7xl' : 'max-w-5xl'} mx-auto space-y-6`}>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Phân tích chuyên sâu</h2>
                     <p className="text-slate-500 mt-1">
-                      {deepAnalysisSubTab === 'dga' && 'Phân tích tình trạng máy biến áp dựa trên dữ liệu DGA'}
-                      {deepAnalysisSubTab === 'pv-cell' && 'Phân tích tình trạng tấm pin năng lượng mặt trời (PV Cell)'}
+                      {deepAnalysisSubTab === 'dga' && 'Phân tích tình trạng & Xu hướng nồng độ khí hòa tan DGA (IEEE C57.104 & Duval Triangles)'}
+                      {deepAnalysisSubTab === 'pv-cell' && 'Phân tích tình trạng tấm pin/cell mặt trời từ ảnh nhiệt (IR) & ảnh thực tế (RGB) theo IEC 62446-3 & Volateq / Sitemark'}
                       {deepAnalysisSubTab === 'wind-turbine' && 'Phân tích tình trạng cánh quạt điện gió (Wind Turbine Blade)'}
                     </p>
                   </div>
@@ -7474,71 +9046,405 @@ export default function App() {
                 {deepAnalysisSubTab === 'dga' && (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Input Form */}
-                  <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                    <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                      <Thermometer size={20} className="text-blue-500" />
-                      Nhập liệu (ppm)
-                    </h3>
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-2">
-                        {['h2', 'ch4', 'c2h6', 'c2h4', 'c2h2', 'co', 'co2', 'o2', 'n2'].map((gas) => (
-                          <div key={gas}>
-                            <label className="block text-xs font-medium text-slate-700 mb-1 uppercase">{gas}</label>
-                            <input
-                              type="number"
-                              value={dgaData[gas as keyof typeof dgaData]}
-                              onChange={(e) => setDgaData({...dgaData, [gas]: e.target.value})}
-                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                              placeholder={`Nhập ${gas.toUpperCase()}`}
-                            />
-                          </div>
-                        ))}
+                  <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                          <Thermometer size={18} className="text-blue-500" />
+                          Nhập liệu &amp; Xu hướng DGA
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Chỉ báo mũi tên (▲/▼) đối soát tức thời với số liệu kỳ đo trước trong cơ sở dữ liệu lịch sử
+                        </p>
                       </div>
-                      <div className="border-t border-slate-200 pt-4 mt-4">
-                        <h4 className="text-sm font-bold text-slate-800 mb-3">Thông số khác</h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Moisture (ppm)</label>
-                            <input type="number" value={dgaData.moisture} onChange={(e) => setDgaData({...dgaData, moisture: e.target.value})} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">BD Strength (kV)</label>
-                            <input type="number" value={dgaData.bdStrength} onChange={(e) => setDgaData({...dgaData, bdStrength: e.target.value})} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Acidity (mgKOH/g)</label>
-                            <input type="number" value={dgaData.acidity} onChange={(e) => setDgaData({...dgaData, acidity: e.target.value})} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">FFA (ppm)</label>
-                            <input type="number" value={dgaData.ffa} onChange={(e) => setDgaData({...dgaData, ffa: e.target.value})} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Est DP</label>
-                            <input type="number" value={dgaData.estDp} onChange={(e) => setDgaData({...dgaData, estDp: e.target.value})} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Tuổi MBA (năm)</label>
-                            <input type="number" value={dgaData.age} onChange={(e) => setDgaData({...dgaData, age: e.target.value})} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">% Phụ tải</label>
-                            <input type="number" value={dgaData.loadFactor} onChange={(e) => setDgaData({...dgaData, loadFactor: e.target.value})} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
+                    </div>
+
+                    {/* Historical Baseline Reference Header Card */}
+                    <div className="mb-4 p-3 bg-gradient-to-r from-blue-50/70 to-slate-50 rounded-xl border border-blue-100/80 text-xs">
+                      <div className="flex items-center justify-between text-[11px] mb-1.5">
+                        <span className="font-bold text-blue-900 flex items-center gap-1">
+                          <History size={12} className="text-blue-600" />
+                          Cơ sở dữ liệu lịch sử tham chiếu:
+                        </span>
+                        <span className="font-mono font-bold text-blue-700 bg-blue-100/60 px-1.5 py-0.5 rounded">
+                          {lastDgaRecord.date}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-600 line-clamp-1 mb-2">
+                        Thiết bị: <strong className="text-slate-800">{equipmentCode}</strong> • {lastDgaRecord.source}
+                      </div>
+
+                      {/* Quick Sample Presets for Testing & Engineering Validation */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-blue-200/60">
+                        <button
+                          type="button"
+                          onClick={handleLoadLastRecordedDga}
+                          className="px-2 py-1 bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded text-[10px] font-bold shadow-2xs transition-colors flex items-center gap-1"
+                          title="Nạp số liệu đo của lần trước để so sánh (Độ lệch = 0)"
+                        >
+                          <RotateCcw size={10} />
+                          Nạp mẫu kỳ trước
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleLoadElevatedDgaSample}
+                          className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded text-[10px] font-bold shadow-2xs transition-colors flex items-center gap-1"
+                          title="Mẫu mô phỏng nồng độ khí tăng (Mũi tên đỏ ▲)"
+                        >
+                          <ArrowUpRight size={10} />
+                          Mẫu tăng khí (▲)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleLoadDecreasingDgaSample}
+                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[10px] font-bold shadow-2xs transition-colors flex items-center gap-1"
+                          title="Mẫu mô phỏng nồng độ khí giảm (Mũi tên xanh ▼)"
+                        >
+                          <ArrowDownRight size={10} />
+                          Mẫu giảm khí (▼)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Trend Indicator Legend */}
+                    <div className="flex items-center justify-between text-[10px] mb-3 px-1 text-slate-500 font-medium">
+                      <span className="flex items-center gap-1 text-rose-600 font-bold">
+                        ▲ Tăng (Xấu hơn)
+                      </span>
+                      <span className="flex items-center gap-1 text-emerald-600 font-bold">
+                        ▼ Giảm (Tốt hơn)
+                      </span>
+                      <span className="flex items-center gap-1 text-slate-500 font-bold">
+                        → Ổn định (±1%)
+                      </span>
+                    </div>
+
+                    {/* Gas Parameters with Visual Trend Indicators */}
+                    <div className="space-y-4">
+                      <div>
+                        <div className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 flex items-center justify-between">
+                          <span>Nồng độ khí hòa tan (ppm)</span>
+                          <span className="text-[10px] font-mono text-slate-400 font-normal">IEEE C57.104</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <DgaParamTrendInput
+                            paramKey="h2"
+                            label="H₂"
+                            subLabel="Hydrogen"
+                            unit="ppm"
+                            standard="≤ 100"
+                            value={dgaData.h2}
+                            onChange={(val) => setDgaData({ ...dgaData, h2: val })}
+                            historicalValue={lastDgaRecord.gases.h2}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập H₂"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="ch4"
+                            label="CH₄"
+                            subLabel="Methane"
+                            unit="ppm"
+                            standard="≤ 120"
+                            value={dgaData.ch4}
+                            onChange={(val) => setDgaData({ ...dgaData, ch4: val })}
+                            historicalValue={lastDgaRecord.gases.ch4}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập CH₄"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="c2h6"
+                            label="C₂H₆"
+                            subLabel="Ethane"
+                            unit="ppm"
+                            standard="≤ 65"
+                            value={dgaData.c2h6}
+                            onChange={(val) => setDgaData({ ...dgaData, c2h6: val })}
+                            historicalValue={lastDgaRecord.gases.c2h6}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập C₂H₆"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="c2h4"
+                            label="C₂H₄"
+                            subLabel="Ethylene"
+                            unit="ppm"
+                            standard="≤ 50"
+                            value={dgaData.c2h4}
+                            onChange={(val) => setDgaData({ ...dgaData, c2h4: val })}
+                            historicalValue={lastDgaRecord.gases.c2h4}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập C₂H₄"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="c2h2"
+                            label="C₂H₂"
+                            subLabel="Acetylene"
+                            unit="ppm"
+                            standard="≤ 1.0"
+                            value={dgaData.c2h2}
+                            onChange={(val) => setDgaData({ ...dgaData, c2h2: val })}
+                            historicalValue={lastDgaRecord.gases.c2h2}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập C₂H₂"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="co"
+                            label="CO"
+                            subLabel="Carbon Monoxide"
+                            unit="ppm"
+                            standard="≤ 350"
+                            value={dgaData.co}
+                            onChange={(val) => setDgaData({ ...dgaData, co: val })}
+                            historicalValue={lastDgaRecord.gases.co}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập CO"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="co2"
+                            label="CO₂"
+                            subLabel="Carbon Dioxide"
+                            unit="ppm"
+                            standard="≤ 2500"
+                            value={dgaData.co2}
+                            onChange={(val) => setDgaData({ ...dgaData, co2: val })}
+                            historicalValue={lastDgaRecord.gases.co2}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập CO₂"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="o2"
+                            label="O₂"
+                            subLabel="Oxygen"
+                            unit="ppm"
+                            standard="≤ 3500"
+                            value={dgaData.o2}
+                            onChange={(val) => setDgaData({ ...dgaData, o2: val })}
+                            historicalValue={lastDgaRecord.gases.o2}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập O₂"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="n2"
+                            label="N₂"
+                            subLabel="Nitrogen"
+                            unit="ppm"
+                            standard="≤ 50000"
+                            value={dgaData.n2}
+                            onChange={(val) => setDgaData({ ...dgaData, n2: val })}
+                            historicalValue={lastDgaRecord.gases.n2}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập N₂"
+                            className="sm:col-span-2"
+                          />
                         </div>
                       </div>
+
+                      {/* Other Oil & Transformer Parameters */}
+                      <div className="border-t border-slate-200 pt-3.5 mt-2">
+                        <div className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 flex items-center justify-between">
+                          <span>Thông số lý hóa dầu &amp; Máy biến áp</span>
+                          <span className="text-[10px] font-mono text-slate-400 font-normal">ASTM / IEC</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <DgaParamTrendInput
+                            paramKey="moisture"
+                            label="Moisture"
+                            subLabel="Độ ẩm dầu"
+                            unit="ppm"
+                            standard="≤ 20"
+                            value={dgaData.moisture}
+                            onChange={(val) => setDgaData({ ...dgaData, moisture: val })}
+                            historicalValue={lastDgaRecord.otherParams.moisture}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập Moisture"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="bdStrength"
+                            label="BD Strength"
+                            subLabel="Đánh thủng"
+                            unit="kV"
+                            standard="≥ 50"
+                            value={dgaData.bdStrength}
+                            onChange={(val) => setDgaData({ ...dgaData, bdStrength: val })}
+                            historicalValue={lastDgaRecord.otherParams.bdStrength}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={true}
+                            placeholder="Nhập BD Strength"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="acidity"
+                            label="Acidity"
+                            subLabel="Chỉ số axit"
+                            unit="mgKOH/g"
+                            standard="≤ 0.10"
+                            value={dgaData.acidity}
+                            onChange={(val) => setDgaData({ ...dgaData, acidity: val })}
+                            historicalValue={lastDgaRecord.otherParams.acidity}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập Acidity"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="ffa"
+                            label="FFA"
+                            subLabel="Furan 2-FAL"
+                            unit="ppm"
+                            standard="≤ 1.5"
+                            value={dgaData.ffa}
+                            onChange={(val) => setDgaData({ ...dgaData, ffa: val })}
+                            historicalValue={lastDgaRecord.otherParams.ffa}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập FFA"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="estDp"
+                            label="Est DP"
+                            subLabel="Độ trùng hợp"
+                            unit="DP"
+                            standard="≥ 500"
+                            value={dgaData.estDp}
+                            onChange={(val) => setDgaData({ ...dgaData, estDp: val })}
+                            historicalValue={lastDgaRecord.otherParams.estDp}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={true}
+                            placeholder="Nhập DP"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="age"
+                            label="Tuổi MBA"
+                            subLabel="Năm vận hành"
+                            unit="năm"
+                            standard="≤ 40"
+                            value={dgaData.age}
+                            onChange={(val) => setDgaData({ ...dgaData, age: val })}
+                            historicalValue={lastDgaRecord.otherParams.age}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập tuổi"
+                          />
+                          <DgaParamTrendInput
+                            paramKey="loadFactor"
+                            label="% Phụ tải"
+                            subLabel="Tỷ lệ tải"
+                            unit="%"
+                            standard="≤ 100"
+                            value={dgaData.loadFactor}
+                            onChange={(val) => setDgaData({ ...dgaData, loadFactor: val })}
+                            historicalValue={lastDgaRecord.otherParams.loadFactor}
+                            historicalDate={lastDgaRecord.date}
+                            isHigherBetter={false}
+                            placeholder="Nhập % tải"
+                            className="sm:col-span-2"
+                          />
+                        </div>
+                      </div>
+
                       <button 
                         onClick={analyzeDGA}
-                        className="w-full mt-6 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
+                        className="w-full mt-4 py-2.5 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white rounded-lg font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
                       >
-                        Phân tích dữ liệu
+                        <Activity size={15} />
+                        <span>Phân tích dữ liệu &amp; Cập nhật Xu hướng</span>
                       </button>
                     </div>
                   </div>
 
                   {/* Analysis Results */}
                   <div className="lg:col-span-2 space-y-6">
-                    {dgaAnalysisResult ? (
+                    {/* View Mode Switcher for DGA Analysis */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setDgaViewMode('dashboard')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                            dgaViewMode === 'dashboard' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          <Activity size={13} />
+                          DGA Advanced Dashboard
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDgaViewMode('both')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            dgaViewMode === 'both' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          Toàn bộ (Biểu đồ &amp; Chẩn đoán)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDgaViewMode('trend')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                            dgaViewMode === 'trend' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          <TrendingUp size={13} />
+                          Biểu đồ Xu hướng (LineChart)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDgaViewMode('diagnostic')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                            dgaViewMode === 'diagnostic' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          <Activity size={13} />
+                          Chẩn đoán Duval &amp; Ma trận
+                        </button>
+                      </div>
+
+                      <div className="text-xs text-slate-500 font-medium px-2">
+                        Tiêu chuẩn: <span className="font-semibold text-slate-700">IEEE C57.104 &amp; IEC 60599</span>
+                      </div>
+                    </div>
+
+                    {/* DGA Advanced Diagnostics Dashboard (Matching images) */}
+                    {dgaViewMode === 'dashboard' && (
+                      <DgaAdvancedDiagnosticsDashboard
+                        currentFormValues={dgaData}
+                        equipmentCode={equipmentCode}
+                        equipmentName={equipmentName}
+                        customerName={customerName}
+                        analysisResult={dgaAnalysisResult}
+                        lastRecordedValues={lastDgaRecord}
+                        onAnalyze={analyzeDGA}
+                        onExportPdf={exportToPDF}
+                        onUpdateAssetInfo={(info) => {
+                          if (info.equipmentCode) setEquipmentCode(info.equipmentCode);
+                          if (info.equipmentName) setEquipmentName(info.equipmentName);
+                        }}
+                        onUpdateFormValues={(vals) => {
+                          setDgaData(prev => ({ ...prev, ...vals }));
+                        }}
+                      />
+                    )}
+
+                    {/* Historical Trend LineChart */}
+                    {(dgaViewMode === 'both' || dgaViewMode === 'trend') && (
+                      <DgaHistoricalTrendChart
+                        currentFormValues={dgaData}
+                        equipmentCode={equipmentCode}
+                        equipmentName={equipmentName}
+                        onLoadSampleToForm={handleLoadDgaSampleToForm}
+                      />
+                    )}
+
+                    {/* Detailed Diagnostic Results */}
+                    {(dgaViewMode === 'both' || dgaViewMode === 'diagnostic') && (
+                      dgaAnalysisResult ? (
                       <div id="dga-report-content" className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
                         <div className="border-b border-slate-200 pb-6 mb-6">
                           <div className="flex justify-between items-start mb-4">
@@ -7767,113 +9673,49 @@ export default function App() {
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 flex flex-col items-center justify-center text-center h-full min-h-[400px]">
-                        <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4">
-                          <Activity size={32} />
+                      dgaViewMode === 'diagnostic' ? (
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 flex flex-col items-center justify-center text-center h-full min-h-[400px]">
+                          <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4">
+                            <Activity size={32} />
+                          </div>
+                          <h3 className="text-xl font-bold text-slate-800 mb-2">Chưa có kết quả chẩn đoán chi tiết</h3>
+                          <p className="text-slate-500 max-w-md">
+                            Vui lòng nhập các giá trị khí hòa tan (DGA) ở cột bên trái hoặc chọn <strong>"Nạp vào Form"</strong> từ bảng lịch sử đo trên, sau đó nhấn <strong>"Phân tích dữ liệu"</strong> để xem ma trận chẩn đoán và dự báo tuổi thọ.
+                          </p>
                         </div>
-                        <h3 className="text-xl font-bold text-slate-800 mb-2">Chưa có dữ liệu phân tích</h3>
-                        <p className="text-slate-500 max-w-md">
-                          Vui lòng nhập các giá trị khí hòa tan (DGA) ở cột bên trái và nhấn "Phân tích dữ liệu" để xem kết quả chẩn đoán và dự báo tuổi thọ.
-                        </p>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+                              <Activity size={20} />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-slate-800">Chưa tạo báo cáo ma trận chẩn đoán cho lần đo hiện tại</h4>
+                              <p className="text-xs text-slate-600 mt-0.5">
+                                Nhấn nút <strong>"Phân tích dữ liệu"</strong> ở cột bên trái hoặc chọn <strong>"Nạp vào Form"</strong> từ bảng lịch sử để chạy ma trận Duval Triangles, Pentagons và đánh giá Health Index.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={analyzeDGA}
+                            className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-lg hover:bg-slate-800 whitespace-nowrap shadow-sm"
+                          >
+                            Phân tích ngay
+                          </button>
+                        </div>
+                      )
+                    )
+                  )}
                   </div>
                 </div>
               )}
 
                 {deepAnalysisSubTab === 'pv-cell' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                      <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                        <Sun size={20} className="text-amber-500" />
-                        Thông số vận hành
-                      </h3>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Nhiệt độ tấm pin (°C)</label>
-                          <input type="number" value={pvCellData.temp} onChange={(e) => setPvCellData({...pvCellData, temp: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Cường độ bức xạ (W/m²)</label>
-                          <input type="number" value={pvCellData.irradiance} onChange={(e) => setPvCellData({...pvCellData, irradiance: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Điện áp hở mạch Voc (V)</label>
-                          <input type="number" value={pvCellData.voc} onChange={(e) => setPvCellData({...pvCellData, voc: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Dòng ngắn mạch Isc (A)</label>
-                          <input type="number" value={pvCellData.isc} onChange={(e) => setPvCellData({...pvCellData, isc: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Hiệu suất hiện tại (%)</label>
-                          <input type="number" value={pvCellData.efficiency} onChange={(e) => setPvCellData({...pvCellData, efficiency: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" />
-                        </div>
-                        <button 
-                          onClick={analyzePVCell}
-                          className="w-full mt-6 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
-                        >
-                          Phân tích hệ thống
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="lg:col-span-2 space-y-6">
-                      {pvAnalysisResult ? (
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
-                          <div className="flex justify-between items-start mb-8 border-b border-slate-100 pb-6">
-                            <div>
-                              <h3 className="text-xl font-bold text-slate-900">Kết quả phân tích PV Cell</h3>
-                              <p className="text-slate-500 mt-1">Thời gian: {pvAnalysisResult.timestamp}</p>
-                            </div>
-                            <div className={`px-4 py-2 rounded-full font-bold text-sm ${pvAnalysisResult.bgColor} ${pvAnalysisResult.color}`}>
-                              {pvAnalysisResult.condition}
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
-                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Chỉ số hiệu suất</h4>
-                              <div className="flex items-end gap-2">
-                                <span className="text-4xl font-bold text-slate-900">{pvCellData.efficiency}%</span>
-                                <span className="text-slate-500 mb-1">/ 20% (Lý tưởng)</span>
-                              </div>
-                            </div>
-                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
-                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Nhiệt độ vận hành</h4>
-                              <div className="flex items-end gap-2">
-                                <span className={`text-4xl font-bold ${parseFloat(pvCellData.temp) > 55 ? 'text-rose-600' : 'text-slate-900'}`}>{pvCellData.temp}°C</span>
-                                <span className="text-slate-500 mb-1">/ 25°C (STC)</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div>
-                            <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                              <CheckCircle size={20} className="text-blue-500" />
-                              Khuyến cáo kỹ thuật
-                            </h4>
-                            <ul className="space-y-3">
-                              {pvAnalysisResult.recommendations.map((rec: string, idx: number) => (
-                                <li key={idx} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-100">
-                                  <div className={`mt-1 w-2 h-2 rounded-full ${pvAnalysisResult.bgColor.replace('bg-', 'bg-').replace('50', '500')}`} />
-                                  <span className="text-slate-700">{rec}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 flex flex-col items-center justify-center text-center h-full min-h-[400px]">
-                          <Sun size={48} className="text-slate-200 mb-4" />
-                          <h3 className="text-xl font-bold text-slate-800 mb-2">Sẵn sàng phân tích PV Cell</h3>
-                          <p className="text-slate-500 max-w-md">
-                            Nhập các thông số vận hành của chuỗi pin mặt trời để đánh giá hiệu suất và phát hiện sớm các lỗi vật lý.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <PvCellDeepThermalAnalyzer
+                    onSaveReport={handleSaveNetaReport}
+                    onNavigateToReports={() => setActiveTab('reports')}
+                  />
                 )}
 
                 {deepAnalysisSubTab === 'wind-turbine' && (
@@ -8321,131 +10163,485 @@ export default function App() {
             <div className="space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-900">Lịch bảo trì định kỳ (PM)</h2>
-                  <p className="text-slate-500">Theo dõi và lên kế hoạch bảo trì cho các thiết bị.</p>
+                  <h2 className="text-2xl font-bold text-slate-900">Lịch bảo trì định kỳ (PM) & Giám sát Tiến độ</h2>
+                  <p className="text-slate-500">Bảng điều khiển theo dõi phiếu PM đã hoàn thành, quá hạn và sắp đến hạn trong tháng, kết hợp tự động cảnh báo Email.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setNewWorkOrder({
+                        title: '',
+                        description: '',
+                        equipmentId: [],
+                        customerId: '',
+                        factory: '',
+                        priority: 'medium',
+                        type: 'preventive',
+                        status: 'initiated',
+                        assignedTo: '',
+                        dueDate: new Date().toISOString().split('T')[0],
+                        usedMaterials: [],
+                        responsibleApprove: 'TM',
+                        responsibleDo: 'Everybody',
+                        blockingRequired: false,
+                        workPermitId: generateWorkPermitId(),
+                        isUnplanned: false,
+                        failureCode: '',
+                        pmFrequency: 'monthly',
+                        estimatedTime: 0,
+                        laborCount: 0,
+                        laborCost: 0,
+                        partCost: 0,
+                        attachments: [],
+                        downtimeStart: '',
+                        repairStart: '',
+                        repairEnd: '',
+                        restartTime: ''
+                      });
+                      setSelectedWorkOrder(null);
+                      setShowWorkOrderModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-semibold shadow-xs transition-all"
+                  >
+                    <Plus size={16} />
+                    <span>Tạo Phiếu PM Mới</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowPMNotificationModal(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-sm font-semibold shadow-xs transition-all"
+                  >
+                    <Mail size={16} />
+                    <span>Email Cảnh Báo (3 Ngày)</span>
+                    {pmUpcomingTasks.length > 0 && (
+                      <span className="ml-1 px-2 py-0.5 bg-amber-400 text-slate-950 text-xs font-bold rounded-full">
+                        {pmUpcomingTasks.length}
+                      </span>
+                    )}
+                  </button>
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
-                        <th className="p-4">Thiết bị</th>
-                        <th className="p-4">Tần suất PM</th>
-                        <th className="p-4">Lần bảo trì cuối</th>
-                        <th className="p-4">Lần bảo trì tiếp theo</th>
-                        <th className="p-4">Trạng thái</th>
-                        <th className="p-4 text-right">Thao tác</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm divide-y divide-slate-50">
-                      {allEquipment.map(eq => {
-                        // Find the latest completed PM work order for this equipment
-                        const eqPmOrders = workOrders.filter(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.status === 'completed');
-                        eqPmOrders.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
-                        const latestPm = eqPmOrders[0];
-                        
-                        // If no PM order exists, we might not know the frequency unless it's stored on the equipment.
-                        // For now, we'll look for ANY PM order (even not completed) to get the frequency.
-                        const anyPmOrder = workOrders.find(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency);
-                        const frequency = anyPmOrder?.pmFrequency || '';
-                        
-                        if (!frequency) return null; // Skip equipment without PM schedule
+              {/* Sub-navigation Tabs */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setPmSubTab('dashboard')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                      pmSubTab === 'dashboard'
+                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    <BarChart3 size={16} />
+                    <span>Biểu Đồ & Dashboard Tiến Độ PM</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      pmSubTab === 'dashboard' ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-700'
+                    }`}>
+                      Mới
+                    </span>
+                  </button>
 
-                        const lastDateStr = latestPm ? (latestPm.updatedAt || latestPm.createdAt) : null;
-                        const nextDate = lastDateStr ? calculateNextPMDate(lastDateStr, frequency) : null;
-                        const isOverdue = nextDate ? nextDate < new Date() : false;
-                        const isDueSoon = nextDate ? (nextDate.getTime() - new Date().getTime()) / (1000 * 3600 * 24) <= 7 : false;
+                  <button
+                    onClick={() => setPmSubTab('schedule')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                      pmSubTab === 'schedule'
+                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    <Calendar size={16} />
+                    <span>Danh Mục Lịch Thiết Bị PM ({allEquipment.length})</span>
+                  </button>
 
-                        return (
-                          <tr key={eq.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-4">
-                              <div className="font-bold text-slate-900">{eq.name}</div>
-                              <div className="text-xs text-slate-500 font-mono">{eq.id}</div>
-                            </td>
-                            <td className="p-4 text-slate-600">
-                              {frequency === 'daily' ? 'Hàng ngày' :
-                               frequency === 'weekly' ? 'Hàng tuần' :
-                               frequency === 'bi-monthly' ? 'Nửa tháng' :
-                               frequency === 'monthly' ? 'Hàng tháng' :
-                               frequency === '3-months' ? '3 tháng' :
-                               frequency === '6-months' ? '6 tháng' :
-                               frequency === '1-year' ? '1 năm' :
-                               frequency === '3-years' ? '3 năm' :
-                               frequency === '6-years' ? '6 năm' : frequency}
-                            </td>
-                            <td className="p-4 text-slate-600">
-                              {lastDateStr ? new Date(lastDateStr).toLocaleDateString('vi-VN') : 'Chưa có dữ liệu'}
-                            </td>
-                            <td className="p-4 font-medium">
-                              {nextDate ? (
-                                <span className={isOverdue ? 'text-rose-600 font-bold' : isDueSoon ? 'text-amber-600 font-bold' : 'text-slate-900'}>
-                                  {nextDate.toLocaleDateString('vi-VN')}
-                                </span>
-                              ) : 'Chưa xác định'}
-                            </td>
-                            <td className="p-4">
-                              {isOverdue ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200">Quá hạn</span>
-                              ) : isDueSoon ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-700 border border-amber-200">Sắp đến hạn</span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-200">Bình thường</span>
-                              )}
-                            </td>
-                            <td className="p-4 text-right">
-                              <button 
-                                onClick={() => {
-                                  setNewWorkOrder({
-                                    title: `Bảo trì định kỳ - ${eq.name}`,
-                                    description: '',
-                                    equipmentId: [eq.id],
-                                    customerId: eq.customer || '',
-                                    priority: 'medium',
-                                    type: 'preventive',
-                                    status: 'initiated',
-                                    assignedTo: '',
-                                    dueDate: nextDate ? nextDate.toISOString().split('T')[0] : '',
-                                    usedMaterials: [],
-                                    responsibleApprove: 'TM',
-                                    responsibleDo: 'Everybody',
-                                    blockingRequired: false,
-                                    workPermitId: generateWorkPermitId(),
-                                    isUnplanned: false,
-                                    failureCode: '',
-                                    pmFrequency: frequency,
-                                    estimatedTime: 0,
-                                    laborCount: 0,
-                                    laborCost: 0,
-                                    partCost: 0,
-                                    attachments: [],
-                                    downtimeStart: '',
-                                    repairStart: '',
-                                    repairEnd: '',
-                                    restartTime: ''
-                                  });
-                                  setSelectedWorkOrder(null);
-                                  setShowWorkOrderModal(true);
-                                }}
-                                className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors"
-                              >
-                                Tạo phiếu PM
-                              </button>
+                  <button
+                    onClick={() => setPmSubTab('alerts')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                      pmSubTab === 'alerts'
+                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    <Mail size={16} />
+                    <span>Cảnh Báo Tự Động (Cloud Functions)</span>
+                    {pmUpcomingTasks.length > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400 text-slate-950">
+                        {pmUpcomingTasks.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-tab 1: PM Dashboard & Charts */}
+              {pmSubTab === 'dashboard' && (
+                <PmScheduleDashboard
+                  workOrders={workOrders}
+                  allEquipment={allEquipment}
+                  onOpenWorkOrderModal={(wo) => {
+                    setSelectedWorkOrder(wo);
+                    setShowWorkOrderModal(true);
+                  }}
+                  onSendAlert={(id) => handleSendPMAlerts(true)}
+                  onOpenEmailConfig={() => setShowPMNotificationModal(true)}
+                  onUpdateWorkOrderStatus={handleQuickUpdateWorkOrderStatus}
+                />
+              )}
+
+              {/* Sub-tab 2: Equipment Schedule Table */}
+              {pmSubTab === 'schedule' && (
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
+                          <th className="p-4">Thiết bị</th>
+                          <th className="p-4">Tần suất PM</th>
+                          <th className="p-4">Lần bảo trì cuối</th>
+                          <th className="p-4">Lần bảo trì tiếp theo</th>
+                          <th className="p-4">Trạng thái</th>
+                          <th className="p-4 text-right">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-sm divide-y divide-slate-50">
+                        {allEquipment.map(eq => {
+                          // Find the latest completed PM work order for this equipment
+                          const eqPmOrders = workOrders.filter(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.status === 'completed');
+                          eqPmOrders.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+                          const latestPm = eqPmOrders[0];
+                          
+                          // If no PM order exists, we might not know the frequency unless it's stored on the equipment.
+                          // For now, we'll look for ANY PM order (even not completed) to get the frequency.
+                          const anyPmOrder = workOrders.find(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency);
+                          const frequency = anyPmOrder?.pmFrequency || '';
+                          
+                          if (!frequency) return null; // Skip equipment without PM schedule
+
+                          const lastDateStr = latestPm ? (latestPm.updatedAt || latestPm.createdAt) : null;
+                          const nextDate = lastDateStr ? calculateNextPMDate(lastDateStr, frequency) : null;
+                          const isOverdue = nextDate ? nextDate < new Date() : false;
+                          const isDueSoon = nextDate ? (nextDate.getTime() - new Date().getTime()) / (1000 * 3600 * 24) <= 7 : false;
+
+                          return (
+                            <tr key={eq.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-4">
+                                <div className="font-bold text-slate-900">{eq.name}</div>
+                                <div className="text-xs text-slate-500 font-mono">{eq.id}</div>
+                              </td>
+                              <td className="p-4 text-slate-600">
+                                {frequency === 'daily' ? 'Hàng ngày' :
+                                 frequency === 'weekly' ? 'Hàng tuần' :
+                                 frequency === 'bi-monthly' ? 'Nửa tháng' :
+                                 frequency === 'monthly' ? 'Hàng tháng' :
+                                 frequency === '3-months' ? '3 tháng' :
+                                 frequency === '6-months' ? '6 tháng' :
+                                 frequency === '1-year' ? '1 năm' :
+                                 frequency === '3-years' ? '3 năm' :
+                                 frequency === '6-years' ? '6 năm' : frequency}
+                              </td>
+                              <td className="p-4 text-slate-600">
+                                {lastDateStr ? new Date(lastDateStr).toLocaleDateString('vi-VN') : 'Chưa có dữ liệu'}
+                              </td>
+                              <td className="p-4 font-medium">
+                                {nextDate ? (
+                                  <span className={isOverdue ? 'text-rose-600 font-bold' : isDueSoon ? 'text-amber-600 font-bold' : 'text-slate-900'}>
+                                    {nextDate.toLocaleDateString('vi-VN')}
+                                  </span>
+                                ) : 'Chưa xác định'}
+                              </td>
+                              <td className="p-4">
+                                {isOverdue ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200">Quá hạn</span>
+                                ) : isDueSoon ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-700 border border-amber-200">Sắp đến hạn</span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-200">Bình thường</span>
+                                )}
+                              </td>
+                              <td className="p-4 text-right">
+                                <button 
+                                  onClick={() => {
+                                    setNewWorkOrder({
+                                      title: `Bảo trì định kỳ - ${eq.name}`,
+                                      description: '',
+                                      equipmentId: [eq.id],
+                                      customerId: eq.customer || '',
+                                      priority: 'medium',
+                                      type: 'preventive',
+                                      status: 'initiated',
+                                      assignedTo: '',
+                                      dueDate: nextDate ? nextDate.toISOString().split('T')[0] : '',
+                                      usedMaterials: [],
+                                      responsibleApprove: 'TM',
+                                      responsibleDo: 'Everybody',
+                                      blockingRequired: false,
+                                      workPermitId: generateWorkPermitId(),
+                                      isUnplanned: false,
+                                      failureCode: '',
+                                      pmFrequency: frequency,
+                                      estimatedTime: 0,
+                                      laborCount: 0,
+                                      laborCost: 0,
+                                      partCost: 0,
+                                      attachments: [],
+                                      downtimeStart: '',
+                                      repairStart: '',
+                                      repairEnd: '',
+                                      restartTime: ''
+                                    });
+                                    setSelectedWorkOrder(null);
+                                    setShowWorkOrderModal(true);
+                                  }}
+                                  className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors"
+                                >
+                                  Tạo phiếu PM
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {allEquipment.filter(eq => workOrders.some(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency)).length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="p-8 text-center text-slate-500">
+                              Chưa có thiết bị nào được thiết lập lịch bảo trì định kỳ (PM).<br/>
+                              Hãy tạo một phiếu công việc loại "Bảo trì định kỳ" và chọn tần suất để thiết lập.
                             </td>
                           </tr>
-                        );
-                      })}
-                      {allEquipment.filter(eq => workOrders.some(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency)).length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="p-8 text-center text-slate-500">
-                            Chưa có thiết bị nào được thiết lập lịch bảo trì định kỳ (PM).<br/>
-                            Hãy tạo một phiếu công việc loại "Bảo trì định kỳ" và chọn tần suất để thiết lập.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-tab 3: Automated Alert Center */}
+              {pmSubTab === 'alerts' && (
+                <div className="space-y-6">
+                  {/* AUTOMATED EMAIL NOTIFICATION HIGHLIGHT BANNER */}
+                  <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-6 text-white border border-slate-700 shadow-md">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                      <div className="space-y-2 max-w-2xl">
+                        <div className="flex items-center gap-3">
+                          <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            ⚡ Firebase Cloud Functions
+                          </span>
+                          <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                            Tự động quét hằng ngày (08:00 AM)
+                          </span>
+                        </div>
+                        <h3 className="text-xl font-bold text-white">
+                          Cảnh báo Email Tự động Trước 3 Ngày Đến Hạn PM
+                        </h3>
+                        <p className="text-sm text-slate-300 leading-relaxed">
+                          Hệ thống tự động lọc các phiếu bảo trì định kỳ có ngày đến hạn (<code className="text-blue-300 font-mono text-xs">dueDate</code>) còn đúng 3 ngày, gửi email HTML thông báo chi tiết đến kỹ thuật viên phụ trách và quản lý (<code className="text-amber-300 font-mono text-xs">sgm1707@gmail.com</code>).
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0">
+                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10 flex items-center justify-between gap-4">
+                          <div>
+                            <div className="text-xs text-slate-400 font-medium">Phiếu PM sắp đến hạn (&le; 3 ngày):</div>
+                            <div className="text-2xl font-black text-amber-400">
+                              {pmUpcomingTasks.length} <span className="text-sm font-normal text-slate-300">thiết bị</span>
+                            </div>
+                          </div>
+                          <button
+                            disabled={pmNotificationLoading}
+                            onClick={() => handleSendPMAlerts(false)}
+                            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+                          >
+                            {pmNotificationLoading ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                            <span>Quét & Gửi ngay</span>
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => setShowPMNotificationModal(true)}
+                          className="px-4 py-2 bg-white/15 hover:bg-white/25 text-white text-xs font-medium rounded-xl border border-white/20 transition-colors text-center"
+                        >
+                          Xem chi tiết danh sách & Cấu hình gửi mail
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PM EMAIL NOTIFICATION MODAL */}
+          {showPMNotificationModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 max-h-[90vh] flex flex-col overflow-hidden">
+                {/* Header */}
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                      <Mail size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">
+                        Cấu hình & Giám sát Email Cảnh báo PM
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Firebase Cloud Functions tự động kích hoạt trước ngày đến hạn 3 ngày
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowPMNotificationModal(false)}
+                    className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-xl transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
+                  {/* Status Banner */}
+                  <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-blue-950 flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Firebase Cloud Function Scheduler: <code className="bg-blue-100 px-1.5 py-0.5 rounded text-blue-800 font-mono text-xs">checkUpcomingPMTasks</code>
+                      </div>
+                      <div className="text-xs text-blue-700 mt-1">
+                        Chu kỳ: Tự động chạy mỗi ngày lúc 08:00 sáng (Asia/Ho_Chi_Minh). Lọc các phiếu có <code className="font-mono">dueDate == Hôm nay + 3 ngày</code>.
+                      </div>
+                    </div>
+                    <span className="shrink-0 px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-full border border-emerald-200">
+                      Sẵn sàng hoạt động
+                    </span>
+                  </div>
+
+                  {/* Upcoming PM List */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                        <span>Phiếu PM sắp đến hạn đúng 3 ngày</span>
+                        <span className="px-2 py-0.5 text-xs bg-slate-100 text-slate-700 rounded-full font-semibold">
+                          {pmUpcomingTasks.length}
+                        </span>
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={pmNotificationLoading}
+                          onClick={checkUpcomingPMAlerts}
+                          className="px-2.5 py-1 text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg flex items-center gap-1 border border-slate-200"
+                        >
+                          <RefreshCw size={12} className={pmNotificationLoading ? 'animate-spin' : ''} />
+                          <span>Làm mới</span>
+                        </button>
+                        {pmUpcomingTasks.length > 0 && (
+                          <button
+                            disabled={pmNotificationLoading}
+                            onClick={() => handleSendPMAlerts(true)}
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
+                          >
+                            <Send size={12} />
+                            <span>Gửi cảnh báo ngay</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {pmUpcomingTasks.length === 0 ? (
+                      <div className="p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center text-slate-500">
+                        <Calendar size={28} className="mx-auto mb-2 text-slate-400" />
+                        <p className="font-medium text-slate-700">Hiện không có phiếu PM nào đến hạn trong đúng 3 ngày tới.</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Khi có phiếu bảo trì với <code className="font-mono text-slate-600">dueDate</code> cách hiện tại 3 ngày, hệ thống sẽ tự động gửi email.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {pmUpcomingTasks.map((task) => (
+                          <div key={task.id} className="p-4 bg-white rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-900">{task.title}</span>
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-[11px] font-bold rounded-md">
+                                  Hạn: {task.dueDate}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
+                                <span>Thiết bị: <strong className="text-slate-700">{task.equipmentName || task.equipmentId}</strong></span>
+                                <span>Khách hàng: <strong className="text-slate-700">{task.customerName || task.customerId}</strong></span>
+                                <span>Người thực hiện: <strong className="text-slate-700">{task.assignedTo || 'Chưa gán'}</strong></span>
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-500 shrink-0">
+                              <span>Gửi tới: <code className="text-blue-600">{task.recipients?.join(', ') || 'sgm1707@gmail.com'}</code></span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Send Test Email Card */}
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                      <Mail size={16} className="text-blue-600" />
+                      <span>Thử nghiệm gửi Email Thông báo</span>
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Gửi một email kiểm tra với khuôn mẫu chuẩn (HTML format) cảnh báo PM để xem giao diện hộp thư của bạn.
+                    </p>
+                    <div className="flex flex-col sm:flex-row items-center gap-2">
+                      <input
+                        type="email"
+                        value={testEmailRecipient}
+                        onChange={(e) => setTestEmailRecipient(e.target.value)}
+                        placeholder="Nhập địa chỉ email nhận..."
+                        className="w-full sm:flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-white"
+                      />
+                      <button
+                        disabled={pmNotificationLoading || !testEmailRecipient}
+                        onClick={handleSendTestEmail}
+                        className="w-full sm:w-auto px-4 py-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors shrink-0 shadow-sm"
+                      >
+                        {pmNotificationLoading ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                        <span>Gửi email test</span>
+                      </button>
+                    </div>
+
+                    {pmNotificationResult && (
+                      <div className={`p-3 rounded-lg text-xs ${pmNotificationResult.success ? 'bg-emerald-50 text-emerald-900 border border-emerald-200' : 'bg-rose-50 text-rose-900 border border-rose-200'}`}>
+                        <div className="font-semibold">{pmNotificationResult.message || (pmNotificationResult.success ? 'Thành công' : 'Thất bại')}</div>
+                        {pmNotificationResult.mode === 'simulated' && (
+                          <div className="text-[11px] text-emerald-700 mt-1">
+                            * Chế độ Mô phỏng (Simulated): Email đã được định dạng chuẩn HTML và ghi nhận an toàn. Để gửi qua hộp thư thực tế, cấu hình <code className="font-mono">SMTP_HOST</code>, <code className="font-mono">SMTP_USER</code>, <code className="font-mono">SMTP_PASS</code> trong môi trường hệ thống.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Firebase Cloud Functions Deployment Info */}
+                  <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                    <h4 className="font-bold text-slate-900 flex items-center gap-2">
+                      <FileText size={16} className="text-indigo-600" />
+                      <span>Hướng dẫn Triển khai Cloud Functions (Firebase CLI)</span>
+                    </h4>
+                    <p className="text-xs text-slate-600">
+                      Mã nguồn Firebase Cloud Functions đã được tạo sẵn trong thư mục <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-700">functions/src/index.ts</code>. Để triển khai lên dự án Firebase của bạn:
+                    </p>
+                    <div className="bg-slate-900 text-slate-100 p-3 rounded-lg font-mono text-xs overflow-x-auto select-all">
+                      firebase deploy --only functions
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                  <button
+                    onClick={() => setShowPMNotificationModal(false)}
+                    className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold transition-colors"
+                  >
+                    Đóng
+                  </button>
                 </div>
               </div>
             </div>
