@@ -159,9 +159,12 @@ app.get('/api/auth/google/url', (req, res) => {
     redirectUri
   );
 
+  // If forceConsent=true, force consent screen; otherwise use 'select_account' to avoid repeated warning screen
+  const prompt = req.query.forceConsent === 'true' ? 'consent' : 'select_account';
+
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    prompt,
     scope: [
       'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/drive.file'
@@ -170,7 +173,7 @@ app.get('/api/auth/google/url', (req, res) => {
     redirect_uri: redirectUri // Explicitly pass redirect_uri
   });
 
-  console.log('Generated OAuth URL:', url);
+  console.log('Generated OAuth URL with prompt:', prompt, 'url:', url);
   console.log('Using redirectUri:', redirectUri);
 
   res.json({ url });
@@ -194,7 +197,11 @@ app.get(['/auth/callback', '/auth/callback/', '/api/auth/callback', '/api/auth/c
     );
 
     const { tokens } = await oauth2Client.getToken(code as string);
-    globalTokens = tokens; // Store globally for this prototype
+    // Retain previously stored refresh_token if Google omitted it in this grant
+    if (!tokens.refresh_token && globalTokens?.refresh_token) {
+      tokens.refresh_token = globalTokens.refresh_token;
+    }
+    globalTokens = tokens; // Store globally for this session
 
     // Send success message to parent window and close popup
     res.send(`
@@ -218,12 +225,42 @@ app.get(['/auth/callback', '/auth/callback/', '/api/auth/callback', '/api/auth/c
   }
 });
 
+// 2b. Refresh Token Endpoint (Silent renewal without user interaction)
+app.post('/api/auth/refresh', async (req, res) => {
+  const tokens = getTokensFromRequest(req);
+  const refreshToken = tokens?.refresh_token || globalTokens?.refresh_token;
+
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'No refresh token available' });
+  }
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({
+      refresh_token: refreshToken
+    });
+
+    const refreshed = await oauth2Client.refreshAccessToken();
+    const newCredentials = {
+      ...tokens,
+      ...refreshed.credentials,
+      refresh_token: refreshed.credentials.refresh_token || refreshToken
+    };
+    globalTokens = newCredentials;
+    res.json({ success: true, tokens: newCredentials });
+  } catch (error: any) {
+    console.error('Error refreshing Google token:', error);
+    res.status(401).json({ error: error.message || 'Failed to refresh token' });
+  }
+});
+
 // 3. Check Auth Status
 app.get('/api/auth/status', (req, res) => {
   try {
-    console.log('Received auth status check request');
     const authHeader = req.headers.authorization;
-    console.log('Auth status check. Header present:', !!authHeader);
     if (authHeader && authHeader.startsWith('Bearer ')) {
       return res.json({ isAuthenticated: true });
     }
@@ -347,18 +384,60 @@ const resolveSpreadsheetId = (req: express.Request): string => {
   return extractSpreadsheetId(fromQuery || fromBody || fromHeader || fromEnv);
 };
 
-// 4. Save Data to Google Sheets (Append)
-app.post('/api/sheets/append', async (req, res) => {
+// Helper to get or auto-discover spreadsheet ID by searching Google Drive for "TEV Service Flatform"
+const resolveSpreadsheetIdAsync = async (req: express.Request, oauth2Client: any): Promise<{ id: string; title: string; isNewlyCreated: boolean }> => {
+  const explicit = resolveSpreadsheetId(req);
+  const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+  if (explicit) {
+    try {
+      const meta = await sheets.spreadsheets.get({ spreadsheetId: explicit, fields: 'spreadsheetId,properties.title' });
+      return { id: explicit, title: meta.data.properties?.title || 'TEV Service Flatform', isNewlyCreated: false };
+    } catch (e: any) {
+      console.warn(`Provided spreadsheetId ${explicit} not accessible directly, searching Drive for 'TEV Service Flatform'...`);
+    }
+  }
+
+  // 1. Search Google Drive for existing spreadsheet named 'TEV Service Flatform' or containing 'TEV Service'
+  try {
+    const driveRes = await drive.files.list({
+      q: "mimeType='application/vnd.google-apps.spreadsheet' and (name contains 'TEV Service Flatform' or name contains 'TEV Service' or name contains 'TEV') and trashed=false",
+      fields: 'files(id, name, createdTime, modifiedTime)',
+      orderBy: 'modifiedTime desc',
+      spaces: 'drive',
+      pageSize: 5
+    });
+
+    if (driveRes.data.files && driveRes.data.files.length > 0) {
+      const found = driveRes.data.files[0];
+      return { id: found.id!, title: found.name || 'TEV Service Flatform', isNewlyCreated: false };
+    }
+  } catch (err: any) {
+    console.warn('Drive search for TEV Service Flatform warning:', err.message);
+  }
+
+  // 2. If no file found, create a new Google Spreadsheet named 'TEV Service Flatform'
+  try {
+    const newSheet = await sheets.spreadsheets.create({
+      requestBody: {
+        properties: {
+          title: 'TEV Service Flatform'
+        }
+      }
+    });
+    return { id: newSheet.data.spreadsheetId!, title: 'TEV Service Flatform', isNewlyCreated: true };
+  } catch (err: any) {
+    console.error('Failed to auto-create spreadsheet:', err);
+    throw new Error('Không thể tìm thấy hoặc tự động tạo file Google Sheet "TEV Service Flatform". Vui lòng kiểm tra quyền Google Drive.');
+  }
+};
+
+// Route to discover or create the 'TEV Service Flatform' spreadsheet on Google Drive
+app.get('/api/sheets/resolve-or-create', async (req, res) => {
   const tokens = getTokensFromRequest(req);
   if (!tokens) {
     return res.status(401).json({ error: 'Not authenticated with Google' });
-  }
-
-  const { range, values } = req.body;
-  const spreadsheetId = resolveSpreadsheetId(req);
-
-  if (!spreadsheetId) {
-    return res.status(400).json({ error: 'SPREADSHEET_ID is not configured. Vui lòng cung cấp Spreadsheet ID hoặc link Google Sheet.' });
   }
 
   try {
@@ -367,6 +446,39 @@ app.post('/api/sheets/append', async (req, res) => {
       process.env.GOOGLE_CLIENT_SECRET
     );
     oauth2Client.setCredentials(tokens);
+
+    const result = await resolveSpreadsheetIdAsync(req, oauth2Client);
+    res.json({
+      success: true,
+      spreadsheetId: result.id,
+      title: result.title,
+      isNewlyCreated: result.isNewlyCreated,
+      url: `https://docs.google.com/spreadsheets/d/${result.id}/edit`
+    });
+  } catch (error: any) {
+    console.error('Error in resolve-or-create sheet:', error);
+    res.status(500).json({ error: error.message || 'Lỗi khi tìm hoặc tạo file Google Sheet' });
+  }
+});
+
+// 4. Save Data to Google Sheets (Append)
+app.post('/api/sheets/append', async (req, res) => {
+  const tokens = getTokensFromRequest(req);
+  if (!tokens) {
+    return res.status(401).json({ error: 'Not authenticated with Google' });
+  }
+
+  const { range, values } = req.body;
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials(tokens);
+
+    const sheetInfo = await resolveSpreadsheetIdAsync(req, oauth2Client);
+    const spreadsheetId = sheetInfo.id;
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
@@ -379,7 +491,7 @@ app.post('/api/sheets/append', async (req, res) => {
       }
     });
 
-    res.json({ success: true, data: response.data });
+    res.json({ success: true, data: response.data, spreadsheetId });
   } catch (error: any) {
     console.error('Error appending to sheet:', error);
     const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
@@ -398,17 +510,15 @@ app.get('/api/sheets/get', async (req, res) => {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
-  const spreadsheetId = resolveSpreadsheetId(req);
-  if (!spreadsheetId) {
-    return res.status(400).json({ error: 'SPREADSHEET_ID is not configured. Vui lòng nhập link hoặc ID Google Sheet.' });
-  }
-
   try {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET
     );
     oauth2Client.setCredentials(tokens);
+
+    const sheetInfo = await resolveSpreadsheetIdAsync(req, oauth2Client);
+    const spreadsheetId = sheetInfo.id;
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
@@ -487,11 +597,6 @@ app.post('/api/sheets/sync-record', async (req, res) => {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
-  const spreadsheetId = resolveSpreadsheetId(req);
-  if (!spreadsheetId) {
-    return res.status(400).json({ error: 'SPREADSHEET_ID is not configured.' });
-  }
-
   const { recordType, data } = req.body;
   if (!recordType || !data) {
     return res.status(400).json({ error: 'Missing recordType or data in request body' });
@@ -503,6 +608,9 @@ app.post('/api/sheets/sync-record', async (req, res) => {
       process.env.GOOGLE_CLIENT_SECRET
     );
     oauth2Client.setCredentials(tokens);
+
+    const sheetInfo = await resolveSpreadsheetIdAsync(req, oauth2Client);
+    const spreadsheetId = sheetInfo.id;
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
@@ -854,14 +962,12 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     tevServiceFlatformData,
     customersData, 
     equipmentData,
-    inventoryData 
+    inventoryData,
+    breakersData,
+    cablesData,
+    batteriesData,
+    relaysData
   } = req.body;
-  
-  const spreadsheetId = resolveSpreadsheetId(req);
-
-  if (!spreadsheetId) {
-    return res.status(400).json({ error: 'SPREADSHEET_ID is not configured. Vui lòng cung cấp link hoặc ID Google Sheet.' });
-  }
 
   try {
     const oauth2Client = new google.auth.OAuth2(
@@ -869,6 +975,9 @@ app.post('/api/sheets/sync-export', async (req, res) => {
       process.env.GOOGLE_CLIENT_SECRET
     );
     oauth2Client.setCredentials(tokens);
+
+    const sheetInfo = await resolveSpreadsheetIdAsync(req, oauth2Client);
+    const spreadsheetId = sheetInfo.id;
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
@@ -962,6 +1071,8 @@ app.post('/api/sheets/sync-export', async (req, res) => {
 
     res.json({ 
       success: true, 
+      spreadsheetId,
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
       message: 'Đồng bộ toàn diện lên Google Sheet thành công!',
       syncedSheets: dataToWrite.map(d => d.range.split('!')[0])
     });
@@ -983,17 +1094,15 @@ app.post('/api/sheets/init-tev-sheets', async (req, res) => {
     return res.status(401).json({ error: 'Not authenticated with Google' });
   }
 
-  const spreadsheetId = resolveSpreadsheetId(req);
-  if (!spreadsheetId) {
-    return res.status(400).json({ error: 'SPREADSHEET_ID is not configured.' });
-  }
-
   try {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET
     );
     oauth2Client.setCredentials(tokens);
+
+    const sheetInfo = await resolveSpreadsheetIdAsync(req, oauth2Client);
+    const spreadsheetId = sheetInfo.id;
 
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });

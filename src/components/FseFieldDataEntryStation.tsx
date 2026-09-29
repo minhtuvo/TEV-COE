@@ -23,6 +23,9 @@ import {
   Flame,
   Check,
   UploadCloud,
+  DownloadCloud,
+  Database,
+  ArrowDownUp,
   ExternalLink,
   ChevronDown,
   ChevronRight,
@@ -36,6 +39,7 @@ import {
 } from 'lucide-react';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
+import { parseVersionTimestamp } from '../utils/syncReconciliationService';
 
 export interface CustomerItem {
   id: string;
@@ -107,6 +111,8 @@ interface Props {
   onFetchFromSheets: () => Promise<void>;
   isSyncing: boolean;
   userEmail?: string;
+  onSyncAppToSheetsAndFirestore?: () => Promise<void>;
+  onSyncSheetsToFirestoreAndApp?: () => Promise<void>;
 }
 
 export const FAILURE_CODES = [
@@ -149,6 +155,74 @@ export const PRIORITIES = [
   { value: 'low', label: 'Thấp (P4)' }
 ];
 
+/**
+ * Tự động tính toán mã WO tiếp theo (WO-YYYY-STT) và WP tiếp theo (WP-YYYY-STT)
+ * theo đúng định dạng chuẩn, ví dụ: WO-2026-001, WO-2026-002, WO-2026-003...
+ */
+export const generateNextWoAndWpIds = (orders: { id?: string; workPermitId?: string }[] = []) => {
+  const currentYear = new Date().getFullYear();
+  let maxWoSeq = 0;
+  let maxWpSeq = 0;
+
+  (orders || []).forEach(item => {
+    // 1. Phân tích mã WO: WO-2026-001, WO-001, WO-2026-1, etc.
+    if (item.id) {
+      const str = String(item.id).trim();
+      const match = str.match(/^WO-(?:(\d{4})-)?(\d+)$/i);
+      if (match) {
+        const yr = match[1] ? parseInt(match[1], 10) : currentYear;
+        const seq = parseInt(match[2], 10);
+        if (!isNaN(seq) && (yr === currentYear || !match[1])) {
+          if (seq < 10000 && seq > maxWoSeq) {
+            maxWoSeq = seq;
+          }
+        }
+      } else {
+        const fallback = str.match(/(\d+)$/);
+        if (fallback) {
+          const seq = parseInt(fallback[1], 10);
+          if (!isNaN(seq) && seq < 10000 && seq > maxWoSeq) {
+            maxWoSeq = seq;
+          }
+        }
+      }
+    }
+
+    // 2. Phân tích mã WP: WP-2026-001, WP-001, etc.
+    const wp = item.workPermitId;
+    if (wp) {
+      const str = String(wp).trim();
+      const match = str.match(/^WP-(?:(\d{4})-)?(\d+)$/i);
+      if (match) {
+        const yr = match[1] ? parseInt(match[1], 10) : currentYear;
+        const seq = parseInt(match[2], 10);
+        if (!isNaN(seq) && (yr === currentYear || !match[1])) {
+          if (seq < 10000 && seq > maxWpSeq) {
+            maxWpSeq = seq;
+          }
+        }
+      } else {
+        const fallback = str.match(/(\d+)$/);
+        if (fallback) {
+          const seq = parseInt(fallback[1], 10);
+          if (!isNaN(seq) && seq < 10000 && seq > maxWpSeq) {
+            maxWpSeq = seq;
+          }
+        }
+      }
+    }
+  });
+
+  const nextSeq = Math.max(maxWoSeq, maxWpSeq, (orders || []).length) + 1;
+  const sttStr = String(nextSeq).padStart(3, '0');
+
+  return {
+    nextWoId: `WO-${currentYear}-${sttStr}`,
+    nextWpId: `WP-${currentYear}-${sttStr}`,
+    nextSeq
+  };
+};
+
 export const FseFieldDataEntryStation: React.FC<Props> = ({
   customers,
   allEquipment,
@@ -161,7 +235,9 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
   onSyncAllToSheets,
   onFetchFromSheets,
   isSyncing,
-  userEmail = 'sgm1707@gmail.com'
+  userEmail = 'sgm1707@gmail.com',
+  onSyncAppToSheetsAndFirestore,
+  onSyncSheetsToFirestoreAndApp
 }) => {
   // Sync status & config
   const [spreadsheetInput, setSpreadsheetInput] = useState(() => {
@@ -169,6 +245,51 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
   });
   const [showConfig, setShowConfig] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+
+  // Local reactive list of work orders so UI updates IMMEDIATELY when saved
+  const [localWorkOrders, setLocalWorkOrders] = useState<WorkOrderItem[]>(() => workOrders || []);
+  const [highlightedWoId, setHighlightedWoId] = useState<string | null>(null);
+  const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
+  const [tableStatusFilter, setTableStatusFilter] = useState<string>('all');
+  const [tablePageSize, setTablePageSize] = useState<number>(25);
+
+  useEffect(() => {
+    if (workOrders && workOrders.length > 0) {
+      setLocalWorkOrders(workOrders);
+    }
+  }, [workOrders]);
+
+  // Unified displayOrders: Combines localWorkOrders & workOrders, filters and sorts newest first
+  const displayOrders = useMemo(() => {
+    const map = new Map<string, WorkOrderItem>();
+    (workOrders || []).forEach(w => { if (w.id) map.set(w.id.toLowerCase(), w); });
+    (localWorkOrders || []).forEach(w => { if (w.id) map.set(w.id.toLowerCase(), w); });
+    let list = Array.from(map.values());
+
+    if (tableStatusFilter !== 'all') {
+      list = list.filter(w => (w.status || '').toLowerCase().includes(tableStatusFilter.toLowerCase()));
+    }
+
+    if (tableSearchQuery.trim()) {
+      const q = tableSearchQuery.toLowerCase().trim();
+      list = list.filter(w =>
+        (w.id && w.id.toLowerCase().includes(q)) ||
+        (w.workPermitId && w.workPermitId.toLowerCase().includes(q)) ||
+        (w.title && w.title.toLowerCase().includes(q)) ||
+        (w.customer && w.customer.toLowerCase().includes(q)) ||
+        (w.failureCode && w.failureCode.toLowerCase().includes(q)) ||
+        (w.assignedTo && w.assignedTo.toLowerCase().includes(q)) ||
+        (w.equipmentId && String(w.equipmentId).toLowerCase().includes(q))
+      );
+    }
+
+    return list.sort((a, b) => {
+      const timeA = parseVersionTimestamp(a.updatedAt || a.createdAt);
+      const timeB = parseVersionTimestamp(b.updatedAt || b.createdAt);
+      if (timeB !== timeA) return timeB - timeA;
+      return (b.id || '').localeCompare(a.id || '');
+    });
+  }, [localWorkOrders, workOrders, tableSearchQuery, tableStatusFilter]);
 
   // Step 1: Customer Selection State
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -285,34 +406,66 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
   });
 
   // Step 4: Work Order (WO) Form State - Exactly 23 Fields
-  const [woData, setWoData] = useState<Partial<WorkOrderItem>>({
-    id: `WO-${new Date().getFullYear()}-${String(workOrders.length + 1).padStart(3, '0')}`,
-    workPermitId: `WP-${new Date().getFullYear()}-${String(workOrders.length + 1).padStart(3, '0')}`,
-    title: 'Kiểm định thử nghiệm & bảo trì thiết bị tại hiện trường',
-    description: 'Thực hiện kiểm tra điện trở tiếp xúc, đo cách điện, kiểm định thông số kỹ thuật theo quy trình NETA ATS.',
-    equipmentId: '',
-    equipmentName: '',
-    failureCode: 'PM-ROUTINE',
-    customer: '',
-    customerId: '',
-    factory: '',
-    type: 'Kiểm định thử nghiệm (Testing)',
-    isUnplanned: false,
-    priority: 'medium',
-    status: 'Mới tạo',
-    assignedTo: userEmail || 'FSE Onsite',
-    responsibleApprove: 'FSE Lead / Trưởng ca',
-    responsibleDo: 'Kỹ sư hiện trường (FSE Onsite)',
-    blockingRequired: true,
-    dueDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
-    usedMaterials: 'Hóa chất vệ sinh tiếp điểm CRC, Giấy đo cách điện, Băng keo hạ thế 3M',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    downtimeStart: '',
-    repairStart: '',
-    repairEnd: '',
-    restartTime: ''
+  const [woData, setWoData] = useState<Partial<WorkOrderItem>>(() => {
+    const { nextWoId, nextWpId } = generateNextWoAndWpIds(workOrders || []);
+    return {
+      id: nextWoId,
+      workPermitId: nextWpId,
+      title: 'Kiểm định thử nghiệm & bảo trì thiết bị tại hiện trường',
+      description: 'Thực hiện kiểm tra điện trở tiếp xúc, đo cách điện, kiểm định thông số kỹ thuật theo quy trình NETA ATS.',
+      equipmentId: '',
+      equipmentName: '',
+      failureCode: 'PM-ROUTINE',
+      customer: '',
+      customerId: '',
+      factory: '',
+      type: 'Kiểm định thử nghiệm (Testing)',
+      isUnplanned: false,
+      priority: 'medium',
+      status: 'Mới tạo',
+      assignedTo: userEmail || 'FSE Onsite',
+      responsibleApprove: 'FSE Lead / Trưởng ca',
+      responsibleDo: 'Kỹ sư hiện trường (FSE Onsite)',
+      blockingRequired: true,
+      dueDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
+      usedMaterials: 'Hóa chất vệ sinh tiếp điểm CRC, Giấy đo cách điện, Băng keo hạ thế 3M',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      downtimeStart: '',
+      repairStart: '',
+      repairEnd: '',
+      restartTime: ''
+    };
   });
+
+  // Automatically ensure WO-YYYY-STT and WP-YYYY-STT match current next STT
+  useEffect(() => {
+    if (localWorkOrders.length > 0) {
+      setWoData(prev => {
+        // If empty or matches generic prefix
+        if (!prev.id || prev.id.startsWith('WO-')) {
+          const { nextWoId, nextWpId } = generateNextWoAndWpIds(localWorkOrders);
+          return {
+            ...prev,
+            id: nextWoId,
+            workPermitId: nextWpId
+          };
+        }
+        return prev;
+      });
+    }
+  }, [localWorkOrders.length]);
+
+  const handleAutoGenerateNextIds = () => {
+    const { nextWoId, nextWpId } = generateNextWoAndWpIds(localWorkOrders);
+    setWoData(prev => ({
+      ...prev,
+      id: nextWoId,
+      workPermitId: nextWpId
+    }));
+    setSyncStatusMsg(`Đã cập nhật mã tiếp theo: ${nextWoId} & ${nextWpId}`);
+    setTimeout(() => setSyncStatusMsg(null), 3000);
+  };
 
   const [savingLoading, setSavingLoading] = useState(false);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState<string | null>(null);
@@ -601,15 +754,24 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
         console.warn('Equipment sheet sync error:', eqSyncErr);
       }
 
+      // Immediately update localWorkOrders reactive state with newest entry on top
+      const updatedList = [finalWO, ...localWorkOrders.filter(w => w.id !== finalWO.id)];
+      setLocalWorkOrders(updatedList);
+      setHighlightedWoId(finalWO.id);
+
       setSaveSuccessNotice(`Đã lưu và đồng bộ 2 chiều thành công WO [${finalWO.id}] vào file Google Sheet "TEV Service Flatform" & Sheet thiết bị "${currentEqType}"!`);
       setTimeout(() => setSaveSuccessNotice(null), 6000);
 
-      // Auto generate next WO code for subsequent work
-      const nextNum = parseInt(finalWO.id.replace(/\D/g, '') || '0') + 1;
+      // Auto generate next WO (WO-YYYY-STT) and WP (WP-YYYY-STT) code for subsequent work
+      const { nextWoId, nextWpId } = generateNextWoAndWpIds(updatedList);
       setWoData(prev => ({
         ...prev,
-        id: `WO-${new Date().getFullYear()}-${String(nextNum).padStart(3, '0')}`,
-        workPermitId: `WP-${new Date().getFullYear()}-${String(nextNum).padStart(3, '0')}`
+        id: nextWoId,
+        workPermitId: nextWpId,
+        downtimeStart: '',
+        repairStart: '',
+        repairEnd: '',
+        restartTime: ''
       }));
     } catch (e: any) {
       alert('Lỗi lưu và đồng bộ: ' + (e.message || String(e)));
@@ -713,26 +875,28 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
               <span>Tạo Các Sheet Thiết Bị</span>
             </button>
 
+            {/* FLOW 1: APP -> GOOGLE SHEET -> FIRESTORE */}
             <button
               type="button"
-              onClick={onFetchFromSheets}
+              onClick={onSyncAppToSheetsAndFirestore || onSyncAllToSheets}
               disabled={isSyncing}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 border border-slate-700 transition-all disabled:opacity-50"
-              title="Đọc dữ liệu mới nhất từ file Google Sheet về App"
+              className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
+              title="Flow 1: Lưu & đồng bộ từ App lên Google Sheet và lưu vào Firestore"
             >
-              <RefreshCw size={14} className={isSyncing ? 'animate-spin text-blue-400' : ''} />
-              <span>{isSyncing ? 'Đang sync...' : 'Fetch từ Sheet'}</span>
+              <Database size={14} className="text-emerald-200" />
+              <span>App ➔ Sheet ➔ Firestore</span>
             </button>
 
+            {/* FLOW 2: GOOGLE SHEET -> FIRESTORE -> APP */}
             <button
               type="button"
-              onClick={onSyncAllToSheets}
+              onClick={onSyncSheetsToFirestoreAndApp || onFetchFromSheets}
               disabled={isSyncing}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
-              title="Đẩy toàn bộ cơ sở dữ liệu lên file Google Sheet"
+              className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
+              title="Flow 2: Nạp dữ liệu mới nhất từ Google Sheet, lưu vào Firestore và cập nhật App"
             >
-              <UploadCloud size={14} />
-              <span>Full Sync Sheet</span>
+              <DownloadCloud size={14} className="text-blue-200" />
+              <span>Sheet ➔ Firestore ➔ App</span>
             </button>
 
             <button
@@ -1992,21 +2156,72 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
 
       {/* RECENT WORK ORDERS ON SHEET "TEV SERVICE FLATFORM" TABLE */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+        <div className="p-4 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <ClipboardList size={18} className="text-emerald-400" />
-            <h3 className="font-bold text-sm">
-              Nhật Ký Phiếu Công Việc Đã Đồng Bộ (<code className="text-emerald-300">TEV Service Flatform</code>)
-            </h3>
+            <div>
+              <h3 className="font-bold text-sm flex items-center gap-2">
+                <span>Nhật Ký Phiếu Công Việc Đã Đồng Bộ</span>
+                <code className="text-emerald-300 text-xs px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800">TEV Service Flatform</code>
+              </h3>
+              <p className="text-[11px] text-slate-400">Tự động hiển thị các phiếu mới lưu & đồng bộ 2 chiều (Mới nhất lên đầu)</p>
+            </div>
           </div>
-          <span className="text-xs text-slate-400">
-            Tổng cộng: <strong className="text-white">{workOrders.length}</strong> phiếu
-          </span>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={tableSearchQuery}
+                onChange={(e) => setTableSearchQuery(e.target.value)}
+                placeholder="Tìm mã WO, thiết bị, KH..."
+                className="pl-8 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-400 outline-none focus:border-emerald-500 w-44 sm:w-56"
+              />
+              {tableSearchQuery && (
+                <button onClick={() => setTableSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            <select
+              value={tableStatusFilter}
+              onChange={(e) => setTableStatusFilter(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-medium outline-none"
+            >
+              <option value="all">Tất cả trạng thái</option>
+              <option value="Mới tạo">Mới tạo</option>
+              <option value="Đang thực hiện">Đang thực hiện</option>
+              <option value="Chờ phê duyệt">Chờ phê duyệt</option>
+              <option value="Hoàn thành">Hoàn thành</option>
+            </select>
+
+            <select
+              value={tablePageSize}
+              onChange={(e) => setTablePageSize(Number(e.target.value))}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none"
+            >
+              <option value={10}>Hiện 10</option>
+              <option value={25}>Hiện 25</option>
+              <option value={50}>Hiện 50</option>
+              <option value={-1}>Tất cả ({displayOrders.length})</option>
+            </select>
+
+            <button
+              onClick={onFetchFromSheets}
+              disabled={isSyncing}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition-colors"
+              title="Làm mới từ Google Sheet"
+            >
+              <RefreshCw size={14} className={isSyncing ? 'animate-spin text-emerald-400' : ''} />
+            </button>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+            <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0 z-10 shadow-xs">
               <tr>
                 <th className="px-3.5 py-2.5">Mã WO</th>
                 <th className="px-3.5 py-2.5">Mã Work Permit</th>
@@ -2021,40 +2236,67 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {workOrders.slice(0, 10).map((wo, i) => (
-                <tr key={wo.id || i} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-3.5 py-2.5 font-mono font-bold text-emerald-700">{wo.id}</td>
-                  <td className="px-3.5 py-2.5 font-mono text-blue-700">{wo.workPermitId || '-'}</td>
-                  <td className="px-3.5 py-2.5 font-bold text-slate-800">{wo.customer || '-'}</td>
-                  <td className="px-3.5 py-2.5 font-semibold text-slate-700">
-                    {Array.isArray(wo.equipmentId) ? wo.equipmentId.join(', ') : wo.equipmentId}
-                  </td>
-                  <td className="px-3.5 py-2.5 text-slate-800 max-w-xs truncate">{wo.title}</td>
-                  <td className="px-3.5 py-2.5 font-mono text-rose-700">{wo.failureCode || '-'}</td>
-                  <td className="px-3.5 py-2.5">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      wo.status === 'Hoàn thành' ? 'bg-emerald-100 text-emerald-800' :
-                      wo.status === 'Đang thực hiện' ? 'bg-blue-100 text-blue-800' :
-                      wo.status === 'Chờ phê duyệt' ? 'bg-amber-100 text-amber-800' :
-                      'bg-slate-100 text-slate-700'
-                    }`}>
-                      {wo.status}
-                    </span>
-                  </td>
-                  <td className="px-3.5 py-2.5 text-slate-600">{wo.assignedTo}</td>
-                  <td className="px-3.5 py-2.5 text-slate-500 font-mono text-[11px]">{wo.downtimeStart || '-'}</td>
-                  <td className="px-3.5 py-2.5 text-slate-500 font-mono text-[11px]">{wo.restartTime || '-'}</td>
-                </tr>
-              ))}
-              {workOrders.length === 0 && (
+              {displayOrders.slice(0, tablePageSize === -1 ? displayOrders.length : tablePageSize).map((wo, i) => {
+                const isJustSaved = wo.id === highlightedWoId;
+                return (
+                  <tr
+                    key={wo.id || i}
+                    className={`transition-colors ${
+                      isJustSaved 
+                        ? 'bg-emerald-50/90 border-l-4 border-l-emerald-600 font-semibold' 
+                        : 'hover:bg-slate-50/80'
+                    }`}
+                  >
+                    <td className="px-3.5 py-2.5 font-mono font-bold text-emerald-700 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        <span>{wo.id}</span>
+                        {isJustSaved && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[9px] font-bold uppercase animate-pulse">
+                            Mới đồng bộ
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3.5 py-2.5 font-mono text-blue-700 whitespace-nowrap">{wo.workPermitId || '-'}</td>
+                    <td className="px-3.5 py-2.5 font-bold text-slate-800">{wo.customer || '-'}</td>
+                    <td className="px-3.5 py-2.5 font-semibold text-slate-700">
+                      {Array.isArray(wo.equipmentId) ? wo.equipmentId.join(', ') : (wo.equipmentId || wo.equipmentName || '-')}
+                    </td>
+                    <td className="px-3.5 py-2.5 text-slate-800 max-w-xs truncate" title={wo.title}>{wo.title}</td>
+                    <td className="px-3.5 py-2.5 font-mono text-rose-700 whitespace-nowrap">{wo.failureCode || '-'}</td>
+                    <td className="px-3.5 py-2.5 whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        wo.status === 'Hoàn thành' ? 'bg-emerald-100 text-emerald-800' :
+                        wo.status === 'Đang thực hiện' ? 'bg-blue-100 text-blue-800' :
+                        wo.status === 'Chờ phê duyệt' ? 'bg-amber-100 text-amber-800' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        {wo.status}
+                      </span>
+                    </td>
+                    <td className="px-3.5 py-2.5 text-slate-600 whitespace-nowrap">{wo.assignedTo}</td>
+                    <td className="px-3.5 py-2.5 text-slate-500 font-mono text-[11px] whitespace-nowrap">{wo.downtimeStart || '-'}</td>
+                    <td className="px-3.5 py-2.5 text-slate-500 font-mono text-[11px] whitespace-nowrap">{wo.restartTime || '-'}</td>
+                  </tr>
+                );
+              })}
+              {displayOrders.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
-                    Chưa có phiếu công việc nào. Hãy điền thông tin bên trên và bấm "Lưu & Đồng bộ" để tạo bản ghi đầu tiên!
+                  <td colSpan={10} className="px-4 py-10 text-center text-slate-400">
+                    Chưa có phiếu công việc nào phù hợp với bộ lọc. Hãy điền thông tin bên trên và bấm "Lưu & Đồng bộ" để tạo bản ghi đầu tiên!
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+        <div className="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+          <span>
+            Đang hiển thị <strong>{Math.min(tablePageSize === -1 ? displayOrders.length : tablePageSize, displayOrders.length)}</strong> trên tổng số <strong>{displayOrders.length}</strong> phiếu công việc
+          </span>
+          <span className="text-[11px] text-slate-400">
+            Dữ liệu đồng bộ tự động 2 chiều giữa App ↔ Firestore ↔ Google Sheet
+          </span>
         </div>
       </div>
 
