@@ -21,7 +21,10 @@ export type EquipmentCategoryType =
   | 'Động cơ'
   | 'Máy phát'
   | 'Tủ điện'
-  | 'Inverter';
+  | 'Inverter'
+  | 'Cáp điện'
+  | 'Pin & UPS'
+  | 'Rơ le bảo vệ';
 
 export interface CustomerRecord {
   id: string;              // Mã khách hàng (VD: KH-SAMSUNG, KH-EVN-01)
@@ -202,285 +205,9 @@ export const DEFAULT_CUSTOMERS: CustomerRecord[] = [
   }
 ];
 
-export const DEFAULT_EQUIPMENT: EquipmentMasterRecord[] = [
-  // --- MÁY CẮT & TỦ TRUNG THẾ (CIRCUIT BREAKER / SWITCHGEAR) ---
-  {
-    id: 'MVCB-001',
-    name: 'Tủ máy cắt trung thế MVCB-001 24kV',
-    customer: 'Super Energy',
-    factory: 'Nhà máy Điện Mặt Trời Super Energy',
-    location: 'Trạm phân phối 24kV - Ngăn lộ F01',
-    type: 'Tủ điện',
-    manufacturer: 'Schneider Electric',
-    model: 'Premset 24kV 630A 25kA',
-    serialNumber: 'SCH-SE-2024-001',
-    yearOfManufacture: '2024',
-    criticality: 'A',
-    status: 'warning',
-    health: 72,
-    lastCheck: '28/09/2026',
-    pmCycleMonths: 6,
-    notes: 'Đang có phiếu sửa chữa đột xuất WO-2026-001: Phát hiện hiện tượng phóng điện bề mặt tại khoang thanh cái.',
-    specs: {
-      switchgear: {
-        ratedVoltageKv: 24,
-        busbarRatingA: 630,
-        shortCircuitKa: 25,
-        cubicleCount: 4,
-        formType: 'Form 4b',
-        ipRating: 'IP4X',
-        enclosureType: 'Metal-Clad LSC2B'
-      }
-    },
-    measurements: {
-      tevDbMax: '28', ultrasonicDbuv: '19', maxBusbarTemp: '68.5',
-      contactResBusbar: '34.2', controlWiringIr: '15.0'
-    }
-  },
-  // --- MÁY BIẾN ÁP ---
-  {
-    id: 'TRF-110-01',
-    name: 'Máy biến áp chính T1 110/22kV 63MVA',
-    customer: 'Công ty Cổ phần Năng lượng TEV',
-    factory: 'Trạm biến áp TEV 110kV',
-    location: 'Sân phân phối 110kV - Vịnh T1',
-    type: 'Máy biến áp',
-    manufacturer: 'Đông Anh EEMC',
-    model: 'TBA-63MVA-110',
-    serialNumber: 'EEMC-2022-9981',
-    yearOfManufacture: '2022',
-    criticality: 'A',
-    status: 'healthy',
-    health: 94,
-    lastCheck: '15/09/2026',
-    pmCycleMonths: 6,
-    specs: {
-      transformer: {
-        ratedPowerKva: 63000,
-        primaryVoltageKv: 110,
-        secondaryVoltageV: 22000,
-        ratedCurrentA: 330,
-        vectorGroup: 'YNd11',
-        coolingType: 'ONAF',
-        insulationType: 'Mineral Oil (Dầu khoáng TCVN)',
-        impedanceZ: 10.5,
-        oilWeightKg: 18500
-      }
-    },
-    measurements: {
-      oilTemp: '52', windingTemp: '61', irHighLow: '3200', irHighEarth: '3100',
-      dielectricStrength: '68', furan: '0.04', oilMoisture: '12',
-      h2: '15', ch4: '12', c2h4: '8', c2h2: '0', co: '180', co2: '1650'
-    }
-  },
-  {
-    id: 'TRF-SEVT-02',
-    name: 'Máy biến áp phân phối khô Cast Resin 2500kVA',
-    customer: 'Samsung Electronics Vietnam (SEVT)',
-    factory: 'Phân xưởng Phụ trợ Utility 1',
-    location: 'Phòng MBA Khô Tầng 1 - Cell TR02',
-    type: 'Máy biến áp',
-    manufacturer: 'ABB Transformer',
-    model: 'Resibloc 2500kVA 22/0.4kV',
-    serialNumber: 'ABB-VN-2023-4589',
-    yearOfManufacture: '2023',
-    criticality: 'A',
-    status: 'healthy',
-    health: 96,
-    lastCheck: '10/08/2026',
-    pmCycleMonths: 12,
-    specs: {
-      transformer: {
-        ratedPowerKva: 2500,
-        primaryVoltageKv: 22,
-        secondaryVoltageV: 400,
-        ratedCurrentA: 3608,
-        vectorGroup: 'Dyn11',
-        coolingType: 'AN/AF',
-        insulationType: 'Cast Resin (Cuộn đúc chân không)',
-        impedanceZ: 6.0
-      }
-    },
-    measurements: {
-      windingTemp: '75', irHighLow: '4500', irHighEarth: '4200'
-    }
-  },
+import { MASTER_EQUIPMENT_104 } from './masterEquipment104';
 
-  // --- MÁY CẮT (CIRCUIT BREAKER) ---
-  {
-    id: 'MC-ACB-3200A',
-    name: 'Máy cắt không khí tổng ACB Incomer 3200A',
-    customer: 'Samsung Electronics Vietnam (SEVT)',
-    factory: 'Nhà máy SEVT Thái Nguyên',
-    location: 'Phòng MSB 01 - Ngăn lộ tổng 01',
-    type: 'Máy cắt',
-    manufacturer: 'Schneider Electric',
-    model: 'MasterPact NW32 H1 3P Drawout',
-    serialNumber: 'SCH-2024-8841',
-    yearOfManufacture: '2024',
-    criticality: 'A',
-    status: 'healthy',
-    health: 98,
-    lastCheck: '20/09/2026',
-    pmCycleMonths: 6,
-    specs: {
-      breaker: {
-        ratedVoltageKv: 0.4,
-        ratedCurrentA: 3200,
-        breakingCapacityKa: 65,
-        breakerType: 'ACB (Air Circuit Breaker)',
-        operatingMechanism: 'Motor Lò xo trữ năng 220VAC',
-        tripUnitModel: 'MicroLogic 6.0A Ground Fault',
-        polesCount: 3
-      }
-    },
-    measurements: {
-      contactResPhaseA: '18.2', contactResPhaseB: '18.5', contactResPhaseC: '18.4',
-      insulationOpenPoles: '2400', insulationToGround: '2100',
-      closingTimeMs: '48', openingTimeMs: '32'
-    }
-  },
-  {
-    id: 'MC-VCB-24KV',
-    name: 'Máy cắt chân không VCB 24kV 1250A 25kA',
-    customer: 'Công ty Cổ phần Năng lượng TEV',
-    factory: 'Nhà máy Bắc Ninh',
-    location: 'Tủ trung thế RMU Ngăn Feeder F02',
-    type: 'Máy cắt',
-    manufacturer: 'Siemens',
-    model: 'SION 3AE 24kV 1250A',
-    serialNumber: 'SIE-2023-1120',
-    yearOfManufacture: '2023',
-    criticality: 'B',
-    status: 'healthy',
-    health: 92,
-    lastCheck: '05/09/2026',
-    pmCycleMonths: 12,
-    specs: {
-      breaker: {
-        ratedVoltageKv: 24,
-        ratedCurrentA: 1250,
-        breakingCapacityKa: 25,
-        breakerType: 'VCB (Vacuum Circuit Breaker)',
-        operatingMechanism: 'Motor Lò xo 110VDC',
-        tripUnitModel: 'Rơ le bảo vệ SIPROTEC 5 7SJ82',
-        polesCount: 3
-      }
-    },
-    measurements: {
-      contactResPhaseA: '28.5', contactResPhaseB: '29.1', contactResPhaseC: '28.8',
-      vacuumIntegrity: 'Pass (25kV AC/1min)', insulationClosedToGround: '4800'
-    }
-  },
-
-  // --- ĐỘNG CƠ ĐIỆN (ELECTRIC MOTOR) ---
-  {
-    id: 'MTR-PUMP-450KW',
-    name: 'Động cơ bơm tuần hoàn nước giải nhiệt 450kW',
-    customer: 'Tổ hợp Sản xuất Ô tô VinFast',
-    factory: 'Nhà máy Cát Hải - Hải Phòng',
-    location: 'Trạm Bơm Làm Mát Trung Tâm - Bơm P1',
-    type: 'Động cơ',
-    manufacturer: 'Siemens / SIMOTICS GP',
-    model: '1LA8 357-4AB60 450kW 380V',
-    serialNumber: 'MTR-SIE-2023-7721',
-    yearOfManufacture: '2023',
-    criticality: 'A',
-    status: 'healthy',
-    health: 91,
-    lastCheck: '12/09/2026',
-    pmCycleMonths: 3,
-    specs: {
-      motor: {
-        ratedPowerKw: 450,
-        ratedVoltageV: 380,
-        ratedCurrentA: 820,
-        ratedSpeedRpm: 1485,
-        poleCount: 4,
-        insulationClass: 'Class F (155°C)',
-        powerFactorCosPhi: 0.88,
-        ipRating: 'IP55',
-        bearingTypeDe: 'SKF 6320 C3'
-      }
-    },
-    measurements: {
-      vibrationDeRms: '1.85', vibrationNdeRms: '1.62',
-      statorTemp: '72.5', bearingTempDe: '63.0', bearingTempNde: '58.5',
-      irStatorMegohms: '850', polarizationIndexPi: '3.4', voltageImbalance: '0.45'
-    }
-  },
-
-  // --- MÁY PHÁT ĐIỆN (ENGINE GENERATOR) ---
-  {
-    id: 'GEN-STANDBY-2000KVA',
-    name: 'Máy phát điện dự phòng khẩn cấp Cummins 2000kVA',
-    customer: 'Samsung Electronics Vietnam (SEVT)',
-    factory: 'Nhà máy SEVT Thái Nguyên',
-    location: 'Nhà máy phát điện dự phòng - Máy số 1',
-    type: 'Máy phát',
-    manufacturer: 'Cummins Power Generation',
-    model: 'C2200 D5 2000kVA 400V 50Hz',
-    serialNumber: 'CUM-2023-55241',
-    yearOfManufacture: '2023',
-    criticality: 'A',
-    status: 'healthy',
-    health: 97,
-    lastCheck: '18/09/2026',
-    pmCycleMonths: 3,
-    specs: {
-      generator: {
-        ratedPowerKva: 2000,
-        ratedVoltageV: 400,
-        ratedCurrentA: 2886,
-        frequencyHz: 50,
-        powerFactorCosPhi: 0.8,
-        engineManufacturer: 'Cummins QSK60-G4 V16 Turbocharged',
-        alternatorBrand: 'Stamford PI734F1 Brushless',
-        excitationSystem: 'PMG + MX321 AVR',
-        coolingSystem: 'Két nước giải nhiệt gắn liền 50°C'
-      }
-    },
-    measurements: {
-      insulationStator: '1250', insulationRotor: '680',
-      voltageL1L2: '401', frequencyHz: '50.05', oilPressureBar: '4.8',
-      coolantTempC: '82', batteryVoltageV: '26.8', atsTransferTimeSec: '8.5'
-    }
-  },
-
-  // --- TỦ ĐIỆN PHÂN PHỐI & ĐÓNG CẮT (SWITCHGEAR) ---
-  {
-    id: 'SWG-MV-24KV-01',
-    name: 'Tủ hợp bộ đóng cắt trung thế 24kV Metal-Clad 8 ngăn',
-    customer: 'Tập đoàn Thép Hòa Phát Dung Quất',
-    factory: 'Khu liên hợp Gang Thép Dung Quất',
-    location: 'Trạm điện phân phối Xưởng Cán Thép',
-    type: 'Tủ điện',
-    manufacturer: 'Schneider Electric',
-    model: 'PIX 24kV 1250A 25kA/1s Form 4b',
-    serialNumber: 'SCH-PIX-2024-1011',
-    yearOfManufacture: '2024',
-    criticality: 'A',
-    status: 'healthy',
-    health: 93,
-    lastCheck: '14/09/2026',
-    pmCycleMonths: 6,
-    specs: {
-      switchgear: {
-        ratedVoltageKv: 24,
-        busbarRatingA: 1250,
-        shortCircuitKa: 25,
-        cubicleCount: 8,
-        formType: 'Form 4b',
-        ipRating: 'IP4X',
-        enclosureType: 'Metal-Clad LSC2B-PM'
-      }
-    },
-    measurements: {
-      tevDbMax: '12', ultrasonicDbuv: '8', maxBusbarTemp: '48.5',
-      contactResBusbar: '16.5', controlWiringIr: '38.0'
-    }
-  }
-];
+export const DEFAULT_EQUIPMENT: EquipmentMasterRecord[] = MASTER_EQUIPMENT_104;
 
 export const DEFAULT_WORK_ORDERS: any[] = [
   {
@@ -802,6 +529,281 @@ export const DEFAULT_WORK_ORDERS: any[] = [
     repairStart: '2026-09-28 09:00',
     repairEnd: '2026-09-28 15:30',
     restartTime: ''
+  },
+  // --- HỆ THỐNG PHIẾU BẢO TRÌ ĐỊNH KỲ PM (SOLAR & WIND, NĂNG LƯỢNG TÁI TẠO & LƯỚI ĐIỆN CÔNG NGHIỆP) ---
+  {
+    id: 'WO-PM-2026-001',
+    workPermitId: 'WP-PM-2026-001',
+    title: 'Bảo trì định kỳ Quý 3 - Máy biến áp dầu T1 2000kVA',
+    description: 'Lấy mẫu dầu DGA, đo điện trở cách điện 10kV, kiểm tra rơ-le Buchholz & van an toàn áp suất.',
+    equipmentId: 'TRF-110-01',
+    equipmentName: 'Máy biến áp chính T1 110/22kV 63MVA (Điện Gió Mũi Né)',
+    failureCode: 'ROUTINE-PM',
+    customer: 'Super Energy',
+    customerId: 'KH-SUPER-05',
+    factory: 'Nhà máy Điện Gió Mũi Né',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'high',
+    status: 'completed',
+    assignedTo: 'KS. Nguyễn Văn S',
+    responsibleApprove: 'GĐ Kỹ thuật Super Energy',
+    responsibleDo: 'Kỹ sư FSE TEV',
+    blockingRequired: true,
+    dueDate: '2026-09-08',
+    completedDate: '2026-09-07',
+    pmFrequency: '3-months',
+    estimatedTime: 6,
+    actualTimeSpent: 5.5,
+    usedMaterials: 'Bộ chai lấy mẫu dầu thủy tinh Syringe DGA, Gioăng làm kín van',
+    createdAt: '2026-09-01T08:00:00.000Z',
+    updatedAt: '2026-09-07T16:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-002',
+    workPermitId: 'WP-PM-2026-002',
+    title: 'Bảo trì định kỳ Tháng 9 - Bộ chuyển nguồn tự động ATS 800A',
+    description: 'Vệ sinh tiếp điểm cực Pole C, kiểm tra khóa liên động cơ khí, đo điện trở mạch điều khiển.',
+    equipmentId: 'SWG-LV-01',
+    equipmentName: 'Tủ chuyển nguồn ATS Khẩn cấp (800A 4P)',
+    failureCode: 'ATS-INSPECTION',
+    customer: 'Công ty Cổ phần Năng lượng TEV',
+    customerId: 'KH-TEV-01',
+    factory: 'Tòa nhà TEV Office Tower',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'urgent',
+    status: 'completed',
+    assignedTo: 'KS. Trần Văn H',
+    responsibleApprove: 'Quản lý Vận hành Tòa nhà',
+    responsibleDo: 'Kỹ sư Cơ điện TEV',
+    blockingRequired: true,
+    dueDate: '2026-09-12',
+    completedDate: '2026-09-11',
+    pmFrequency: 'monthly',
+    estimatedTime: 4,
+    actualTimeSpent: 4.5,
+    usedMaterials: 'Bình xịt vệ sinh tiếp điểm CRC Contact Cleaner, Mỡ dẫn điện tiếp xúc',
+    createdAt: '2026-09-02T08:00:00.000Z',
+    updatedAt: '2026-09-11T17:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-003',
+    workPermitId: 'WP-PM-2026-003',
+    title: 'Bảo trì định kỳ Tháng 9 - Tổ máy phát Diesel khẩn cấp 500kW',
+    description: 'Kiểm tra bảo vệ ngắt quá tốc độ (115%), sấy cuộn stator nâng PI, thử tải nấc 100% Load Bank.',
+    equipmentId: 'GEN-STANDBY-2000KVA',
+    equipmentName: 'Tổ máy phát điện Diesel 500kW (Cummins)',
+    failureCode: 'GEN-TEST',
+    customer: 'Công ty Cổ phần Năng lượng TEV',
+    customerId: 'KH-TEV-01',
+    factory: 'Bệnh Viện TEV General Hospital',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'urgent',
+    status: 'in-progress',
+    assignedTo: 'KS. Nguyễn Văn S',
+    responsibleApprove: 'Trưởng ban An toàn Y tế',
+    responsibleDo: 'Đội Máy phát TEV Service',
+    blockingRequired: false,
+    dueDate: '2026-09-21',
+    pmFrequency: 'monthly',
+    estimatedTime: 8,
+    actualTimeSpent: 4,
+    usedMaterials: 'Lọc gió Donaldson, Nước làm mát chống đông, Axit châm bình ắc quy',
+    createdAt: '2026-09-05T08:00:00.000Z',
+    updatedAt: '2026-09-21T10:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-004',
+    workPermitId: 'WP-PM-2026-004',
+    title: 'Bảo dưỡng kiểm tra Giàn ắc quy VRLA AGM 120kVA Data Center',
+    description: 'Đo nội trở nội suy mΩ, kiểm tra cân bằng điện áp cực đất và nhiệt độ cực âm.',
+    equipmentId: 'BAT-BESS-01',
+    equipmentName: 'Giàn ắc quy VRLA 120kVA (12V x 40 bình)',
+    failureCode: 'BATT-IMPEDANCE',
+    customer: 'Công ty Cổ phần Năng lượng TEV',
+    customerId: 'KH-TEV-01',
+    factory: 'Trung Tâm Dữ Liệu TEV Tier-III',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'high',
+    status: 'initiated',
+    assignedTo: 'KS. Lê Hoàng D',
+    responsibleApprove: 'GĐ Trung tâm Dữ liệu',
+    responsibleDo: 'Kỹ sư Nguồn DC TEV',
+    blockingRequired: false,
+    dueDate: '2026-09-18',
+    pmFrequency: 'monthly',
+    estimatedTime: 5,
+    actualTimeSpent: 0,
+    usedMaterials: 'Đồng hồ đo nội trở Hioki BT3554, Giẻ lau chống tĩnh điện',
+    createdAt: '2026-09-08T08:00:00.000Z',
+    updatedAt: '2026-09-18T09:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-005',
+    workPermitId: 'WP-PM-2026-005',
+    title: 'Bảo trì & Kiểm tra rơ-le số bảo vệ xuất tuyến 22kV SEL-751',
+    description: 'Bơm dòng thứ cấp thử đặc tính thời gian quá dòng 50/51, kiểm tra cổng SCADA Modbus.',
+    equipmentId: 'REL-SEL-751-01',
+    equipmentName: 'Rơ-le bảo vệ kỹ thuật số SEL-751 Ngăn Lộ 471',
+    failureCode: 'RELAY-TEST',
+    customer: 'Công ty Cổ phần Năng lượng TEV',
+    customerId: 'KH-TEV-01',
+    factory: 'Khu Công Nghiệp VSIP 1',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'medium',
+    status: 'completed',
+    assignedTo: 'KS. Phạm Minh T',
+    responsibleApprove: 'Trưởng nhóm Bảo vệ Rơ-le',
+    responsibleDo: 'Nhóm Thí nghiệm TEV',
+    blockingRequired: true,
+    dueDate: '2026-09-15',
+    completedDate: '2026-09-14',
+    pmFrequency: '6-months',
+    estimatedTime: 4,
+    actualTimeSpent: 3.5,
+    usedMaterials: 'Dây cắm thí nghiệm an toàn 4mm, Hàng kẹp Phoenix Contact',
+    createdAt: '2026-09-05T08:00:00.000Z',
+    updatedAt: '2026-09-14T16:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-006',
+    workPermitId: 'WP-PM-2026-006',
+    title: 'Đo phóng điện cục bộ Partial Discharge (PD) Tủ trung thế RMU',
+    description: 'Đo cảm biến TEV & Siêu âm màng ngăn tủ cáp đầu vào trạm 22kV.',
+    equipmentId: 'SWG-MV-24KV-01',
+    equipmentName: 'Tủ máy cắt trung thế RMU Schneider 24kV',
+    failureCode: 'PD-ULTRASOUND',
+    customer: 'Công ty Cổ phần Năng lượng TEV',
+    customerId: 'KH-TEV-01',
+    factory: 'Nhà máy Sản xuất TEV Tân Uyên',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'high',
+    status: 'initiated',
+    assignedTo: 'KS. Trần Văn H',
+    responsibleApprove: 'Quản đốc Nhà máy Tân Uyên',
+    responsibleDo: 'Kỹ sư Thí nghiệm Hiện trường',
+    blockingRequired: false,
+    dueDate: '2026-09-26',
+    pmFrequency: 'monthly',
+    estimatedTime: 3,
+    actualTimeSpent: 0,
+    usedMaterials: 'Máy đo UltraTEV Plus2, Cảm biến tiếp xúc vỏ kim loại',
+    createdAt: '2026-09-12T08:00:00.000Z',
+    updatedAt: '2026-09-20T10:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-007',
+    workPermitId: 'WP-PM-2026-007',
+    title: 'Khảo sát ảnh nhiệt hồng ngoại (IR) toàn bộ thanh cái hạ thế',
+    description: 'Quét camera Flir E76 các đầu cosse cáp tổng tủ MSB khi mang tải trên 75%.',
+    equipmentId: 'MC-ACB-3200A',
+    equipmentName: 'Tủ phân phối chính MSB 2500A Khối Sản Xuất',
+    failureCode: 'THERMO-SCAN',
+    customer: 'Samsung Electronics Vietnam (SEVT)',
+    customerId: 'KH-SEVT-02',
+    factory: 'Nhà máy Sản xuất TEV Tân Uyên',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'medium',
+    status: 'initiated',
+    assignedTo: 'KS. Lê Hoàng D',
+    responsibleApprove: 'Trưởng ban An toàn Cơ điện',
+    responsibleDo: 'Kỹ sư Chẩn đoán IR',
+    blockingRequired: false,
+    dueDate: '2026-09-27',
+    pmFrequency: '3-months',
+    estimatedTime: 4,
+    actualTimeSpent: 0,
+    usedMaterials: 'Camera nhiệt Flir E76, Thước đo khoảng cách laser',
+    createdAt: '2026-09-15T08:00:00.000Z',
+    updatedAt: '2026-09-21T09:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-008',
+    workPermitId: 'WP-PM-2026-008',
+    title: 'Bảo trì thí nghiệm VLF cáp ngầm trung thế 24kV Cu/XLPE 3x240mm2',
+    description: 'Thử nghiệm điện áp cao tần số thấp 0.1Hz và đo góc tổn hao điện môi Tan Delta.',
+    equipmentId: 'CAB-24KV-01',
+    equipmentName: 'Tuyến cáp ngầm trung thế 24kV cấp trạm biến áp',
+    failureCode: 'VLF-HIPOT',
+    customer: 'Công ty Cổ phần Năng lượng TEV',
+    customerId: 'KH-TEV-01',
+    factory: 'Khu Công Nghiệp VSIP 1',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'high',
+    status: 'initiated',
+    assignedTo: 'KS. Phạm Minh T',
+    responsibleApprove: 'Trưởng ban Quản lý Hạ tầng KCN',
+    responsibleDo: 'Đội Thí nghiệm Cáp lực TEV',
+    blockingRequired: true,
+    dueDate: '2026-09-20',
+    pmFrequency: '1-year',
+    estimatedTime: 6,
+    actualTimeSpent: 0,
+    usedMaterials: 'Thiết bị HVA28 VLF Test Set, Tiếp địa di động cáp',
+    createdAt: '2026-09-10T08:00:00.000Z',
+    updatedAt: '2026-09-19T14:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-009',
+    workPermitId: 'WP-PM-2026-009',
+    title: 'Bảo trì trạm sạc xe điện nhanh DC Fast EVSE 120kW',
+    description: 'Kiểm tra điện trở tiếp địa súng sạc, kiểm tra quạt làm mát công suất và cách điện DC.',
+    equipmentId: 'EVSE-DC-120KW',
+    equipmentName: 'Trạm sạc xe điện cao tốc 120kW Dual Gun',
+    failureCode: 'EVSE-INSPECTION',
+    customer: 'Tổ hợp Sản xuất Ô tô VinFast',
+    customerId: 'KH-VINFAST-03',
+    factory: 'Trạm Sạc Cao Tốc Long Thành',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'low',
+    status: 'completed',
+    assignedTo: 'KS. Nguyễn Văn S',
+    responsibleApprove: 'Quản lý Trạm Sạc EVSE',
+    responsibleDo: 'Kỹ sư Dịch vụ TEV',
+    blockingRequired: false,
+    dueDate: '2026-09-05',
+    completedDate: '2026-09-04',
+    pmFrequency: 'monthly',
+    estimatedTime: 3,
+    actualTimeSpent: 3,
+    usedMaterials: 'Hóa chất vệ sinh cổng sạc CCS2, Lọc bụi công nghiệp',
+    createdAt: '2026-09-01T08:00:00.000Z',
+    updatedAt: '2026-09-04T17:00:00.000Z'
+  },
+  {
+    id: 'WO-PM-2026-010',
+    workPermitId: 'WP-PM-2026-010',
+    title: 'Kiểm tra định kỳ Quý - Dàn Inverter Năng lượng mặt trời áp mái 500kW',
+    description: 'Kiểm tra đường đặc tính I-V string, đo điện trở cách điện DC mảng pin và vệ sinh tản nhiệt.',
+    equipmentId: 'INV-SOLAR-01',
+    equipmentName: 'Chuỗi biến tần Solar Inverter Sungrow 110kW',
+    failureCode: 'INVERTER-IV-CURVE',
+    customer: 'Super Energy',
+    customerId: 'KH-SUPER-05',
+    factory: 'Nhà máy Điện Gió Mũi Né',
+    type: 'preventive',
+    isUnplanned: false,
+    priority: 'medium',
+    status: 'in-progress',
+    assignedTo: 'KS. Lê Hoàng D',
+    responsibleApprove: 'Trưởng ban Năng lượng Tái tạo',
+    responsibleDo: 'Đội O&M Solar & Wind TEV',
+    blockingRequired: false,
+    dueDate: '2026-09-29',
+    pmFrequency: '3-months',
+    estimatedTime: 5,
+    actualTimeSpent: 2,
+    usedMaterials: 'Đồng hồ đo Solar I-V Seaward PV200, Quạt hút tản nhiệt dự phòng',
+    createdAt: '2026-09-18T08:00:00.000Z',
+    updatedAt: '2026-09-24T11:00:00.000Z'
   }
 ];
 

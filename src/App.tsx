@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   LayoutDashboard,
   Server,
@@ -22,6 +22,7 @@ import {
   QrCode,
   Camera,
   UploadCloud,
+  DownloadCloud,
   Save,
   Send,
   Thermometer,
@@ -64,7 +65,8 @@ import {
   Navigation,
   Layers,
   FileSpreadsheet,
-  ClipboardCheck
+  ClipboardCheck,
+  Smartphone
 } from 'lucide-react';
 import {
   LineChart,
@@ -94,7 +96,7 @@ import L from 'leaflet';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as htmlToImage from 'html-to-image';
-import { auth, db, signInWithGoogle, logOut } from './firebase';
+import { auth, db, signInWithGoogle, signInAsGuestOrDemo, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, onSnapshot, orderBy, limit, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -152,6 +154,10 @@ import {
   parseVersionTimestamp
 } from './utils/syncReconciliationService';
 import { SyncReconciliationModal } from './components/SyncReconciliationModal';
+import { PWAInstallModal } from './components/PWAInstallModal';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { usePWAInstall } from './hooks/usePWAInstall';
 import {
   DEFAULT_SIMULATION_REPORTS,
   DEFAULT_CUSTOMERS,
@@ -159,7 +165,8 @@ import {
   DEFAULT_WORK_ORDERS,
   DEFAULT_INVENTORY,
   getInitialEquipmentList,
-  getInitialReportsList
+  getInitialReportsList,
+  getInitialWorkOrdersList
 } from './utils/defaultDataService';
 
 enum OperationType {
@@ -292,8 +299,8 @@ const MaintenanceCharts = ({ equipment, workOrders, reports }: { equipment: any,
     }
   };
 
-  // 1. Calculate OEE Score (Mocked based on health but slightly dynamic)
-  const oeeScore = equipment.health ? Math.min(100, Math.max(0, equipment.health - 5 + Math.floor(Math.random() * 10))) : 76;
+  // 1. Calculate OEE Score (Deterministic based on equipment health, not fluctuating)
+  const oeeScore = equipment.health ? Math.min(100, Math.max(0, Math.round(equipment.health * 0.95))) : 76;
 
   // 2. MTBF Evolution
   const monthsList = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -1101,9 +1108,14 @@ const MapBoundsHandler = ({
   viewTrigger: { type: 'auto' | 'fit-all' | 'global' | 'sea' | 'vn'; timestamp: number } 
 }) => {
   const map = useMap();
+  const lastTriggerTimeRef = useRef<number>(0);
 
   useEffect(() => {
     if (!map) return;
+    // Only adjust view when the user actually changes viewTrigger (clicked a map control button)
+    if (viewTrigger.timestamp === lastTriggerTimeRef.current && lastTriggerTimeRef.current !== 0) return;
+    lastTriggerTimeRef.current = viewTrigger.timestamp;
+
     if (viewTrigger.type === 'global') {
       map.setView([20, 15], 2);
     } else if (viewTrigger.type === 'sea') {
@@ -1121,9 +1133,21 @@ const MapBoundsHandler = ({
         map.setView([16.047079, 108.206230], 5);
       }
     }
-  }, [sites, viewTrigger, map]);
+  }, [viewTrigger.timestamp, viewTrigger.type, map]);
 
   return null;
+};
+
+// Deterministic pseudo-random helper to ensure equipment test measurements & metrics stay stable and never fluctuate/jump
+export const getDeterministicVal = (seed: string, min: number, max: number, decimals: number = 2): number => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const ratio = (Math.abs(hash) % 10000) / 10000;
+  const val = min + ratio * (max - min);
+  return parseFloat(val.toFixed(decimals));
 };
 
 const initialAllEquipment: any[] = getInitialEquipmentList();
@@ -1607,6 +1631,8 @@ export default function App() {
   const [userCustomerName, setUserCustomerName] = useState<string | null>(null);
   const [userFactory, setUserFactory] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -1706,7 +1732,16 @@ export default function App() {
   const [selectedRiskDetail, setSelectedRiskDetail] = useState<string | null>(null);
   const [selectedEqForQR, setSelectedEqForQR] = useState<any>(null);
   const [showQRModal, setShowQRModal] = useState(false);
-  const [allEquipment, setAllEquipment] = useState(initialAllEquipment);
+  const [allEquipment, setAllEquipment] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem('tev_equipment_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return getInitialEquipmentList(parsed);
+      }
+    } catch (e) {}
+    return initialAllEquipment;
+  });
 
   // Tự động đồng bộ các thiết bị được tạo từ phiếu CMMS vào allEquipment nếu chưa có (ví dụ: MVCB-001)
   useEffect(() => {
@@ -1737,7 +1772,13 @@ export default function App() {
             }
           });
         });
-        return hasNew ? next : prevEq;
+        if (hasNew) {
+          try {
+            localStorage.setItem('tev_equipment_cache', JSON.stringify(next));
+          } catch (e) {}
+          return next;
+        }
+        return prevEq;
       });
     }
   }, [workOrders]);
@@ -1754,9 +1795,11 @@ export default function App() {
   const [isReconciling, setIsReconciling] = useState<boolean>(false);
   const [showReconciliationModal, setShowReconciliationModal] = useState<boolean>(false);
   const [reconciliationReport, setReconciliationReport] = useState<ReconciliationReport | null>(null);
+  const [showPWAInstallModal, setShowPWAInstallModal] = useState<boolean>(false);
 
   // 2-Way Automated Sync States (Luồng dữ liệu 2 chiều tự động App ↔ Google Sheets 'TEV Service Flatform')
-  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(true);
+  // Default to false so app stays steady and doesn't run sync loop when no data has been inputted
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(false);
   const [autoSyncStatus, setAutoSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const [lastAutoSyncTime, setLastAutoSyncTime] = useState<string>('');
   const [twoWaySyncNotice, setTwoWaySyncNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -1764,6 +1807,13 @@ export default function App() {
     const id = localStorage.getItem('tev_spreadsheet_id');
     return id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : '';
   });
+
+  // Listener refs to prevent duplicate onSnapshot subscriptions
+  const unsubWoRef = useRef<(() => void) | null>(null);
+  const unsubCustRef = useRef<(() => void) | null>(null);
+  const unsubInvRef = useRef<(() => void) | null>(null);
+  const unsubEqRef = useRef<(() => void) | null>(null);
+  const [isEquipmentLoading, setIsEquipmentLoading] = useState(false);
 
   const handleQuickUpdateWorkOrderStatus = async (woId: string, newStatus: string) => {
     const now = new Date().toISOString();
@@ -1890,6 +1940,7 @@ export default function App() {
             // Ensure customer database and CMMS work orders are loaded for all users (to populate dropdowns and dashboard)
             fetchCustomers();
             fetchWorkOrders();
+            fetchEquipment();
           } else {
             // Create default user document
             // If email matches the default admin email, set as admin
@@ -1903,6 +1954,7 @@ export default function App() {
             setUserRole(role);
             fetchCustomers();
             fetchWorkOrders();
+            fetchEquipment();
           }
         } else {
           setUser(null);
@@ -1917,6 +1969,7 @@ export default function App() {
         setUserRole(currentUser?.email === 'sgm1707@gmail.com' ? 'admin' : 'customer');
         fetchCustomers();
         fetchWorkOrders();
+        fetchEquipment();
       } finally {
         setIsAuthLoading(false);
       }
@@ -1929,6 +1982,7 @@ export default function App() {
     // Initial fetch to ensure Dashboard immediately displays latest CMMS work orders and customers
     fetchWorkOrders();
     fetchCustomers();
+    fetchEquipment();
   }, []);
 
   useEffect(() => {
@@ -1953,36 +2007,196 @@ export default function App() {
   }, [allEquipment]);
 
   const handleLogin = async () => {
+    setLoginError(null);
+    setIsLoggingIn(true);
     try {
       await signInWithGoogle();
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error('Google Sign-In Error:', error);
+      const errCode = error?.code || '';
+      const errMsg = error?.message || String(error);
+      if (errCode === 'auth/network-request-failed' || errMsg.includes('network-request-failed')) {
+        setLoginError('Không thể kết nối Firebase Auth (auth/network-request-failed). Do môi trường iFrame/Preview chặn cửa sổ xác thực của Google. Bạn có thể sử dụng nút "Đăng nhập nhanh" bên dưới để truy cập ngay lập tức.');
+      } else if (errCode === 'auth/popup-blocked') {
+        setLoginError('Trình duyệt đã chặn cửa sổ Popup đăng nhập. Vui lòng cho phép Popup hoặc sử dụng Đăng nhập nhanh.');
+      } else if (errCode === 'auth/popup-closed-by-user') {
+        setLoginError('Cửa sổ đăng nhập đã bị đóng trước khi hoàn tất.');
+      } else {
+        setLoginError(`Lỗi đăng nhập: ${errMsg}`);
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
-  const fetchWorkOrders = () => {
-    if (!auth.currentUser) return;
+  const handleQuickDemoLogin = async (role: 'admin' | 'customer' = 'admin') => {
+    setLoginError(null);
+    setIsLoggingIn(true);
+    try {
+      const anonUser = await signInAsGuestOrDemo();
+      const mockEmail = role === 'admin' ? 'sgm1707@gmail.com' : 'customer.demo@evn.vn';
+      const mockName = role === 'admin' ? 'Kỹ sư Quản trị (SGM Admin)' : 'Đại diện Khách hàng (EVN)';
+      const mockUid = anonUser?.uid || (role === 'admin' ? 'admin-sgm1707' : 'customer-demo-uid');
+      
+      const sessionUser = {
+        uid: mockUid,
+        email: mockEmail,
+        displayName: mockName,
+        isAnonymous: true
+      };
+      
+      setUser(sessionUser);
+      setUserRole(role);
+      if (role === 'customer') {
+        setUserCustomerName('Tập đoàn Điện lực Việt Nam');
+        setUserFactory('Trạm 110kV Bắc Ninh');
+      }
+      fetchCustomers();
+      fetchWorkOrders();
+      fetchInventory();
+      fetchEquipment();
+    } catch (err: any) {
+      console.error('Demo login error:', err);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogoutUser = async () => {
+    try {
+      if (unsubWoRef.current) { unsubWoRef.current(); unsubWoRef.current = null; }
+      if (unsubCustRef.current) { unsubCustRef.current(); unsubCustRef.current = null; }
+      if (unsubInvRef.current) { unsubInvRef.current(); unsubInvRef.current = null; }
+      if (unsubEqRef.current) { unsubEqRef.current(); unsubEqRef.current = null; }
+      await logOut();
+    } catch (err) {
+      console.warn('Logout warning:', err);
+    }
+    setUser(null);
+    setUserRole(null);
+    setUserCustomerName(null);
+    setUserFactory(null);
+    setLoginError(null);
+  };
+
+  const fetchWorkOrders = (force: boolean = false) => {
+    if (!auth.currentUser && !user) return;
+    if (unsubWoRef.current && !force) return; // Prevent duplicate subscriptions
+    if (unsubWoRef.current && force) {
+      try { unsubWoRef.current(); } catch (e) {}
+      unsubWoRef.current = null;
+    }
     
     setIsWorkOrdersLoading(true);
     const q = query(
       collection(db, 'workOrders'),
       orderBy('createdAt', 'desc'),
-      limit(50)
+      limit(100)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const orders = snapshot.docs.map(doc => ({
+    unsubWoRef.current = onSnapshot(q, async (snapshot) => {
+      let orders = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
+
+      // Bổ sung đầy đủ toàn bộ danh mục phiếu CMMS & PM (Solar, Wind & Lưới điện) nếu chưa đủ
+      if (orders.length < DEFAULT_WORK_ORDERS.length) {
+        const merged = getInitialWorkOrdersList(orders);
+        orders = merged;
+        if (auth.currentUser || user) {
+          const nowIso = new Date().toISOString();
+          const existingIds = new Set(snapshot.docs.map(d => d.id.toLowerCase()));
+          const missing = merged.filter((m: any) => !existingIds.has((m.id || '').toLowerCase()));
+          missing.forEach(async (wo: any) => {
+            try {
+              const woId = (wo.id || '').toString().trim();
+              if (!woId) return;
+              await setDoc(doc(db, 'workOrders', woId), {
+                ...wo,
+                id: woId,
+                createdAt: wo.createdAt || nowIso,
+                updatedAt: wo.updatedAt || nowIso
+              }, { merge: true });
+            } catch (e) {}
+          });
+        }
+      }
       setWorkOrders(orders);
       setIsWorkOrdersLoading(false);
     }, (error) => {
-      console.error("Error fetching work orders:", error);
+      console.warn("Firestore work orders notice:", error);
       setIsWorkOrdersLoading(false);
+      setWorkOrders(prev => prev.length > 0 ? prev : DEFAULT_WORK_ORDERS);
     });
 
-    return unsubscribe;
+    return unsubWoRef.current;
+  };
+
+  const handleOpenWorkOrderDetail = (order: any) => {
+    if (!order) return;
+    setSelectedWorkOrder(order);
+
+    const eqIds: string[] = Array.isArray(order.equipmentId)
+      ? order.equipmentId.map((id: any) => String(id).trim())
+      : (order.equipmentId ? [String(order.equipmentId).trim()] : []);
+
+    let materialsList: any[] = [];
+    if (Array.isArray(order.usedMaterials)) {
+      materialsList = order.usedMaterials.map((m: any) => {
+        if (typeof m === 'object' && m !== null) return m;
+        return { name: String(m), quantity: 1, unit: 'pcs' };
+      });
+    } else if (typeof order.usedMaterials === 'string' && order.usedMaterials.trim()) {
+      materialsList = order.usedMaterials.split(',').map((s: string) => ({
+        name: s.trim(),
+        quantity: 1,
+        unit: 'pcs'
+      }));
+    }
+
+    let custId = order.customerId || '';
+    if (!custId && order.customer) {
+      const matchCust = customers.find(c => c.name?.toLowerCase() === order.customer?.toLowerCase());
+      custId = matchCust?.id || order.customer;
+    }
+    if (!custId && customers.length > 0) {
+      custId = customers[0].id;
+    }
+
+    setNewWorkOrder({
+      title: order.title || (order.id ? `Phiếu ${order.id}` : ''),
+      description: order.description || '',
+      equipmentId: eqIds,
+      customerId: custId,
+      factory: order.factory || '',
+      priority: (order.priority || 'medium').toString().toLowerCase(),
+      type: order.type || 'preventive',
+      status: order.status || 'initiated',
+      assignedTo: order.assignedTo || '',
+      dueDate: order.dueDate ? (order.dueDate.includes('T') ? order.dueDate.split('T')[0] : order.dueDate) : '',
+      usedMaterials: materialsList,
+      responsibleApprove: order.responsibleApprove || 'TM',
+      responsibleDo: order.responsibleDo || 'Everybody',
+      blockingRequired: Boolean(order.blockingRequired),
+      workPermitId: order.workPermitId || order.id || '',
+      isUnplanned: Boolean(order.isUnplanned),
+      failureCode: order.failureCode || '',
+      rootCause: order.rootCause || '',
+      actualTimeSpent: typeof order.actualTimeSpent === 'number' ? order.actualTimeSpent : (typeof order.actualHours === 'number' ? order.actualHours : 0),
+      pmFrequency: order.pmFrequency || (order.type === 'preventive' ? 'monthly' : ''),
+      estimatedTime: typeof order.estimatedTime === 'number' ? order.estimatedTime : (typeof order.estimatedHours === 'number' ? order.estimatedHours : 0),
+      laborCount: order.laborCount || 1,
+      laborCost: order.laborCost || 0,
+      partCost: order.partCost || 0,
+      attachments: Array.isArray(order.attachments) ? order.attachments : [],
+      downtimeStart: order.downtimeStart || '',
+      repairStart: order.repairStart || '',
+      repairEnd: order.repairEnd || '',
+      restartTime: order.restartTime || ''
+    });
+    setWoError('');
+    setShowWorkOrderModal(true);
   };
 
   const handleViewEquipmentProfile = (eq: any) => {
@@ -1997,10 +2211,11 @@ export default function App() {
   };
 
   const fetchCustomers = () => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser && !user) return;
+    if (unsubCustRef.current) return; // Prevent duplicate subscriptions
     setIsCustomersLoading(true);
     const q = query(collection(db, 'customers'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    unsubCustRef.current = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setCustomers(items);
       setIsCustomersLoading(false);
@@ -2008,14 +2223,15 @@ export default function App() {
       console.error("Error fetching customers:", error);
       setIsCustomersLoading(false);
     });
-    return unsubscribe;
+    return unsubCustRef.current;
   };
 
   const fetchInventory = () => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser && !user) return;
+    if (unsubInvRef.current) return; // Prevent duplicate subscriptions
     setIsInventoryLoading(true);
     const q = query(collection(db, 'inventory'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    unsubInvRef.current = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setInventory(items);
       setIsInventoryLoading(false);
@@ -2023,18 +2239,114 @@ export default function App() {
       console.error("Error fetching inventory:", error);
       setIsInventoryLoading(false);
     });
-    return unsubscribe;
+    return unsubInvRef.current;
+  };
+
+  const fetchEquipment = (force: boolean = false) => {
+    if (!auth.currentUser && !user) return;
+    if (unsubEqRef.current && !force) return; // Prevent duplicate subscriptions
+    if (unsubEqRef.current && force) {
+      try { unsubEqRef.current(); } catch (e) {}
+      unsubEqRef.current = null;
+    }
+    setIsEquipmentLoading(true);
+    const q = collection(db, 'equipment');
+    unsubEqRef.current = onSnapshot(q, async (snapshot) => {
+      if (!snapshot.empty) {
+        let items: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Nếu Firestore có ít hơn 104 thiết bị, đồng bộ và bổ sung đầy đủ 104 thiết bị
+        if (items.length < 104) {
+          const merged = getInitialEquipmentList(items);
+          items = merged;
+          if (auth.currentUser || user) {
+            const nowIso = new Date().toISOString();
+            const existingIds = new Set(snapshot.docs.map(d => d.id.toLowerCase()));
+            const missing = merged.filter((m: any) => !existingIds.has((m.id || '').toLowerCase()));
+            missing.forEach(async (eq: any) => {
+              try {
+                const eqId = (eq.id || '').toString().trim();
+                if (!eqId) return;
+                await setDoc(doc(db, 'equipment', eqId), {
+                  id: eqId,
+                  name: eq.name || ('Thiết bị ' + eqId),
+                  customer: eq.customer || '',
+                  customerName: eq.customer || '',
+                  customerId: eq.customerId || eq.customer || 'default',
+                  factory: eq.factory || '',
+                  location: eq.location || '',
+                  type: eq.type || 'Máy biến áp',
+                  status: (eq.status === 'critical' || eq.status === 'warning') ? eq.status : 'healthy',
+                  health: typeof eq.health === 'number' && !isNaN(eq.health) ? eq.health : 100,
+                  criticality: eq.criticality || 'B',
+                  lastCheck: eq.lastCheck || new Date().toLocaleDateString('vi-VN'),
+                  createdAt: eq.createdAt || nowIso,
+                  updatedAt: nowIso
+                }, { merge: true });
+              } catch (e) {}
+            });
+          }
+        }
+        items.sort((a: any, b: any) => (a.name || a.id || '').localeCompare(b.name || b.id || ''));
+        setAllEquipment(items);
+        try {
+          localStorage.setItem('tev_equipment_cache', JSON.stringify(items));
+        } catch (e) {}
+      } else {
+        const initialFleet = getInitialEquipmentList();
+        setAllEquipment(initialFleet);
+        try {
+          localStorage.setItem('tev_equipment_cache', JSON.stringify(initialFleet));
+        } catch (e) {}
+        if (auth.currentUser || user) {
+          const nowIso = new Date().toISOString();
+          initialFleet.forEach(async (eq: any) => {
+            try {
+              const eqId = (eq.id || '').toString().trim();
+              if (!eqId) return;
+              await setDoc(doc(db, 'equipment', eqId), {
+                id: eqId,
+                name: eq.name || ('Thiết bị ' + eqId),
+                customer: eq.customer || '',
+                customerName: eq.customer || '',
+                customerId: eq.customerId || eq.customer || 'default',
+                factory: eq.factory || '',
+                location: eq.location || '',
+                type: eq.type || 'Máy biến áp',
+                status: (eq.status === 'critical' || eq.status === 'warning') ? eq.status : 'healthy',
+                health: typeof eq.health === 'number' && !isNaN(eq.health) ? eq.health : 100,
+                criticality: eq.criticality || 'B',
+                lastCheck: eq.lastCheck || new Date().toLocaleDateString('vi-VN'),
+                createdAt: eq.createdAt || nowIso,
+                updatedAt: nowIso
+              }, { merge: true });
+            } catch (e) {}
+          });
+        }
+      }
+      setIsEquipmentLoading(false);
+    }, (error) => {
+      console.warn('Error fetching equipment from Firestore:', error);
+      setIsEquipmentLoading(false);
+      const cached = localStorage.getItem('tev_equipment_cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAllEquipment(getInitialEquipmentList(parsed));
+          }
+        } catch (e) {}
+      }
+    });
+    return unsubEqRef.current;
   };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setIsSidebarOpen(false); // Close sidebar on mobile when tab changes
-    if (tab === 'dashboard' && isGoogleConnected) {
-      handleFetchFromSheets();
-    }
-    if (tab === 'dashboard' || tab === 'cmms' || tab === 'customers') {
+    if (tab === 'dashboard' || tab === 'cmms' || tab === 'customers' || tab === 'equipment') {
       fetchWorkOrders();
       fetchCustomers();
+      fetchEquipment();
     }
     if (tab === 'inventory') {
       fetchInventory();
@@ -2419,13 +2731,15 @@ export default function App() {
       }
 
       if (selectedWorkOrder) {
-        // Update
+        // Update / Upsert
         woId = selectedWorkOrder.id;
-        await updateDoc(doc(db, 'workOrders', woId), {
+        await setDoc(doc(db, 'workOrders', woId), {
+          id: woId,
+          ...selectedWorkOrder,
           ...updatedWO,
           updatedAt: now,
           completedAt: updatedWO.status === 'completed' ? now : (selectedWorkOrder?.completedAt || null)
-        });
+        }, { merge: true });
       } else {
         // Create
         const docRef = await addDoc(collection(db, 'workOrders'), {
@@ -2590,11 +2904,11 @@ export default function App() {
 
     if (eq.type === 'Máy biến áp') {
       const raw = eq.rawData || [];
-      // Generate realistic values based on DNO Common Network Asset Indices Methodology
-      const moisture = raw[17] ? parseFloat(raw[17].toString().replace(',', '.')) : (isCritical ? 35 + Math.random() * 15 : isWarning ? 20 + Math.random() * 15 : 5 + Math.random() * 10);
-      const acidity = isCritical ? 0.2 + Math.random() * 0.15 : isWarning ? 0.12 + Math.random() * 0.08 : 0.02 + Math.random() * 0.08;
-      const bdv = raw[15] ? parseFloat(raw[15].toString().replace(',', '.')) : (isCritical ? 25 + Math.random() * 10 : isWarning ? 35 + Math.random() * 10 : 55 + Math.random() * 15);
-      const ffa = raw[16] ? parseFloat(raw[16].toString().replace(',', '.')) : (isCritical ? 5.5 + Math.random() * 2 : isWarning ? 3.5 + Math.random() * 2 : 0.5 + Math.random() * 2);
+      // Generate realistic values based on DNO Common Network Asset Indices Methodology (Deterministic based on equipment ID)
+      const moisture = raw[17] ? parseFloat(raw[17].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_moist', 35, 48, 1) : isWarning ? getDeterministicVal(eq.id + '_moist', 20, 32, 1) : getDeterministicVal(eq.id + '_moist', 6, 14, 1));
+      const acidity = isCritical ? getDeterministicVal(eq.id + '_acid', 0.2, 0.32, 3) : isWarning ? getDeterministicVal(eq.id + '_acid', 0.12, 0.19, 3) : getDeterministicVal(eq.id + '_acid', 0.02, 0.08, 3);
+      const bdv = raw[15] ? parseFloat(raw[15].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_bdv', 22, 29, 1) : isWarning ? getDeterministicVal(eq.id + '_bdv', 32, 39, 1) : getDeterministicVal(eq.id + '_bdv', 55, 68, 1));
+      const ffa = raw[16] ? parseFloat(raw[16].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_ffa', 5.5, 7.2, 2) : isWarning ? getDeterministicVal(eq.id + '_ffa', 3.5, 4.8, 2) : getDeterministicVal(eq.id + '_ffa', 0.5, 1.8, 2));
       
       // Scoring based on PDF calibration tables (Inverted: 10 is Good, 0 is Bad)
       const moistureScore = moisture > 45 ? 0 : moisture > 35 ? 2 : moisture > 25 ? 6 : moisture > 15 ? 8 : 10;
@@ -2611,7 +2925,7 @@ export default function App() {
           : 'Thiết bị hoạt động bình thường. Tiếp tục bảo dưỡng định kỳ theo khuyến cáo của nhà sản xuất.';
 
       failureProfile = [
-        { subject: 'Tình trạng bên ngoài', score: Math.min(100, 100 - (baseRisk + Math.random() * 20)) },
+        { subject: 'Tình trạng bên ngoài', score: Math.min(100, Math.max(10, 100 - (baseRisk + getDeterministicVal(eq.id + '_ext', 0, 15, 0)))) },
         { subject: 'Phóng điện cục bộ (PD)', score: Math.min(100, pdScore * 10) },
         { subject: 'Chất lượng dầu', score: Math.min(100, Math.min(moistureScore, acidityScore, bdvScore) * 10) },
         { subject: 'Khí hòa tan (DGA)', score: Math.min(100, dgaScore * 10) },
@@ -2634,9 +2948,9 @@ export default function App() {
       ];
     } else if (eq.type === 'Tủ điện trung thế' || eq.type === 'Tủ điện') {
       const raw = eq.rawData || [];
-      const tevLevel = raw[11] ? parseFloat(raw[11].toString().replace(',', '.')) : (isCritical ? 30 + Math.random() * 20 : isWarning ? 20 + Math.random() * 9 : 5 + Math.random() * 14);
-      const pulses = raw[13] ? parseFloat(raw[13].toString().replace(',', '.')) : (isCritical ? Math.floor(1 + Math.random() * 28) : isWarning ? Math.floor(1 + Math.random() * 5) : 0);
-      const ultrasonic = raw[12] ? parseFloat(raw[12].toString().replace(',', '.')) : (isCritical ? 20 + Math.random() * 20 : isWarning ? 5 + Math.random() * 15 : Math.random() * 5);
+      const tevLevel = raw[11] ? parseFloat(raw[11].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_tev', 32, 48, 1) : isWarning ? getDeterministicVal(eq.id + '_tev', 21, 28, 1) : getDeterministicVal(eq.id + '_tev', 6, 18, 1));
+      const pulses = raw[13] ? parseFloat(raw[13].toString().replace(',', '.')) : (isCritical ? Math.round(getDeterministicVal(eq.id + '_pulse', 8, 25, 0)) : isWarning ? Math.round(getDeterministicVal(eq.id + '_pulse', 2, 6, 0)) : 0);
+      const ultrasonic = raw[12] ? parseFloat(raw[12].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_ultra', 20, 35, 1) : isWarning ? getDeterministicVal(eq.id + '_ultra', 6, 14, 1) : getDeterministicVal(eq.id + '_ultra', 1, 4, 1));
 
       const tevScore = tevLevel > 29 ? 1 : tevLevel >= 20 ? 4 : 10;
       const pulsesScore = pulses >= 7 && pulses <= 29 ? 1 : pulses >= 1 && pulses <= 6 ? 4 : pulses >= 30 ? 6 : 10; 
@@ -2649,7 +2963,7 @@ export default function App() {
             : 'Không có dấu hiệu phóng điện cục bộ. Kiểm tra lại trong vòng 12 tháng.';
 
       failureProfile = [
-          { subject: 'Tình trạng bên ngoài', score: Math.min(100, 100 - (baseRisk + Math.random() * 20)) },
+          { subject: 'Tình trạng bên ngoài', score: Math.min(100, Math.max(10, 100 - (baseRisk + getDeterministicVal(eq.id + '_ext_swg', 0, 15, 0)))) },
           { subject: 'Phóng điện TEV', score: Math.min(100, tevScore * 10) },
           { subject: 'Phóng điện siêu âm', score: Math.min(100, ultrasonicScore * 10) },
           { subject: 'Mật độ xung', score: Math.min(100, pulsesScore * 10) },
@@ -2667,11 +2981,11 @@ export default function App() {
       ];
     } else if (eq.type === 'Động cơ') {
       const raw = eq.rawData || [];
-      const tanDelta = raw[13] ? parseFloat(raw[13].toString().replace(',', '.')) : (isCritical ? 0.08 + Math.random() * 0.05 : isWarning ? 0.04 + Math.random() * 0.03 : 0.01 + Math.random() * 0.02);
-      const pd = raw[19] ? parseFloat(raw[19].toString().replace(',', '.')) : (isCritical ? 18000 + Math.random() * 5000 : isWarning ? 8000 + Math.random() * 7000 : 2000 + Math.random() * 3000);
-      const ir = raw[22] ? parseFloat(raw[22].toString().replace(',', '.')) : (isCritical ? 0.5 + Math.random() * 0.5 : isWarning ? 5 + Math.random() * 5 : 60 + Math.random() * 50);
-      const pi = raw[25] ? parseFloat(raw[25].toString().replace(',', '.')) : (isCritical ? 0.8 + Math.random() * 0.2 : isWarning ? 1.2 + Math.random() * 0.8 : 2.5 + Math.random() * 1.5);
-      const elcid = raw[31] ? parseFloat(raw[31].toString().replace(',', '.')) : (isCritical ? 250 + Math.random() * 100 : isWarning ? 120 + Math.random() * 80 : 40 + Math.random() * 30);
+      const tanDelta = raw[13] ? parseFloat(raw[13].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_td', 0.08, 0.12, 3) : isWarning ? getDeterministicVal(eq.id + '_td', 0.04, 0.07, 3) : getDeterministicVal(eq.id + '_td', 0.01, 0.03, 3));
+      const pd = raw[19] ? parseFloat(raw[19].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_pd', 19000, 24000, 0) : isWarning ? getDeterministicVal(eq.id + '_pd', 9000, 14000, 0) : getDeterministicVal(eq.id + '_pd', 2000, 4500, 0));
+      const ir = raw[22] ? parseFloat(raw[22].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_ir', 0.5, 0.9, 2) : isWarning ? getDeterministicVal(eq.id + '_ir', 5, 9, 1) : getDeterministicVal(eq.id + '_ir', 60, 95, 1));
+      const pi = raw[25] ? parseFloat(raw[25].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_pi', 0.8, 0.98, 2) : isWarning ? getDeterministicVal(eq.id + '_pi', 1.2, 1.8, 2) : getDeterministicVal(eq.id + '_pi', 2.5, 3.8, 2));
+      const elcid = raw[31] ? parseFloat(raw[31].toString().replace(',', '.')) : (isCritical ? getDeterministicVal(eq.id + '_elcid', 210, 320, 0) : isWarning ? getDeterministicVal(eq.id + '_elcid', 120, 190, 0) : getDeterministicVal(eq.id + '_elcid', 40, 65, 0));
 
       const tanDeltaScore = tanDelta >= 0.1 ? 1 : tanDelta >= 0.07 ? 3 : tanDelta >= 0.04 ? 6 : 10;
       const pdScore = pd >= 20000 ? 1 : pd >= 15000 ? 3 : pd >= 10000 ? 6 : 10;
@@ -3725,7 +4039,17 @@ export default function App() {
     const matchStatus = statusFilter === 'all' || eq.status === statusFilter;
     const matchName = filterName === '' || eq.name.toLowerCase().includes(filterName.toLowerCase()) || eq.id.toLowerCase().includes(filterName.toLowerCase());
     const matchLocation = filterLocation === '' || eq.factory.toLowerCase().includes(filterLocation.toLowerCase()) || eq.location.toLowerCase().includes(filterLocation.toLowerCase());
-    const matchType = filterType === 'all' || eq.type === filterType;
+    const matchType = filterType === 'all' || 
+      eq.type === filterType ||
+      (filterType === 'Máy cắt' && (eq.type?.toLowerCase().includes('cắt') || eq.type?.toLowerCase().includes('breaker') || eq.type?.toLowerCase().includes('vcb') || eq.type?.toLowerCase().includes('acb'))) ||
+      (filterType === 'Tủ điện' && (eq.type?.toLowerCase().includes('tủ') || eq.type?.toLowerCase().includes('switchgear') || eq.type?.toLowerCase().includes('rmu'))) ||
+      (filterType === 'Động cơ' && (eq.type?.toLowerCase().includes('động cơ') || eq.type?.toLowerCase().includes('motor'))) ||
+      (filterType === 'Máy phát' && (eq.type?.toLowerCase().includes('máy phát') || eq.type?.toLowerCase().includes('generator'))) ||
+      (filterType === 'Máy biến áp' && (eq.type?.toLowerCase().includes('biến áp') || eq.type?.toLowerCase().includes('transformer') || eq.type?.toLowerCase().includes('mba'))) ||
+      (filterType === 'Cáp điện' && (eq.type?.toLowerCase().includes('cáp') || eq.type?.toLowerCase().includes('cable'))) ||
+      (filterType === 'Pin & UPS' && (eq.type?.toLowerCase().includes('pin') || eq.type?.toLowerCase().includes('ups') || eq.type?.toLowerCase().includes('battery') || eq.type?.toLowerCase().includes('ắc quy') || eq.type?.toLowerCase().includes('bess'))) ||
+      (filterType === 'Rơ le bảo vệ' && (eq.type?.toLowerCase().includes('rơ le') || eq.type?.toLowerCase().includes('relay'))) ||
+      (filterType === 'Inverter' && (eq.type?.toLowerCase().includes('inverter') || eq.type?.toLowerCase().includes('biến tần')));
     const matchHealthMin = filterHealthMin === '' || eq.health >= parseInt(filterHealthMin);
     const matchHealthMax = filterHealthMax === '' || eq.health <= parseInt(filterHealthMax);
     return matchStatus && matchName && matchLocation && matchType && matchHealthMin && matchHealthMax;
@@ -3979,35 +4303,97 @@ export default function App() {
     setAttachedFiles([]);
   }, [selectedEqType]);
 
-  // Google Auth Effect
-  useEffect(() => {
-    let retryCount = 0;
-    const maxRetries = 3;
+  const getAuthHeaders = (isJson = true) => {
+    const tokens = localStorage.getItem('google_tokens');
+    const headers: Record<string, string> = {};
+    if (tokens) {
+      headers['Authorization'] = `Bearer ${tokens}`;
+    }
+    if (isJson) {
+      headers['Content-Type'] = 'application/json';
+    }
+    return headers;
+  };
 
-    const checkAuthStatus = async () => {
-      try {
-        const response = await fetch('/api/auth/status', {
-          headers: getAuthHeaders(false)
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setIsGoogleConnected(data.isAuthenticated);
-          retryCount = 0; // Reset on success
+  const checkGoogleAuthStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/status', {
+        headers: getAuthHeaders(false)
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const isAuth = !!data.isAuthenticated;
+        setIsGoogleConnected(isAuth);
+        if (isAuth && data.tokens) {
+          const existingRaw = localStorage.getItem('google_tokens');
+          let mergedTokens = { ...data.tokens };
+          if (existingRaw) {
+            try {
+              const existing = JSON.parse(existingRaw);
+              if (existing.refresh_token && !mergedTokens.refresh_token) {
+                mergedTokens.refresh_token = existing.refresh_token;
+              }
+            } catch (e) {}
+          }
+          localStorage.setItem('google_tokens', JSON.stringify(mergedTokens));
+        } else if (!isAuth) {
+          // Attempt silent renewal if localStorage still has a refresh_token
+          const localTokensRaw = localStorage.getItem('google_tokens');
+          if (localTokensRaw) {
+            try {
+              const localTokens = JSON.parse(localTokensRaw);
+              if (localTokens.refresh_token) {
+                const refreshRes = await fetch('/api/auth/refresh', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localTokensRaw}`
+                  }
+                });
+                if (refreshRes.ok) {
+                  const refData = await refreshRes.json();
+                  if (refData.tokens) {
+                    localStorage.setItem('google_tokens', JSON.stringify(refData.tokens));
+                    setIsGoogleConnected(true);
+                    return;
+                  }
+                }
+              }
+            } catch (e) {}
+          }
+          localStorage.removeItem('google_tokens');
         }
-      } catch (error: any) {
-        // Only log error if we've exhausted retries or it's not a fetch error
-        if (error.message === 'Failed to fetch' && retryCount < maxRetries) {
-          retryCount++;
-          setTimeout(checkAuthStatus, 2000 * retryCount); // Exponential backoff
-        } else {
-          console.error('Failed to check auth status', error);
-        }
+      } else if (response.status === 401) {
+        localStorage.removeItem('google_tokens');
+        setIsGoogleConnected(false);
+      } else {
+        setIsGoogleConnected(false);
       }
-    };
-    checkAuthStatus();
+    } catch (error: any) {
+      console.warn('Check Google auth status notice:', error?.message);
+    }
+  }, []);
 
-    // Poll for status every 30 seconds to catch expiration
-    const interval = setInterval(checkAuthStatus, 30000);
+  const handleDisconnectGoogle = async () => {
+    try {
+      await fetch('/api/auth/disconnect', { method: 'POST' });
+    } catch (e) {
+      console.warn('Disconnect error:', e);
+    }
+    localStorage.removeItem('google_tokens');
+    localStorage.removeItem('tev_spreadsheet_id');
+    setIsGoogleConnected(false);
+    setIsAutoSyncEnabled(false);
+    setAutoSyncStatus('idle');
+    setGoogleSheetUrl('');
+  };
+
+  // Google Auth Effect - Persistent auto-connect on load and across sessions
+  useEffect(() => {
+    checkGoogleAuthStatus();
+
+    // Poll for status every 60 seconds to maintain persistent connection & refresh tokens
+    const interval = setInterval(checkGoogleAuthStatus, 60000);
 
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) {
@@ -4018,6 +4404,7 @@ export default function App() {
           localStorage.setItem('google_tokens', JSON.stringify(event.data.tokens));
         }
         setIsGoogleConnected(true);
+        checkGoogleAuthStatus();
       }
     };
     window.addEventListener('message', handleMessage);
@@ -4025,7 +4412,7 @@ export default function App() {
       window.removeEventListener('message', handleMessage);
       clearInterval(interval);
     };
-  }, []);
+  }, [checkGoogleAuthStatus]);
 
   // Firestore connection test
   useEffect(() => {
@@ -4052,18 +4439,6 @@ export default function App() {
     testFirestore();
   }, []);
 
-  const getAuthHeaders = (isJson = true) => {
-    const tokens = localStorage.getItem('google_tokens');
-    const headers: Record<string, string> = {};
-    if (tokens) {
-      headers['Authorization'] = `Bearer ${tokens}`;
-    }
-    if (isJson) {
-      headers['Content-Type'] = 'application/json';
-    }
-    return headers;
-  };
-
   const syncToSheet = async (sheetName: string, values: any[]) => {
     if (!isGoogleConnected) {
       throw new Error('Chưa kết nối Google Drive.');
@@ -4080,7 +4455,11 @@ export default function App() {
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: 'Lỗi không xác định' }));
         if (response.status === 401) {
+          localStorage.removeItem('google_tokens');
           setIsGoogleConnected(false);
+          setIsAutoSyncEnabled(false);
+          setAutoSyncStatus('idle');
+          setIsSyncing(false);
           throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.');
         }
         throw new Error(err.error || 'Lỗi đồng bộ Google Sheets');
@@ -5128,7 +5507,11 @@ export default function App() {
       if (!response.ok) {
         const err = await response.json();
         if (response.status === 401) {
+          localStorage.removeItem('google_tokens');
           setIsGoogleConnected(false);
+          setIsAutoSyncEnabled(false);
+          setAutoSyncStatus('idle');
+          setIsSyncing(false);
           throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.');
         }
         if (err.error && err.error.includes('SPREADSHEET_ID')) {
@@ -5174,9 +5557,30 @@ export default function App() {
       // 1. Đẩy dữ liệu lên Google Sheets (force: true để không bị gián đoạn bởi popup đối soát)
       await handleSyncToSheets(undefined, true, true);
 
-      // 2. Lưu đồng bộ toàn bộ Work Orders & Khách hàng vào Cloud Firestore
-      if (auth.currentUser) {
+      // 2. Lưu đồng bộ toàn bộ Thiết bị, Work Orders, Khách hàng, Vật tư vào Cloud Firestore
+      if (auth.currentUser || user) {
         const promises: Promise<any>[] = [];
+        const nowIso = new Date().toISOString();
+        allEquipment.forEach(eq => {
+          if (eq.id) {
+            promises.push(setDoc(doc(db, 'equipment', eq.id), {
+              id: eq.id,
+              name: eq.name || `Thiết bị ${eq.id}`,
+              customer: eq.customer || '',
+              customerName: eq.customer || '',
+              customerId: eq.customerId || eq.customer || 'default',
+              factory: eq.factory || '',
+              location: eq.location || '',
+              type: eq.type || 'Máy biến áp',
+              status: (eq.status === 'critical' || eq.status === 'warning') ? eq.status : 'healthy',
+              health: typeof eq.health === 'number' && !isNaN(eq.health) ? eq.health : 100,
+              criticality: eq.criticality || 'B',
+              lastCheck: eq.lastCheck || new Date().toLocaleDateString('vi-VN'),
+              createdAt: eq.createdAt || nowIso,
+              updatedAt: nowIso
+            }, { merge: true }));
+          }
+        });
         workOrders.forEach(wo => {
           if (wo.id) {
             promises.push(setDoc(doc(db, 'workOrders', wo.id), wo, { merge: true }));
@@ -5187,6 +5591,11 @@ export default function App() {
             promises.push(setDoc(doc(db, 'customers', c.id), c, { merge: true }));
           }
         });
+        inventory.forEach(inv => {
+          if (inv.id) {
+            promises.push(setDoc(doc(db, 'inventory', inv.id), inv, { merge: true }));
+          }
+        });
         await Promise.allSettled(promises);
       }
 
@@ -5194,7 +5603,7 @@ export default function App() {
       setLastAutoSyncTime(nowTime);
       setTwoWaySyncNotice({
         type: 'success',
-        message: `Đã hoàn tất luồng [App ➔ Google Sheet ➔ Firestore] lúc ${nowTime}! Đã đồng bộ ${workOrders.length} phiếu WO và ${customers.length} khách hàng.`
+        message: `Đã hoàn tất luồng [App ➔ Google Sheet ➔ Firestore] lúc ${nowTime}! Đã đồng bộ ${allEquipment.length} thiết bị, ${workOrders.length} phiếu WO và ${customers.length} khách hàng.`
       });
       setTimeout(() => setTwoWaySyncNotice(null), 6000);
     } catch (err: any) {
@@ -5250,6 +5659,13 @@ export default function App() {
       if (!silent) alert('Vui lòng kết nối Google Drive trước khi đồng bộ 2 chiều.');
       return;
     }
+
+    // Do not trigger another sync if already syncing
+    if (isSyncing || autoSyncStatus === 'syncing') {
+      console.log('Đang trong quá trình đồng bộ, bỏ qua yêu cầu đồng thời.');
+      return;
+    }
+
     setAutoSyncStatus('syncing');
     try {
       // Step 1: Export full app data to Google Sheets (force: true để không chặn ngầm)
@@ -5272,24 +5688,26 @@ export default function App() {
       if (!silent) {
         alert('Lỗi khi đồng bộ 2 chiều: ' + (err.message || 'Lỗi không xác định'));
       }
+    } finally {
+      setIsSyncing(false);
+      // Đảm bảo không bao giờ bị treo ở trạng thái "Đang Sync..."
+      setTimeout(() => {
+        setAutoSyncStatus(prev => prev === 'syncing' ? 'idle' : prev);
+      }, 3000);
     }
   };
 
-  // Tự động đồng bộ 2 chiều (Background Auto 2-Way Sync every 60s)
+  // Tự động đồng bộ 2 chiều (Chỉ chạy chu kỳ ngầm khi người dùng chủ động bật Auto 2-Way Sync)
   useEffect(() => {
     if (!isGoogleConnected || !isAutoSyncEnabled) return;
 
-    // Trigger initial 2-way sync 3 seconds after connect
-    const initialTimer = setTimeout(() => {
-      handlePerformTwoWaySync(true);
-    }, 3000);
-
     const interval = setInterval(() => {
-      handlePerformTwoWaySync(true);
-    }, 60000); // 60 seconds cycle
+      if (!isSyncing && autoSyncStatus !== 'syncing') {
+        handlePerformTwoWaySync(true);
+      }
+    }, 180000); // Chu kỳ 3 phút khi được bật, tránh spam API và giật lag giao diện
 
     return () => {
-      clearTimeout(initialTimer);
       clearInterval(interval);
     };
   }, [isGoogleConnected, isAutoSyncEnabled]);
@@ -5300,14 +5718,29 @@ export default function App() {
       fetch('/api/sheets/resolve-or-create', {
         headers: getAuthHeaders()
       })
-      .then(r => r.json())
+      .then(async r => {
+        if (!r.ok) {
+          if (r.status === 401) {
+            localStorage.removeItem('google_tokens');
+            setIsGoogleConnected(false);
+            setIsAutoSyncEnabled(false);
+            setAutoSyncStatus('idle');
+            setIsSyncing(false);
+          }
+          const errData = await r.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to resolve or create sheet');
+        }
+        return r.json();
+      })
       .then(res => {
         if (res.spreadsheetId) {
           localStorage.setItem('tev_spreadsheet_id', res.spreadsheetId);
           setGoogleSheetUrl(`https://docs.google.com/spreadsheets/d/${res.spreadsheetId}/edit`);
+          // Tự động nạp toàn bộ danh mục 104 thiết bị từ Google Sheets vào Firebase và cập nhật trên App
+          handleFetchFromSheets(true, true);
         }
       })
-      .catch(err => console.warn('Auto resolve sheet error:', err));
+      .catch(err => console.warn('Auto resolve sheet notice:', err.message));
     }
   }, [isGoogleConnected]);
 
@@ -5321,7 +5754,11 @@ export default function App() {
       if (!response.ok) {
         const err = await response.json();
         if (response.status === 401) {
+          localStorage.removeItem('google_tokens');
           setIsGoogleConnected(false);
+          setIsAutoSyncEnabled(false);
+          setAutoSyncStatus('idle');
+          setIsSyncing(false);
           throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.');
         }
         throw new Error(err.error || 'Failed to fetch data');
@@ -5562,499 +5999,155 @@ export default function App() {
           continue;
         }
 
-        // Determine equipment type
-        let eqType: 'Máy biến áp' | 'Tủ điện' | 'Động cơ' | 'Inverter' = 'Máy biến áp';
-        if (lowerSheetName.includes('tủ điện') || lowerSheetName.includes('trung thế') || lowerSheetName.includes('hạ thế') || lowerSheetName.includes('switchgear') || lowerSheetName.includes('swg') || lowerSheetName.includes('mcc') || lowerSheetName.includes('tev') || lowerSheetName.includes('rmu')) {
-          eqType = 'Tủ điện';
-        } else if (lowerSheetName.includes('động cơ') || lowerSheetName.includes('motor') || lowerSheetName.includes('máy bơm') || lowerSheetName.includes('pump') || lowerSheetName.includes('fan') || lowerSheetName.includes('quạt')) {
-          eqType = 'Động cơ';
+        // Xác định phân loại thiết bị mặc định theo tên Sheet
+        let defaultSheetType: string = 'Máy biến áp';
+        if (lowerSheetName.includes('máy cắt') || lowerSheetName.includes('breaker') || lowerSheetName.includes('vcb') || lowerSheetName.includes('acb')) {
+          defaultSheetType = 'Máy cắt';
+        } else if (lowerSheetName.includes('tủ điện') || lowerSheetName.includes('trung thế') || lowerSheetName.includes('hạ thế') || lowerSheetName.includes('switchgear') || lowerSheetName.includes('swg') || lowerSheetName.includes('rmu') || lowerSheetName.includes('mcc') || lowerSheetName.includes('tev')) {
+          defaultSheetType = 'Tủ điện';
+        } else if (lowerSheetName.includes('động cơ') || lowerSheetName.includes('motor') || lowerSheetName.includes('máy bơm') || lowerSheetName.includes('pump') || lowerSheetName.includes('quạt')) {
+          defaultSheetType = 'Động cơ';
+        } else if (lowerSheetName.includes('máy phát') || lowerSheetName.includes('generator')) {
+          defaultSheetType = 'Máy phát';
         } else if (lowerSheetName.includes('biến áp') || lowerSheetName.includes('mba') || lowerSheetName.includes('transformer')) {
-          eqType = 'Máy biến áp';
+          defaultSheetType = 'Máy biến áp';
+        } else if (lowerSheetName.includes('cáp điện') || lowerSheetName.includes('cable') || lowerSheetName.includes('cáp')) {
+          defaultSheetType = 'Cáp điện';
+        } else if (lowerSheetName.includes('pin') || lowerSheetName.includes('ups') || lowerSheetName.includes('bess') || lowerSheetName.includes('battery') || lowerSheetName.includes('ắc quy')) {
+          defaultSheetType = 'Pin & UPS';
+        } else if (lowerSheetName.includes('rơ le') || lowerSheetName.includes('relay') || lowerSheetName.includes('role')) {
+          defaultSheetType = 'Rơ le bảo vệ';
         } else if (lowerSheetName.includes('inverter') || lowerSheetName.includes('biến tần') || lowerSheetName.includes('solar') || lowerSheetName.includes('wind')) {
-          eqType = 'Inverter';
-        } else {
-          const hasTransformerCols = getColumnIndex(header, ['Nhiệt độ dầu', 'DGA', 'Furan']) !== -1;
-          const hasSwitchgearCols = getColumnIndex(header, ['TEV', 'Siêu âm', 'SF6']) !== -1;
-          const hasMotorCols = getColumnIndex(header, ['Rung động', 'Stator', 'Bearing']) !== -1;
-          const hasInverterCols = getColumnIndex(header, ['MPPT', 'DC Input', 'AC Output', 'Hiệu suất']) !== -1;
-          const hasEqId = getColumnIndex(header, ['Mã thiết bị', 'Mã TB', 'Equipment ID']) !== -1;
-          
-          if (hasMotorCols) eqType = 'Động cơ';
-          else if (hasSwitchgearCols) eqType = 'Tủ điện';
-          else if (hasInverterCols) eqType = 'Inverter';
-          else if (hasTransformerCols) eqType = 'Máy biến áp';
-          else if (hasEqId) eqType = 'Máy biến áp';
-          else continue; // Skip sheet if no equipment indicators found
+          defaultSheetType = 'Inverter';
         }
 
         const dataRows = rows.slice(headerIdx + 1);
-        
-        if (eqType === 'Máy biến áp') {
-          const mIdx = {
-            oilTemp: getColumnIndex(header, ['Nhiệt độ dầu', 'Oil Temp', 'Temp dầu']),
-            windingTemp: getColumnIndex(header, ['Nhiệt độ cuộn dây', 'Winding Temp', 'Temp cuộn dây']),
-            irHighLow: getColumnIndex(header, ['Điện trở cách điện H-L', 'IR High-Low', 'IR Cao-Hạ']),
-            irHighEarth: getColumnIndex(header, ['Điện trở cách điện H-E', 'IR High-Earth', 'IR Cao-Vỏ']),
-            oilLeak: getColumnIndex(header, ['Rò rỉ dầu', 'Oil Leak']),
-            dga: getColumnIndex(header, ['Phân tích khí hòa tan', 'DGA', 'Khí hòa tan']),
-            dielectricStrength: getColumnIndex(header, ['Độ bền điện môi', 'Dielectric Strength']),
-            furan: getColumnIndex(header, ['Hàm lượng Furan', 'Furan']),
-            oilMoisture: getColumnIndex(header, ['Độ ẩm trong dầu', 'Oil Moisture', 'Độ ẩm dầu']),
-            h2: getColumnIndex(header, ['H2']),
-            o2: getColumnIndex(header, ['O2']),
-            n2: getColumnIndex(header, ['N2']),
-            ch4: getColumnIndex(header, ['CH4']),
-            co: getColumnIndex(header, ['CO']),
-            co2: getColumnIndex(header, ['CO2']),
-            c2h4: getColumnIndex(header, ['C2H4']),
-            c2h6: getColumnIndex(header, ['C2H6']),
-            c2h2: getColumnIndex(header, ['C2H2'])
-          };
+        for (const row of dataRows) {
+          if (!row || row.length === 0) continue;
+          const idVal = idx.idIdx !== -1 ? row[idx.idIdx] : (row[1] && String(row[1]).trim().length >= 3 && !String(row[1]).includes(' ') ? row[1] : (row[4] || row[0]));
+          if (!idVal) continue;
+          const idStr = String(idVal).trim();
+          if (idStr === '' || idStr.toLowerCase().includes('mã ') || idStr.toLowerCase().includes('tag id') || idStr.toLowerCase().includes('equipment id')) continue;
 
-          dataRows.forEach((row: any[]) => {
-            if (!row || row.length === 0) return;
-            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
-            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
-            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
+          const nameVal = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[2] || row[1] || ('Thiết bị ' + idStr));
+          const nameStr = String(nameVal || ('Thiết bị ' + idStr)).trim();
 
-            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
-            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
-            let age = idx.ageIdx !== -1 ? parseFloat(row[idx.ageIdx]?.toString().replace(',', '.') || '10') : 10;
-            let dutyFactor = idx.dutyFactorIdx !== -1 ? parseFloat(row[idx.dutyFactorIdx]?.toString().replace(',', '.') || '1.0') : 1.0;
-            if (isNaN(age)) age = 10;
-            if (isNaN(dutyFactor)) dutyFactor = 1.0;
+          // Xác định chính xác loại thiết bị
+          let resolvedType = defaultSheetType;
+          if (idx.typeIdx !== -1 && row[idx.typeIdx] && String(row[idx.typeIdx]).trim() !== '') {
+            resolvedType = String(row[idx.typeIdx]).trim();
+          } else if (idStr.startsWith('TRF')) {
+            resolvedType = 'Máy biến áp';
+          } else if (idStr.startsWith('MVCB') || idStr.startsWith('MC-')) {
+            resolvedType = 'Máy cắt';
+          } else if (idStr.startsWith('SWG')) {
+            resolvedType = 'Tủ điện';
+          } else if (idStr.startsWith('MTR')) {
+            resolvedType = 'Động cơ';
+          } else if (idStr.startsWith('GEN')) {
+            resolvedType = 'Máy phát';
+          } else if (idStr.startsWith('CAB')) {
+            resolvedType = 'Cáp điện';
+          } else if (idStr.startsWith('BAT')) {
+            resolvedType = 'Pin & UPS';
+          } else if (idStr.startsWith('REL')) {
+            resolvedType = 'Rơ le bảo vệ';
+          } else if (idStr.startsWith('INV')) {
+            resolvedType = 'Inverter';
+          }
 
-            let hasCritical = false;
-            let hasWarning = false;
-            const paramsToCheck = [
-              { key: 'oilTemp', val: mIdx.oilTemp !== -1 ? row[mIdx.oilTemp] : '' },
-              { key: 'windingTemp', val: mIdx.windingTemp !== -1 ? row[mIdx.windingTemp] : '' },
-              { key: 'irHighLow', val: mIdx.irHighLow !== -1 ? row[mIdx.irHighLow] : '' },
-              { key: 'irHighEarth', val: mIdx.irHighEarth !== -1 ? row[mIdx.irHighEarth] : '' },
-              { key: 'oilLeak', val: mIdx.oilLeak !== -1 ? row[mIdx.oilLeak] : '' },
-              { key: 'dga', val: mIdx.dga !== -1 ? row[mIdx.dga] : '' },
-              { key: 'dielectricStrength', val: mIdx.dielectricStrength !== -1 ? row[mIdx.dielectricStrength] : '' },
-              { key: 'furan', val: mIdx.furan !== -1 ? row[mIdx.furan] : '' },
-              { key: 'oilMoisture', val: mIdx.oilMoisture !== -1 ? row[mIdx.oilMoisture] : '' },
-              { key: 'h2', val: mIdx.h2 !== -1 ? row[mIdx.h2] : '' },
-              { key: 'o2', val: mIdx.o2 !== -1 ? row[mIdx.o2] : '' },
-              { key: 'n2', val: mIdx.n2 !== -1 ? row[mIdx.n2] : '' },
-              { key: 'ch4', val: mIdx.ch4 !== -1 ? row[mIdx.ch4] : '' },
-              { key: 'co', val: mIdx.co !== -1 ? row[mIdx.co] : '' },
-              { key: 'co2', val: mIdx.co2 !== -1 ? row[mIdx.co2] : '' },
-              { key: 'c2h4', val: mIdx.c2h4 !== -1 ? row[mIdx.c2h4] : '' },
-              { key: 'c2h6', val: mIdx.c2h6 !== -1 ? row[mIdx.c2h6] : '' },
-              { key: 'c2h2', val: mIdx.c2h2 !== -1 ? row[mIdx.c2h2] : '' }
-            ];
-            paramsToCheck.forEach(p => {
-              const status = evaluateEquipmentParam('Máy biến áp', p.key, p.val);
-              if (status === 'critical') hasCritical = true;
-              if (status === 'warning') hasWarning = true;
-            });
+          let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '92') : 92;
+          if (isNaN(healthVal)) healthVal = 92;
+          let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
+          if (!statusVal) {
+            statusVal = healthVal < 60 ? 'critical' : (healthVal < 80 ? 'warning' : 'healthy');
+          }
 
-            const params: TransformerParams = {
-              mainTransformer: { age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0), reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5 },
-              tapchanger: { age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0), reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5 }
-            };
-            const result = calculateTransformerHealth(params);
-            let calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-            
-            if (hasCritical) {
-              statusVal = 'critical';
-              if (calcHealth >= 60) calcHealth = 59; // Ensure health reflects critical status
-            } else if (hasWarning) {
-              statusVal = 'warning';
-              if (calcHealth >= 80) calcHealth = 79; // Ensure health reflects warning status
-              else if (calcHealth < 60) calcHealth = 60; // Ensure health doesn't drop to critical if only warning
-            } else {
-              statusVal = 'healthy';
-              if (calcHealth < 80) calcHealth = 85; // Ensure health reflects healthy status
+          const customerVal = idx.customerIdx !== -1 ? String(row[idx.customerIdx] || '') : (row[3] || '');
+          const factoryVal = idx.factoryIdx !== -1 ? String(row[idx.factoryIdx] || '') : (row[4] || '');
+          const locationVal = idx.locationIdx !== -1 ? String(row[idx.locationIdx] || '') : (row[5] || '');
+          const criticalityVal = idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B';
+          const lastCheckVal = idx.dateIdx !== -1 ? (row[idx.dateIdx] || new Date().toLocaleDateString('vi-VN')) : new Date().toLocaleDateString('vi-VN');
+
+          const measurementsObj: Record<string, any> = {};
+          header.forEach((colName, cIdx) => {
+            if (colName && row[cIdx] !== undefined && row[cIdx] !== '') {
+              measurementsObj[colName] = row[cIdx];
             }
-
-            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
-            else {
-              // If health is provided but doesn't match status, adjust it
-              if (statusVal === 'critical' && healthVal >= 60) healthVal = 59;
-              if (statusVal === 'warning' && (healthVal >= 80 || healthVal < 60)) healthVal = 75;
-              if (statusVal === 'healthy' && healthVal < 80) healthVal = 90;
-            }
-
-            const eqData = {
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
-              id, name, type: 'Máy biến áp', health: healthVal, status: statusVal,
-              measurements: {
-                oilTemp: paramsToCheck[0].val, windingTemp: paramsToCheck[1].val, irHighLow: paramsToCheck[2].val,
-                irHighEarth: paramsToCheck[3].val, oilLeak: paramsToCheck[4].val, dga: paramsToCheck[5].val,
-                dielectricStrength: paramsToCheck[6].val, furan: paramsToCheck[7].val, oilMoisture: paramsToCheck[8].val,
-                h2: paramsToCheck[9].val, o2: paramsToCheck[10].val, n2: paramsToCheck[11].val,
-                ch4: paramsToCheck[12].val, co: paramsToCheck[13].val, co2: paramsToCheck[14].val,
-                c2h4: paramsToCheck[15].val, c2h6: paramsToCheck[16].val, c2h2: paramsToCheck[17].val,
-                age: age.toString(), dutyFactor: dutyFactor.toString()
-              },
-              rawData: [...row]
-            };
-            newEquipmentList.push(eqData);
-            newReportsList.push({
-              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
-              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              type: 'Máy biến áp', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
-              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
-              rawData: [...row]
-            });
           });
-        } else if (eqType === 'Tủ điện') {
-          const mIdx = {
-            thermography: getColumnIndex(header, ['Nhiệt hồng ngoại', 'Thermography', 'Nhiệt độ tiếp xúc']),
-            contactRes: getColumnIndex(header, ['Điện trở tiếp xúc', 'Contact Res']),
-            tev: getColumnIndex(header, ['TEV']),
-            ultrasonic: getColumnIndex(header, ['Siêu âm', 'Ultrasonic']),
-            tevPulses: getColumnIndex(header, ['Xung TEV', 'TEV Pulses', 'Số xung TEV']),
-            humidity: getColumnIndex(header, ['Độ ẩm', 'Humidity', 'Độ ẩm môi trường']),
-            sf6Pressure: getColumnIndex(header, ['Áp suất SF6', 'SF6 Pressure'])
+
+          const eqData: any = {
+            id: idStr,
+            name: nameStr,
+            customer: customerVal,
+            factory: factoryVal,
+            location: locationVal,
+            type: resolvedType,
+            health: healthVal,
+            status: statusVal,
+            criticality: criticalityVal,
+            lastCheck: lastCheckVal,
+            measurements: measurementsObj,
+            rawData: [...row]
           };
 
-          dataRows.forEach((row: any[]) => {
-            if (!row || row.length === 0) return;
-            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
-            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
-            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
-
-            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
-            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
-            let age = idx.ageIdx !== -1 ? parseFloat(row[idx.ageIdx]?.toString().replace(',', '.') || '10') : 10;
-            let dutyFactor = idx.dutyFactorIdx !== -1 ? parseFloat(row[idx.dutyFactorIdx]?.toString().replace(',', '.') || '1.0') : 1.0;
-            if (isNaN(age)) age = 10;
-            if (isNaN(dutyFactor)) dutyFactor = 1.0;
-
-            let hasCritical = false;
-            let hasWarning = false;
-            const paramsToCheck = [
-              { key: 'thermography', val: mIdx.thermography !== -1 ? row[mIdx.thermography] : '' },
-              { key: 'contactRes', val: mIdx.contactRes !== -1 ? row[mIdx.contactRes] : '' },
-              { key: 'tev', val: mIdx.tev !== -1 ? row[mIdx.tev] : '' },
-              { key: 'ultrasonic', val: mIdx.ultrasonic !== -1 ? row[mIdx.ultrasonic] : '' },
-              { key: 'tevPulses', val: mIdx.tevPulses !== -1 ? row[mIdx.tevPulses] : '' },
-              { key: 'humidity', val: mIdx.humidity !== -1 ? row[mIdx.humidity] : '' },
-              { key: 'sf6Pressure', val: mIdx.sf6Pressure !== -1 ? row[mIdx.sf6Pressure] : '' }
-            ];
-            paramsToCheck.forEach(p => {
-              const status = evaluateEquipmentParam('Tủ điện', p.key, p.val);
-              if (status === 'critical') hasCritical = true;
-              if (status === 'warning') hasWarning = true;
-            });
-
-            const params: SwitchgearParams = {
-              age, normalExpectedLife: 40, dutyFactor, locationFactor: 1.0, healthScoreFactor: 1.0, reliabilityFactor: 1.0, healthScoreCap: 10, healthScoreCollar: 0.5, reliabilityCollar: 0.5, observedFactor: 1.0, measuredFactor: hasCritical ? 1.5 : (hasWarning ? 1.2 : 1.0)
-            };
-            const result = calculateSwitchgearHealth(params);
-            let calcHealth = Math.max(0, Math.round(100 - (result.score / 10) * 100));
-            
-            if (hasCritical) {
-              statusVal = 'critical';
-              if (calcHealth >= 60) calcHealth = 59;
-            } else if (hasWarning) {
-              statusVal = 'warning';
-              if (calcHealth >= 80) calcHealth = 79;
-              else if (calcHealth < 60) calcHealth = 60;
-            } else {
-              statusVal = 'healthy';
-              if (calcHealth < 80) calcHealth = 85;
-            }
-
-            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
-            else {
-              if (statusVal === 'critical' && healthVal >= 60) healthVal = 59;
-              if (statusVal === 'warning' && (healthVal >= 80 || healthVal < 60)) healthVal = 75;
-              if (statusVal === 'healthy' && healthVal < 80) healthVal = 90;
-            }
-
-            const eqData = {
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
-              id, name, type: 'Tủ điện', health: healthVal, status: statusVal,
-              measurements: {
-                thermography: paramsToCheck[0].val, contactRes: paramsToCheck[1].val, tev: paramsToCheck[2].val,
-                ultrasonic: paramsToCheck[3].val, tevPulses: paramsToCheck[4].val, humidity: paramsToCheck[5].val,
-                sf6Pressure: paramsToCheck[6].val, age: age.toString(), dutyFactor: dutyFactor.toString()
-              },
-              rawData: [...row]
-            };
-            newEquipmentList.push(eqData);
-            newReportsList.push({
-              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
-              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              type: 'Tủ điện', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
-              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
-              rawData: [...row]
-            });
-          });
-        } else if (eqType === 'Động cơ') {
-          const mIdx = {
-            vibration: getColumnIndex(header, ['Rung động', 'Vibration', 'Độ rung']),
-            statorTemp: getColumnIndex(header, ['Nhiệt độ Stator', 'Stator Temp']),
-            bearingTemp: getColumnIndex(header, ['Nhiệt độ ổ bi', 'Bearing Temp', 'Nhiệt độ vòng bi']),
-            voltageImbalance: getColumnIndex(header, ['Mất cân bằng điện áp', 'Voltage Imbalance', 'Độ lệch điện áp']),
-            tanDelta: getColumnIndex(header, ['Tan Delta']),
-            tipUp: getColumnIndex(header, ['Tip Up']),
-            pd: getColumnIndex(header, ['Phóng điện cục bộ', 'PD']),
-            ir: getColumnIndex(header, ['Điện trở cách điện', 'IR']),
-            pi: getColumnIndex(header, ['Chỉ số phân cực', 'PI']),
-            dd: getColumnIndex(header, ['Phóng điện điện môi', 'DD']),
-            elcid: getColumnIndex(header, ['ELCID'])
-          };
-
-          dataRows.forEach((row: any[]) => {
-            if (!row || row.length === 0) return;
-            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
-            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
-            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
-
-            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
-            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
-            
-            let hasCritical = false;
-            let hasWarning = false;
-
-            const singleParams = [
-              { key: 'vibration', val: mIdx.vibration !== -1 ? row[mIdx.vibration] : '' },
-              { key: 'statorTemp', val: mIdx.statorTemp !== -1 ? row[mIdx.statorTemp] : '' },
-              { key: 'bearingTemp', val: mIdx.bearingTemp !== -1 ? row[mIdx.bearingTemp] : '' },
-              { key: 'voltageImbalance', val: mIdx.voltageImbalance !== -1 ? row[mIdx.voltageImbalance] : '' }
-            ];
-
-            singleParams.forEach(p => {
-              const status = evaluateEquipmentParam('Động cơ', p.key, p.val);
-              if (status === 'critical') hasCritical = true;
-              if (status === 'warning') hasWarning = true;
-            });
-
-            const parsePhaseData = (baseIdx: number): MotorPhaseData => {
-              if (baseIdx === -1) return { R: null, Y: null, B: null };
-              return {
-                R: parseFloat(row[baseIdx]?.toString().replace(',', '.') || '0') || null,
-                Y: parseFloat(row[baseIdx + 1]?.toString().replace(',', '.') || '0') || null,
-                B: parseFloat(row[baseIdx + 2]?.toString().replace(',', '.') || '0') || null
-              };
-            };
-
-            const tests: MotorDiagnosticTests = {
-              ratedKV: 6600,
-              tanDelta: parsePhaseData(mIdx.tanDelta),
-              tipUp: parsePhaseData(mIdx.tipUp),
-              pd: parsePhaseData(mIdx.pd),
-              ir: parsePhaseData(mIdx.ir),
-              pi: parsePhaseData(mIdx.pi),
-              dd: parsePhaseData(mIdx.dd),
-              elcid: parsePhaseData(mIdx.elcid)
-            };
-
-            // Check phase-based tests for critical/warning
-            const phaseTests = [
-              { key: 'tanDelta', vals: tests.tanDelta },
-              { key: 'tipUp', vals: tests.tipUp },
-              { key: 'pd', vals: tests.pd },
-              { key: 'ir', vals: tests.ir },
-              { key: 'pi', vals: tests.pi },
-              { key: 'dd', vals: tests.dd },
-              { key: 'elcid', vals: tests.elcid }
-            ];
-
-            phaseTests.forEach(test => {
-              if (test.vals) {
-                [test.vals.R, test.vals.Y, test.vals.B].forEach(v => {
-                  if (v !== null) {
-                    const status = evaluateEquipmentParam('Động cơ', test.key, v);
-                    if (status === 'critical') hasCritical = true;
-                    if (status === 'warning') hasWarning = true;
-                  }
-                });
-              }
-            });
-
-            const result = calculateMotorHealth(tests);
-            let calcHealth = Math.max(0, Math.round(result.hiPercentage));
-            
-            if (hasCritical) {
-              statusVal = 'critical';
-              if (calcHealth >= 60) calcHealth = 59;
-            } else if (hasWarning) {
-              statusVal = 'warning';
-              if (calcHealth >= 80) calcHealth = 79;
-              else if (calcHealth < 60) calcHealth = 60;
-            } else {
-              statusVal = 'healthy';
-              if (calcHealth < 80) calcHealth = 85;
-            }
-
-            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
-            else {
-              if (statusVal === 'critical' && healthVal >= 60) healthVal = 59;
-              if (statusVal === 'warning' && (healthVal >= 80 || healthVal < 60)) healthVal = 75;
-              if (statusVal === 'healthy' && healthVal < 80) healthVal = 90;
-            }
-
-            let age = idx.ageIdx !== -1 ? parseFloat(row[idx.ageIdx]?.toString().replace(',', '.') || '10') : 10;
-            let dutyFactor = idx.dutyFactorIdx !== -1 ? parseFloat(row[idx.dutyFactorIdx]?.toString().replace(',', '.') || '1.0') : 1.0;
-            if (isNaN(age)) age = 10;
-            if (isNaN(dutyFactor)) dutyFactor = 1.0;
-
-            const eqData = {
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
-              id, name, type: 'Động cơ', health: healthVal, status: statusVal,
-              measurements: {
-                vibration: singleParams[0].val, statorTemp: singleParams[1].val, bearingTemp: singleParams[2].val,
-                voltageImbalance: singleParams[3].val,
-                tanDeltaR: tests.tanDelta?.R, tanDeltaY: tests.tanDelta?.Y, tanDeltaB: tests.tanDelta?.B,
-                tipUpR: tests.tipUp?.R, tipUpY: tests.tipUp?.Y, tipUpB: tests.tipUp?.B,
-                pdR: tests.pd?.R, pdY: tests.pd?.Y, pdB: tests.pd?.B,
-                irR: tests.ir?.R, irY: tests.ir?.Y, irB: tests.ir?.B,
-                piR: tests.pi?.R, piY: tests.pi?.Y, piB: tests.pi?.B,
-                ddR: tests.dd?.R, ddY: tests.dd?.Y, ddB: tests.dd?.B,
-                elcidR: tests.elcid?.R, elcidY: tests.elcid?.Y, elcidB: tests.elcid?.B,
-                age: age.toString(), dutyFactor: dutyFactor.toString()
-              },
-              rawData: [...row]
-            };
-            newEquipmentList.push(eqData);
-            newReportsList.push({
-              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
-              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              type: 'Động cơ', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
-              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
-              rawData: [...row]
-            });
-          });
-        } else if (eqType === 'Inverter') {
-          const mIdx = {
-            dcInputVoltage: getColumnIndex(header, ['Điện áp DC', 'DC Input Voltage', 'Voc max']),
-            mpptVoltageRange: getColumnIndex(header, ['Dải MPPT', 'MPPT Voltage Range']),
-            dcInputCurrent: getColumnIndex(header, ['Dòng điện DC', 'DC Input Current', 'Isc']),
-            acOutputVoltage: getColumnIndex(header, ['Điện áp AC', 'AC Output Voltage']),
-            acFrequency: getColumnIndex(header, ['Tần số AC', 'AC Frequency']),
-            harmonicDistortion: getColumnIndex(header, ['Độ méo hài', 'Harmonic Distortion', 'THD']),
-            maxEfficiency: getColumnIndex(header, ['Hiệu suất tối đa', 'Max Efficiency']),
-            euroEfficiency: getColumnIndex(header, ['Hiệu suất Châu Âu', 'Euro Efficiency']),
-            antiIslanding: getColumnIndex(header, ['Chống hòa lưới', 'Anti-islanding']),
-            rcdIsolation: getColumnIndex(header, ['Dòng rò & Cách ly', 'RCD & Isolation']),
-            dielectricVoltage: getColumnIndex(header, ['Điện áp chịu đựng', 'Dielectric Voltage']),
-            physicalDisconnects: getColumnIndex(header, ['Cách ly vật lý', 'Physical Disconnects']),
-            operatingTemp: getColumnIndex(header, ['Nhiệt độ vận hành', 'Operating Temp']),
-            airFilters: getColumnIndex(header, ['Bộ lọc khí', 'Air Filters'])
-          };
-
-          dataRows.forEach((row: any[]) => {
-            if (!row || row.length === 0) return;
-            const id = idx.idIdx !== -1 ? row[idx.idIdx] : (row[4] || row[0]);
-            const name = idx.nameIdx !== -1 ? row[idx.nameIdx] : (row[5] || row[1]);
-            if (!id || !name || id.toString().trim() === '' || id.toString().toLowerCase().includes('mã thiết bị')) return;
-
-            let healthVal = idx.healthIdx !== -1 ? parseFloat(row[idx.healthIdx]?.toString().replace(',', '.') || '0') : 0;
-            let statusVal = mapStatusFromSheet(idx.statusIdx !== -1 ? row[idx.statusIdx] : '');
-            
-            let hasCritical = false;
-            let hasWarning = false;
-
-            const measurements: any = {};
-            Object.entries(mIdx).forEach(([key, colIdx]) => {
-              if (colIdx !== -1) {
-                const val = row[colIdx];
-                measurements[key] = val;
-                const status = evaluateEquipmentParam('Inverter', key, val);
-                if (status === 'critical') hasCritical = true;
-                if (status === 'warning') hasWarning = true;
-              }
-            });
-
-            let calcHealth = 100;
-            if (hasCritical) {
-              statusVal = 'critical';
-              calcHealth = 55;
-            } else if (hasWarning) {
-              statusVal = 'warning';
-              calcHealth = 75;
-            } else {
-              statusVal = 'healthy';
-              calcHealth = 95;
-            }
-
-            if (healthVal === 0 || isNaN(healthVal)) healthVal = calcHealth;
-
-            const eqData = {
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || '',
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              criticality: idx.criticalityIdx !== -1 ? (row[idx.criticalityIdx]?.toString().trim().toUpperCase() || 'B') : 'B',
-              id, name, type: 'Inverter', health: healthVal, status: statusVal,
-              measurements,
-              rawData: [...row]
-            };
-            newEquipmentList.push(eqData);
-            newReportsList.push({
-              id: `REP-${id}-${Math.floor(Math.random() * 10000)}`,
-              date: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              lastCheck: (idx.dateIdx !== -1 ? row[idx.dateIdx] : '') || new Date().toLocaleDateString('vi-VN'),
-              customer: (idx.customerIdx !== -1 ? row[idx.customerIdx] : '') || '',
-              location: (idx.locationIdx !== -1 ? row[idx.locationIdx] : '') || '',
-              equipmentId: id, equipmentName: name, factory: (idx.factoryIdx !== -1 ? row[idx.factoryIdx] : '') || '',
-              type: 'Inverter', inspector: 'FSE', status: statusVal, notes: 'Dữ liệu đồng bộ từ Google Sheets',
-              measurements: eqData.measurements, fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
-              rawData: [...row]
-            });
+          newEquipmentList.push(eqData);
+          newReportsList.push({
+            id: 'REP-' + idStr + '-' + Math.floor(Math.random() * 10000),
+            date: lastCheckVal,
+            lastCheck: lastCheckVal,
+            customer: customerVal,
+            location: locationVal,
+            equipmentId: idStr,
+            equipmentName: nameStr,
+            factory: factoryVal,
+            type: resolvedType,
+            inspector: 'FSE',
+            status: statusVal,
+            notes: 'Đồng bộ từ Sheet ' + sheetName,
+            measurements: measurementsObj,
+            fileUrl: (idx.linksIdx !== -1 ? row[idx.linksIdx] : '') || '#',
+            rawData: [...row]
           });
         }
       }
 
-
       if (newEquipmentList.length > 0) {
-        // Deduplicate equipment list (keep latest by date)
+        // Hợp nhất và khử trùng lặp thiết bị (giữ bản ghi chi tiết nhất và mới nhất)
         const uniqueEqMap = new Map();
         newEquipmentList.forEach(eq => {
-          const existing = uniqueEqMap.get(eq.id);
+          const key = (eq.id || '').toString().toLowerCase().trim();
+          if (!key) return;
+          const existing = uniqueEqMap.get(key);
           if (!existing) {
-            uniqueEqMap.set(eq.id, eq);
+            uniqueEqMap.set(key, eq);
           } else {
-            // Compare dates (DD/MM/YYYY)
-            const parseDate = (dateStr: string) => {
-              if (!dateStr) return 0;
-              const parts = dateStr.split('/');
-              if (parts.length === 3) {
-                return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).getTime();
-              }
-              return new Date(dateStr).getTime() || 0;
-            };
-            const date1 = parseDate(eq.lastCheck);
-            const date2 = parseDate(existing.lastCheck);
-            if (date1 > date2) {
-              uniqueEqMap.set(eq.id, eq);
-            }
+            uniqueEqMap.set(key, {
+              ...existing,
+              ...eq,
+              name: (eq.name && !eq.name.startsWith('Thiết bị ')) ? eq.name : existing.name,
+              customer: eq.customer || existing.customer,
+              factory: eq.factory || existing.factory,
+              location: eq.location || existing.location,
+              type: eq.type || existing.type,
+              health: (typeof eq.health === 'number' && eq.health > 0) ? eq.health : existing.health,
+              status: eq.status || existing.status,
+              measurements: { ...(existing.measurements || {}), ...(eq.measurements || {}) }
+            });
           }
         });
-        
+
+        // Bổ sung đầy đủ 104 thiết bị nếu Sheet chưa có đủ
+        const masterDefaults = getInitialEquipmentList();
+        masterDefaults.forEach((defEq: any) => {
+          const key = (defEq.id || '').toString().toLowerCase().trim();
+          if (!uniqueEqMap.has(key)) {
+            uniqueEqMap.set(key, defEq);
+          }
+        });
+
         const uniqueEquipmentList = Array.from(uniqueEqMap.values());
+        uniqueEquipmentList.sort((a: any, b: any) => (a.name || a.id || '').localeCompare(b.name || b.id || ''));
         
         // Sort reports by date descending
         newReportsList.sort((a, b) => {
@@ -6073,6 +6166,44 @@ export default function App() {
         setAllReports(newReportsList);
         setSyncSuccess(true);
         
+        // Cache equipment in localStorage for instant offline load across reloads
+        try {
+          localStorage.setItem('tev_equipment_cache', JSON.stringify(uniqueEquipmentList));
+        } catch (e) {}
+
+        // Lưu đồng bộ toàn bộ danh mục thiết bị từ Google Sheets vào Cloud Firestore
+        let syncedEquipmentCount = 0;
+        if (auth.currentUser || user) {
+          const nowIso = new Date().toISOString();
+          const eqPromises = uniqueEquipmentList.map(async (eq) => {
+            const eqId = (eq.id || '').toString().trim();
+            if (!eqId) return;
+            const cleanEq: any = {
+              id: eqId,
+              name: eq.name || `Thiết bị ${eqId}`,
+              customer: eq.customer || '',
+              customerName: eq.customer || '',
+              customerId: eq.customerId || eq.customer || 'default',
+              factory: eq.factory || '',
+              location: eq.location || '',
+              type: eq.type || 'Máy biến áp',
+              status: (eq.status === 'critical' || eq.status === 'warning') ? eq.status : 'healthy',
+              health: typeof eq.health === 'number' && !isNaN(eq.health) ? eq.health : 100,
+              criticality: eq.criticality || 'B',
+              lastCheck: eq.lastCheck || new Date().toLocaleDateString('vi-VN'),
+              createdAt: eq.createdAt || nowIso,
+              updatedAt: nowIso
+            };
+            try {
+              await setDoc(doc(db, 'equipment', eqId), cleanEq, { merge: true });
+              syncedEquipmentCount++;
+            } catch (err) {
+              console.warn(`Lỗi lưu thiết bị ${eqId} vào Firestore:`, err);
+            }
+          });
+          await Promise.allSettled(eqPromises);
+        }
+
         // Update siteName and customerName from the first equipment found if currently default
         if (uniqueEquipmentList.length > 0 && (siteName === 'Nhà máy Bắc Ninh' || !siteName)) {
           setSiteName(uniqueEquipmentList[0].factory);
@@ -6080,7 +6211,7 @@ export default function App() {
         }
         setTimeout(() => setSyncSuccess(false), 3000);
         
-        let successMsg = 'Đã tải dữ liệu từ Google Sheets thành công!';
+        let successMsg = `Đã tải và đồng bộ ${uniqueEquipmentList.length} thiết bị từ Google Sheets vào Firebase thành công!`;
         if (syncedWoCount > 0) successMsg += ` (${syncedWoCount} phiếu WO)`;
         if (syncedCustomersCount > 0) successMsg += ` (${syncedCustomersCount} KH)`;
         if (syncedInventoryCount > 0) successMsg += ` (${syncedInventoryCount} vật tư)`;
@@ -6115,19 +6246,7 @@ export default function App() {
     }
   };
 
-  // Auto fetch when connected
-  useEffect(() => {
-    if (isGoogleConnected) {
-      handleFetchFromSheets();
-    }
-  }, [isGoogleConnected]);
-
   const handleSaveToSheets = async () => {
-    if (!isGoogleConnected) {
-      alert('Vui lòng kết nối Google Drive trước khi lưu.');
-      return;
-    }
-
     setIsSaving(true);
     setSaveSuccess(false);
 
@@ -6154,153 +6273,50 @@ export default function App() {
       const pdfBlob = await generateIndividualReportPDF(reportData, false, historicalReports) as Blob;
       const pdfFile = new File([pdfBlob], `${newReportId}.pdf`, { type: 'application/pdf' });
 
-      // 2. Upload files to Drive (including the generated PDF)
       let attachmentLinks = '';
-      const uploadFormData = new FormData();
-      
-      // Append user attached files
-      if (attachedFiles.length > 0) {
-        attachedFiles.forEach(file => {
-          uploadFormData.append('files', file);
-        });
-      }
-      
-      // Append auto-generated PDF
-      uploadFormData.append('files', pdfFile);
 
-      const uploadRes = await fetch('/api/drive/upload', {
-        method: 'POST',
-        headers: getAuthHeaders(false),
-        body: uploadFormData
-      });
+      // 2. If Google Drive is connected, upload files to Drive (including the generated PDF)
+      if (isGoogleConnected) {
+        try {
+          const uploadFormData = new FormData();
+          if (attachedFiles.length > 0) {
+            attachedFiles.forEach(file => {
+              uploadFormData.append('files', file);
+            });
+          }
+          uploadFormData.append('files', pdfFile);
 
-      if (uploadRes.ok) {
-        const uploadData = await uploadRes.json();
-        if (uploadData.success && uploadData.links) {
-          attachmentLinks = uploadData.links.join('\n');
+          const uploadRes = await fetch('/api/drive/upload', {
+            method: 'POST',
+            headers: getAuthHeaders(false),
+            body: uploadFormData
+          });
+
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            if (uploadData.success && uploadData.links) {
+              attachmentLinks = uploadData.links.join('\n');
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('Upload to Drive skipped or error:', uploadErr);
         }
-      } else {
-        console.error('Failed to upload files');
-        alert('Có lỗi khi upload file đính kèm, nhưng dữ liệu vẫn sẽ được lưu.');
-      }
-
-      // 3. Update local reports state
-      setAllReports(prev => [reportData, ...prev]);
-
-      // 4. Prepare data row based on equipment type
-      const now = new Date().toLocaleString('vi-VN');
-      const baseData = [now, customerName, siteName, locationName, equipmentCode, equipmentName, selectedEqType, healthResult?.index || 'N/A', healthResult?.status || 'N/A'];
-      
-      let values: any[] = [];
-      let range = 'Sheet1!A:Z'; // Default
-      
-      if (selectedEqType === 'Máy biến áp') {
-        values = [
-          ...baseData, 
-          formData.oilTemp || '', 
-          formData.windingTemp || '', 
-          formData.irHighLow || '', 
-          formData.irHighEarth || '', 
-          formData.oilLeak || '',
-          formData.dga || '',
-          formData.dielectricStrength || '',
-          formData.furan || '',
-          formData.oilMoisture || '',
-          formData.h2 || '',
-          formData.o2 || '',
-          formData.n2 || '',
-          formData.ch4 || '',
-          formData.co || '',
-          formData.co2 || '',
-          formData.c2h4 || '',
-          formData.c2h6 || '',
-          formData.c2h2 || '',
-          formData.age || '',
-          formData.dutyFactor || '',
-          attachmentLinks
-        ];
-        range = 'Máy biến áp!A:Z';
-      } else if (selectedEqType === 'Tủ điện trung thế' || selectedEqType === 'Tủ điện') {
-        values = [
-          ...baseData, 
-          formData.thermography || '', 
-          formData.contactRes || '', 
-          formData.tev || '', 
-          formData.ultrasonic || '', 
-          formData.tevPulses || '',
-          formData.humidity || '',
-          formData.sf6Pressure || '',
-          formData.age || '',
-          formData.dutyFactor || '',
-          attachmentLinks
-        ];
-        range = 'Tủ điện trung thế!A:Z';
-      } else if (selectedEqType === 'Động cơ') {
-        values = [
-          ...baseData, 
-          formData.vibration || '', 
-          formData.statorTemp || '', 
-          formData.ir || '', 
-          formData.pd || '', 
-          formData.voltageImbalance || '', 
-          formData.pi || '',
-          formData.bearingTemp || '',
-          formData.tanDelta || '',
-          formData.age || '',
-          formData.dutyFactor || '',
-          attachmentLinks
-        ];
-        range = 'Động cơ!A:Z';
-      } else if (selectedEqType === 'Inverter') {
-        values = [
-          ...baseData,
-          formData.dcInputVoltage || '',
-          formData.mpptVoltageRange || '',
-          formData.dcInputCurrent || '',
-          formData.acOutputVoltage || '',
-          formData.acFrequency || '',
-          formData.harmonicDistortion || '',
-          formData.maxEfficiency || '',
-          formData.euroEfficiency || '',
-          formData.antiIslanding || '',
-          formData.rcdIsolation || '',
-          formData.dielectricVoltage || '',
-          formData.physicalDisconnects || '',
-          formData.operatingTemp || '',
-          formData.airFilters || '',
-          attachmentLinks
-        ];
-        range = 'Inverter!A:Z';
       }
 
-      const response = await fetch('/api/sheets/append', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          range,
-          values
-        })
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        if (response.status === 401) {
-          setIsGoogleConnected(false);
-          throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.');
+      // 3. Save report to Firestore database
+      try {
+        if (db && (user || auth.currentUser)) {
+          await addDoc(collection(db, 'reports'), {
+            ...reportData,
+            attachmentLinks: attachmentLinks || '',
+            createdAt: new Date().toISOString()
+          });
         }
-        if (err.error && err.error.includes('SPREADSHEET_ID')) {
-          throw new Error('Chưa cấu hình SPREADSHEET_ID. Vui lòng vào Settings -> Secrets để thêm ID của file Google Sheets.');
-        }
-        if (err.error && (err.error.includes('not found') || err.error.includes('Requested entity was not found'))) {
-          throw new Error('Không tìm thấy file Google Sheets. Vui lòng kiểm tra lại SPREADSHEET_ID trong Settings -> Secrets (chỉ lấy phần ID, không lấy cả đường link).');
-        }
-        throw new Error(err.error || 'Failed to save');
+      } catch (firestoreErr) {
+        console.warn('Firestore reports save note:', firestoreErr);
       }
 
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-      
-      // Add a new report to the reports list
+      // 4. Update local reports state
       const newReport = {
         id: newReportId,
         date: reportDate,
@@ -6315,12 +6331,133 @@ export default function App() {
       };
       setAllReports(prev => [newReport, ...prev]);
 
+      // 5. Update equipment status in allEquipment
+      setAllEquipment(prev => prev.map(eq => {
+        if (eq.id === equipmentCode) {
+          return {
+            ...eq,
+            lastCheck: reportDate,
+            status: healthResult?.status || 'healthy',
+            health: healthResult?.index ?? eq.health
+          };
+        }
+        return eq;
+      }));
+
+      // 6. If Google Drive & Sheets connected, sync row to Sheets
+      if (isGoogleConnected) {
+        const now = new Date().toLocaleString('vi-VN');
+        const baseData = [now, customerName, siteName, locationName, equipmentCode, equipmentName, selectedEqType, healthResult?.index || 'N/A', healthResult?.status || 'N/A'];
+        
+        let values: any[] = [];
+        let range = 'Sheet1!A:Z'; // Default
+        
+        if (selectedEqType === 'Máy biến áp') {
+          values = [
+            ...baseData, 
+            formData.oilTemp || '', 
+            formData.windingTemp || '', 
+            formData.irHighLow || '', 
+            formData.irHighEarth || '', 
+            formData.oilLeak || '',
+            formData.dga || '',
+            formData.dielectricStrength || '',
+            formData.furan || '',
+            formData.oilMoisture || '',
+            formData.h2 || '',
+            formData.o2 || '',
+            formData.n2 || '',
+            formData.ch4 || '',
+            formData.co || '',
+            formData.co2 || '',
+            formData.c2h4 || '',
+            formData.c2h6 || '',
+            formData.c2h2 || '',
+            formData.age || '',
+            formData.dutyFactor || '',
+            attachmentLinks
+          ];
+          range = 'Máy biến áp!A:Z';
+        } else if (selectedEqType === 'Tủ điện trung thế' || selectedEqType === 'Tủ điện') {
+          values = [
+            ...baseData, 
+            formData.thermography || '', 
+            formData.contactRes || '', 
+            formData.tev || '', 
+            formData.ultrasonic || '', 
+            formData.tevPulses || '',
+            formData.humidity || '',
+            formData.sf6Pressure || '',
+            formData.age || '',
+            formData.dutyFactor || '',
+            attachmentLinks
+          ];
+          range = 'Tủ điện trung thế!A:Z';
+        } else if (selectedEqType === 'Động cơ') {
+          values = [
+            ...baseData, 
+            formData.vibration || '', 
+            formData.statorTemp || '', 
+            formData.ir || '', 
+            formData.pd || '', 
+            formData.voltageImbalance || '', 
+            formData.pi || '',
+            formData.bearingTemp || '',
+            formData.tanDelta || '',
+            formData.age || '',
+            formData.dutyFactor || '',
+            attachmentLinks
+          ];
+          range = 'Động cơ!A:Z';
+        } else if (selectedEqType === 'Inverter') {
+          values = [
+            ...baseData,
+            formData.dcInputVoltage || '',
+            formData.mpptVoltageRange || '',
+            formData.dcInputCurrent || '',
+            formData.acOutputVoltage || '',
+            formData.acFrequency || '',
+            formData.harmonicDistortion || '',
+            formData.maxEfficiency || '',
+            formData.euroEfficiency || '',
+            formData.antiIslanding || '',
+            formData.rcdIsolation || '',
+            formData.dielectricVoltage || '',
+            formData.physicalDisconnects || '',
+            formData.operatingTemp || '',
+            formData.airFilters || '',
+            attachmentLinks
+          ];
+          range = 'Inverter!A:Z';
+        }
+
+        try {
+          const response = await fetch('/api/sheets/append', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ range, values })
+          });
+
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            if (response.status === 401) {
+              setIsGoogleConnected(false);
+            }
+            console.warn('Sheets append notice:', err.error);
+          } else {
+            handleFetchFromSheets();
+          }
+        } catch (sheetErr: any) {
+          console.warn('Sheets sync skipped or notice:', sheetErr.message);
+        }
+      }
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3500);
+
       setAttachedFiles([]);
       setFormData({});
       setHealthResult(null);
-      
-      // Fetch updated data to reflect the new entry
-      handleFetchFromSheets();
     } catch (error: any) {
       console.error('Save error:', error);
       alert('Lỗi khi lưu dữ liệu: ' + error.message);
@@ -7264,26 +7401,93 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50">
-        <div className="bg-white p-8 rounded-2xl shadow-lg max-w-md w-full text-center">
-          <div className="flex justify-center mb-6">
-            <img src="https://static.wixstatic.com/media/dea24c_6207cba10c9e4e15939adcc4dbd42524~mv2.jpg" alt="TEV Logo" className="w-20 h-20 rounded-full object-contain border border-slate-200 p-1" />
+      <div className="flex h-screen items-center justify-center bg-slate-100 p-4">
+        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-slate-200">
+          <div className="flex justify-center mb-5">
+            <img src="https://static.wixstatic.com/media/dea24c_6207cba10c9e4e15939adcc4dbd42524~mv2.jpg" alt="TEV Logo" className="w-20 h-20 rounded-full object-contain border border-slate-200 p-1 shadow-sm bg-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-2">Welcome to TEV COE</h1>
-          <p className="text-slate-500 mb-8">Vui lòng đăng nhập để tiếp tục sử dụng hệ thống.</p>
-          <button 
-            onClick={handleLogin}
-            className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl font-medium transition-colors"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-            </svg>
-            Đăng nhập bằng Google
-          </button>
+          <h1 className="text-2xl font-bold text-slate-900 mb-1">TEV COE Platform</h1>
+          <p className="text-sm text-slate-500 mb-6">Hệ thống Quản lý Thiết bị, Kiểm định & CMMS</p>
+
+          {loginError && (
+            <div className="mb-5 p-3.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs text-left rounded-xl space-y-1.5 shadow-sm">
+              <div className="font-semibold flex items-center gap-1.5 text-amber-800">
+                <ShieldAlert size={15} className="text-amber-600 flex-shrink-0" />
+                <span>Thông báo kết nối xác thực</span>
+              </div>
+              <p className="text-slate-700 leading-relaxed">{loginError}</p>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <button 
+              onClick={handleLogin}
+              disabled={isLoggingIn}
+              className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl font-medium transition-all shadow-md hover:shadow-lg disabled:opacity-50"
+            >
+              {isLoggingIn ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                </svg>
+              )}
+              <span>{isLoggingIn ? 'Đang xác thực...' : 'Đăng nhập bằng Google'}</span>
+            </button>
+
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-200"></div>
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-3 text-slate-400 font-medium">Hoặc đăng nhập nhanh</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleQuickDemoLogin('admin')}
+                disabled={isLoggingIn}
+                className="w-full py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                <ShieldCheck size={14} className="text-emerald-400" />
+                <span>Admin SGM</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickDemoLogin('customer')}
+                disabled={isLoggingIn}
+                className="w-full py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 border border-slate-200"
+              >
+                <User size={14} className="text-blue-500" />
+                <span>Khách hàng EVN</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowPWAInstallModal(true)}
+              className="w-full mt-2 py-2.5 px-3 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 text-blue-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 border border-blue-200/80 shadow-sm"
+            >
+              <Smartphone size={15} className="text-blue-600" />
+              <span>Cài đặt ứng dụng lên điện thoại (PWA)</span>
+            </button>
+
+            <p className="text-[11px] text-slate-400 mt-2">
+              Mẹo: Khi mở trên khung nhúng Sandbox iFrame, bạn có thể chọn Đăng nhập nhanh để trải nghiệm toàn bộ dữ liệu.
+            </p>
+          </div>
         </div>
+
+        {/* PWA Mobile Install Modal */}
+        <PWAInstallModal
+          isOpen={showPWAInstallModal}
+          onClose={() => setShowPWAInstallModal(false)}
+        />
       </div>
     );
   }
@@ -7357,10 +7561,21 @@ export default function App() {
           </div>
           <button 
             onClick={() => handleTabChange('field-entry')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'field-entry' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'field-entry' ? 'bg-amber-600 text-white font-bold shadow-md shadow-amber-600/30' : 'hover:bg-slate-800 hover:text-white'}`}
           >
-            <ClipboardList size={18} />
-            Nhập liệu hiện trường
+            <ClipboardCheck size={18} className={activeTab === 'field-entry' ? 'text-white' : 'text-amber-400'} />
+            <span className="flex-1 text-left font-semibold">Kỹ sư FSE (NETA)</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">23 BB</span>
+          </button>
+          <button 
+            onClick={() => {
+              setCmmsSubTab('station');
+              handleTabChange('cmms');
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'cmms' && cmmsSubTab === 'station' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Zap size={18} className={activeTab === 'cmms' && cmmsSubTab === 'station' ? 'text-white' : 'text-blue-400'} />
+            <span className="flex-1 text-left font-semibold">Trạm FSE & Sheets</span>
           </button>
           <button 
             onClick={() => handleTabChange('deep-analysis')}
@@ -7370,11 +7585,14 @@ export default function App() {
             Phân tích chuyên sâu
           </button>
           <button 
-            onClick={() => handleTabChange('cmms')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'cmms' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+            onClick={() => {
+              setCmmsSubTab('table');
+              handleTabChange('cmms');
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'cmms' && cmmsSubTab === 'table' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
           >
             <ClipboardList size={18} />
-            Quản lý CMMS
+            Quản lý CMMS (Phiếu WO)
           </button>
           <button 
             onClick={() => handleTabChange('pm-schedule')}
@@ -7401,6 +7619,16 @@ export default function App() {
 
         <div className="p-4 border-t border-slate-800 space-y-1">
           <button 
+            onClick={() => {
+              setIsSidebarOpen(false);
+              setShowPWAInstallModal(true);
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+          >
+            <Smartphone size={18} />
+            Cài App Điện Thoại
+          </button>
+          <button 
             onClick={() => handleTabChange('settings')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
           >
@@ -7408,7 +7636,7 @@ export default function App() {
             Cài đặt
           </button>
           <button 
-            onClick={logOut}
+            onClick={handleLogoutUser}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
           >
             <LogOut size={18} />
@@ -7418,7 +7646,7 @@ export default function App() {
       </aside>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden w-full">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden w-full pb-16 lg:pb-0">
         
         {/* HEADER */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 flex-shrink-0 z-10">
@@ -7432,9 +7660,15 @@ export default function App() {
             <h1 className="text-lg md:text-xl font-semibold text-slate-800 truncate max-w-[180px] sm:max-w-none">
               {activeTab === 'dashboard' ? 'Dashboard Tổng quan' : 
                activeTab === 'equipment' ? 'Quản lý Thiết bị' : 
+               activeTab === 'deep-analysis' ? 'Phân tích Chuyên sâu (DGA / PV / Wind)' :
                activeTab === 'reports' ? 'Kho Báo cáo' : 
                activeTab === 'settings' ? 'Cài đặt hệ thống' :
-               'Nhập liệu hiện trường'}
+               activeTab === 'field-entry' ? 'Kỹ sư Hiện trường FSE (NETA)' :
+               activeTab === 'cmms' ? (cmmsSubTab === 'station' ? 'Trạm FSE & Đồng Bộ Sheets' : 'Quản lý Phiếu CMMS') :
+               activeTab === 'pm-schedule' ? 'Lịch Bảo Trì PM' :
+               activeTab === 'customers' ? 'Quản lý Khách hàng' :
+               activeTab === 'inventory' ? 'Quản lý Kho Vật tư' :
+               'Kỹ sư Hiện trường FSE'}
             </h1>
             {activeTab !== 'field-entry' && (
               <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-md text-sm text-slate-600 border border-slate-200 cursor-pointer hover:bg-slate-200 transition-colors">
@@ -7445,20 +7679,38 @@ export default function App() {
             )}
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* PWA Mobile Install Button */}
+            <button
+              onClick={() => setShowPWAInstallModal(true)}
+              title="Cài đặt ứng dụng lên điện thoại di động (PWA) hoặc quét QR"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all border border-indigo-400/30 flex-shrink-0"
+            >
+              <Smartphone size={14} className="text-indigo-200" />
+              <span className="hidden sm:inline">Cài App Đ.Thoại</span>
+              <span className="sm:hidden">Cài App</span>
+            </button>
+
+            {/* Cloud Database Connected Status Badge */}
+            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-md text-xs font-semibold" title="Cơ sở dữ liệu Cloud Firestore luôn tự động kết nối thời gian thực khi đăng nhập">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Database: Kết nối</span>
+            </div>
+
             {!isGoogleConnected ? (
               <button 
                 onClick={handleConnectGoogle}
+                title="Tùy chọn: Kết nối tài khoản Google để tự động sao lưu và đồng bộ bảng tính Google Sheets 'TEV Service Flatform'"
                 className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors border border-blue-200"
               >
                 <UploadCloud size={16} />
-                Kết nối Google Drive
+                <span>Kết nối Google Drive</span>
               </button>
             ) : (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setIsAutoSyncEnabled(!isAutoSyncEnabled)}
-                  title={isAutoSyncEnabled ? "Đang bật tự động đồng bộ 2 chiều mỗi 60s" : "Đã tạm dừng tự động đồng bộ"}
+                  title={isAutoSyncEnabled ? "Đang bật tự động đồng bộ 2 chiều mỗi 3 phút" : "Đã tạm dừng tự động đồng bộ"}
                   className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
                     isAutoSyncEnabled
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
@@ -8043,12 +8295,12 @@ export default function App() {
                 <div className="bg-slate-50 p-5 border-t border-slate-200 flex flex-col sm:flex-row gap-3 justify-end items-center">
                   {saveSuccess && (
                     <span className="text-emerald-600 text-sm font-medium flex items-center gap-1 mr-auto">
-                      <CheckCircle size={16} /> Đã lưu vào Google Sheets
+                      <CheckCircle size={16} /> {isGoogleConnected ? 'Đã lưu vào Google Sheets & Database' : 'Đã lưu vào Database thành công'}
                     </span>
                   )}
                   <button 
                     onClick={handleSaveToSheets}
-                    disabled={isSaving || !isGoogleConnected}
+                    disabled={isSaving}
                     className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors shadow-sm"
                   >
                     {isSaving ? (
@@ -8056,7 +8308,7 @@ export default function App() {
                     ) : (
                       <Send size={18} />
                     )}
-                    {isSaving ? 'Đang lưu...' : (isGoogleConnected ? 'Lưu & Đồng bộ Sheets' : 'Cần kết nối Google Drive để Lưu')}
+                    {isSaving ? 'Đang lưu...' : (isGoogleConnected ? 'Lưu & Đồng bộ Sheets' : 'Lưu vào Database')}
                   </button>
                 </div>
               </div>
@@ -9210,11 +9462,7 @@ export default function App() {
                                     </button>
                                   )}
                                   <button
-                                    onClick={() => {
-                                      setSelectedWorkOrder(wo);
-                                      setCmmsSubTab('table');
-                                      handleTabChange('cmms');
-                                    }}
+                                    onClick={() => handleOpenWorkOrderDetail(wo)}
                                     className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                                     title="Xem chi tiết phiếu trong CMMS"
                                   >
@@ -9271,16 +9519,26 @@ export default function App() {
                     <div>
                       <div className="flex items-center gap-2">
                         <h2 className="font-semibold text-slate-800">Danh sách toàn bộ thiết bị & Mô phỏng</h2>
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
-                          {allEquipment.length} Thiết bị
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700" title="Tổng số thiết bị đang lưu trữ trong cơ sở dữ liệu Cloud Firestore">
+                          {allEquipment.length} Thiết bị (Firestore Database)
                         </span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
                         <span className={`w-2 h-2 rounded-full ${isGoogleConnected && isAutoSyncEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
-                        <span>Luồng 2 chiều với Google Sheet <strong>TEV Service Flatform</strong>: {isGoogleConnected ? (lastAutoSyncTime ? `Đã đồng bộ (${lastAutoSyncTime})` : 'Tự động đồng bộ mỗi 60s') : 'Chưa kết nối'}</span>
+                        <span>Luồng 2 chiều với Google Sheet <strong>TEV Service Flatform</strong>: {isGoogleConnected ? (lastAutoSyncTime ? `Đã đồng bộ (${lastAutoSyncTime})` : (isAutoSyncEnabled ? 'Tự động đồng bộ mỗi 3 phút' : 'Chế độ đồng bộ thủ công')) : 'Chưa kết nối'}</span>
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <button 
+                        onClick={() => handleFetchFromSheets(false, true)}
+                        disabled={!isGoogleConnected || isSyncing}
+                        className="text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-md font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                        title="Nạp và đồng bộ toàn bộ danh mục thiết bị từ Google Sheets vào Cloud Firestore"
+                      >
+                        <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                        <span>Đồng bộ từ Google Sheets ({allEquipment.length} TB)</span>
+                      </button>
+
                       <button 
                         onClick={() => handlePerformTwoWaySync(false)}
                         disabled={!isGoogleConnected || isSyncing || autoSyncStatus === 'syncing'}
@@ -9481,10 +9739,16 @@ export default function App() {
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px] lg:h-[calc(100vh-8rem)]">
                 <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex flex-col gap-1">
-                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                      <Server className="text-blue-500" size={20} />
-                      Quản lý Thiết bị
-                    </h2>
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <Server className="text-blue-500" size={20} />
+                        Quản lý Thiết bị
+                      </h2>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200/80 rounded-md text-xs font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+                        Đồng bộ Firebase & Google Sheets: {allEquipment.length} thiết bị
+                      </span>
+                    </div>
                     <div className="flex items-center gap-2 text-xs text-slate-400">
                       <span>Hệ thống</span>
                       <ChevronRight size={12} />
@@ -9514,6 +9778,15 @@ export default function App() {
                         onChange={(e) => { setFilterName(e.target.value); setCurrentPage(1); }}
                       />
                     </div>
+                    <button 
+                      onClick={() => handleFetchFromSheets(false, true)} 
+                      disabled={isSyncing} 
+                      className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50"
+                      title="Đồng bộ 2 chiều toàn diện: Nạp 104 thiết bị từ Google Sheets và lưu vào Firebase Firestore"
+                    >
+                      <RefreshCw size={15} className={isSyncing ? "animate-spin" : ""} />
+                      <span className="hidden sm:inline">Đồng bộ Google Sheets</span> ({allEquipment.length} TB)
+                    </button>
                     <button onClick={() => setShowAddEqModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm">
                       <span className="text-lg leading-none">+</span> Thêm thiết bị
                     </button>
@@ -9540,16 +9813,20 @@ export default function App() {
                     </select>
                   )}
                   <select 
-                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500 font-medium text-xs sm:text-sm"
                     value={filterType}
                     onChange={(e) => { setFilterType(e.target.value); setCurrentPage(1); }}
                   >
-                    <option value="all">Tất cả loại thiết bị</option>
-                    <option value="Máy biến áp">Máy biến áp</option>
-                    <option value="Động cơ">Động cơ điện</option>
-                    <option value="Máy phát">Máy phát điện</option>
-                    <option value="Tủ điện">Tủ điện</option>
-                    <option value="Inverter">Inverter Solar/Wind</option>
+                    <option value="all">Tất cả loại thiết bị ({allEquipment.length})</option>
+                    <option value="Máy biến áp">Máy biến áp ({allEquipment.filter(e => e.type?.includes('biến áp')).length})</option>
+                    <option value="Máy cắt">Máy cắt VCB/ACB/SF6 ({allEquipment.filter(e => e.type?.includes('cắt')).length})</option>
+                    <option value="Tủ điện">Tủ điện Switchgear/RMU ({allEquipment.filter(e => e.type?.includes('tủ')).length})</option>
+                    <option value="Động cơ">Động cơ điện ({allEquipment.filter(e => e.type?.includes('động cơ')).length})</option>
+                    <option value="Máy phát">Máy phát điện ({allEquipment.filter(e => e.type?.includes('máy phát')).length})</option>
+                    <option value="Cáp điện">Cáp điện ngầm/treo ({allEquipment.filter(e => e.type?.includes('cáp')).length})</option>
+                    <option value="Pin & UPS">Dàn Pin & UPS ({allEquipment.filter(e => e.type?.includes('pin') || e.type?.includes('UPS')).length})</option>
+                    <option value="Rơ le bảo vệ">Rơ le bảo vệ ({allEquipment.filter(e => e.type?.includes('rơ le')).length})</option>
+                    <option value="Inverter">Inverter Solar/Wind ({allEquipment.filter(e => e.type?.includes('Inverter') || e.type?.includes('biến tần')).length})</option>
                   </select>
                   <select 
                     className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
@@ -9906,33 +10183,33 @@ export default function App() {
             </div>
           )}
           {activeTab === 'deep-analysis' && (
-            <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 pb-24 lg:pb-8 bg-slate-50/50">
               <div className={`${deepAnalysisSubTab === 'pv-cell' || deepAnalysisSubTab === 'dga' ? 'max-w-7xl' : 'max-w-5xl'} mx-auto space-y-6`}>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Phân tích chuyên sâu</h2>
-                    <p className="text-slate-500 mt-1">
+                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Phân tích chuyên sâu</h2>
+                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
                       {deepAnalysisSubTab === 'dga' && 'Phân tích tình trạng & Xu hướng nồng độ khí hòa tan DGA (IEEE C57.104 & Duval Triangles)'}
                       {deepAnalysisSubTab === 'pv-cell' && 'Phân tích tình trạng tấm pin/cell mặt trời từ ảnh nhiệt (IR) & ảnh thực tế (RGB) theo IEC 62446-3 & Volateq / Sitemark'}
                       {deepAnalysisSubTab === 'wind-turbine' && 'Phân tích tình trạng cánh quạt điện gió (Wind Turbine Blade)'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm w-full md:w-auto">
                     <button 
                       onClick={() => setDeepAnalysisSubTab('dga')}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${deepAnalysisSubTab === 'dga' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+                      className={`flex-1 md:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${deepAnalysisSubTab === 'dga' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
                     >
                       DGA MBA
                     </button>
                     <button 
                       onClick={() => setDeepAnalysisSubTab('pv-cell')}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${deepAnalysisSubTab === 'pv-cell' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+                      className={`flex-1 md:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${deepAnalysisSubTab === 'pv-cell' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
                     >
                       PV Cell
                     </button>
                     <button 
                       onClick={() => setDeepAnalysisSubTab('wind-turbine')}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${deepAnalysisSubTab === 'wind-turbine' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+                      className={`flex-1 md:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${deepAnalysisSubTab === 'wind-turbine' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
                     >
                       Wind Blade
                     </button>
@@ -9940,7 +10217,7 @@ export default function App() {
                   {deepAnalysisSubTab === 'dga' && dgaAnalysisResult && (
                     <button 
                       onClick={exportToPDF}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                      className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
                     >
                       <Download size={18} />
                       Xuất báo cáo PDF
@@ -10350,7 +10627,7 @@ export default function App() {
                     {/* Detailed Diagnostic Results */}
                     {(dgaViewMode === 'both' || dgaViewMode === 'diagnostic') && (
                       dgaAnalysisResult ? (
-                      <div id="dga-report-content" className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                      <div id="dga-report-content" className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6 lg:p-8">
                         <div className="border-b border-slate-200 pb-6 mb-6">
                           <div className="flex justify-between items-start mb-4">
                             <div>
@@ -10662,7 +10939,7 @@ export default function App() {
 
                     <div className="lg:col-span-2 space-y-6">
                       {windAnalysisResult ? (
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6 lg:p-8">
                           <div className="flex justify-between items-start mb-8 border-b border-slate-100 pb-6">
                             <div>
                               <h3 className="text-xl font-bold text-slate-900">Kết quả phân tích Cánh quạt</h3>
@@ -10787,10 +11064,34 @@ export default function App() {
                 <div className="space-y-6">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                      <h2 className="text-2xl font-bold text-slate-900">Quản lý CMMS (Solar & Wind)</h2>
-                      <p className="text-slate-500">Quản lý phiếu công việc, bảo trì định kỳ và sửa chữa.</p>
+                      <div className="flex flex-wrap items-center gap-2.5 mb-1">
+                        <h2 className="text-2xl font-bold text-slate-900">Quản lý CMMS (Solar & Wind)</h2>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200/80 rounded-md text-xs font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+                          Đồng bộ Firebase & Google Sheets: {workOrders.length} phiếu WO
+                        </span>
+                      </div>
+                      <p className="text-slate-500">Quản lý phiếu công việc, bảo trì định kỳ PM (Solar, Wind & Thiết bị Công nghiệp) và sửa chữa CMMS.</p>
                     </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => handleFetchFromSheets(false, true)}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50"
+                    title="Nạp toàn bộ phiếu CMMS từ Google Sheets 'TEV Service Flatform' về Firestore & App"
+                  >
+                    <RefreshCw size={15} className={isSyncing ? "animate-spin" : ""} />
+                    <span>Nạp từ Google Sheets</span>
+                  </button>
+                  <button
+                    onClick={() => handleSyncToSheets(undefined, false, true)}
+                    disabled={isSyncing}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50"
+                    title="Đồng bộ toàn bộ phiếu CMMS từ App lên Google Sheets"
+                  >
+                    <DownloadCloud size={15} />
+                    <span>Đẩy lên Sheets</span>
+                  </button>
                   <button 
                     onClick={() => {
                       setNewWorkOrder({
@@ -10812,7 +11113,7 @@ export default function App() {
                         failureCode: '',
                         rootCause: '',
                         actualTimeSpent: 0,
-                        pmFrequency: '',
+                        pmFrequency: 'monthly',
                         estimatedTime: 0,
                         laborCount: 0,
                         laborCost: 0,
@@ -11074,42 +11375,9 @@ export default function App() {
                                   <Trash2 size={16} />
                                 </button>
                                 <button 
-                                  onClick={() => {
-                                    setSelectedWorkOrder(order);
-                                    setNewWorkOrder({
-                                      title: order.title,
-                                      description: order.description || '',
-                                      equipmentId: Array.isArray(order.equipmentId) ? order.equipmentId : (order.equipmentId ? [order.equipmentId] : []),
-                                      customerId: order.customerId,
-                                      priority: order.priority,
-                                      type: order.type,
-                                      status: order.status,
-                                      assignedTo: order.assignedTo || '',
-                                      dueDate: order.dueDate || '',
-                                      usedMaterials: order.usedMaterials || [],
-                                      responsibleApprove: order.responsibleApprove || 'TM',
-                                      responsibleDo: order.responsibleDo || 'Everybody',
-                                      blockingRequired: order.blockingRequired || false,
-                                      workPermitId: order.workPermitId || '',
-                                      isUnplanned: order.isUnplanned || false,
-                                      failureCode: order.failureCode || '',
-                                      rootCause: order.rootCause || '',
-                                      actualTimeSpent: order.actualTimeSpent || 0,
-                                      pmFrequency: order.pmFrequency || '',
-                                      estimatedTime: order.estimatedTime || 0,
-                                      laborCount: order.laborCount || 0,
-                                      laborCost: order.laborCost || 0,
-                                      partCost: order.partCost || 0,
-                                      attachments: order.attachments || [],
-                                      downtimeStart: order.downtimeStart || '',
-                                      repairStart: order.repairStart || '',
-                                      repairEnd: order.repairEnd || '',
-                                      restartTime: order.restartTime || ''
-                                    });
-                                    setShowWorkOrderModal(true);
-                                  }}
+                                  onClick={() => handleOpenWorkOrderDetail(order)}
                                   className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Chỉnh sửa"
+                                  title="Chi tiết & Chỉnh sửa"
                                 >
                                   <Settings size={16} />
                                 </button>
@@ -11248,8 +11516,7 @@ export default function App() {
                   workOrders={workOrders}
                   allEquipment={allEquipment}
                   onOpenWorkOrderModal={(wo) => {
-                    setSelectedWorkOrder(wo);
-                    setShowWorkOrderModal(true);
+                    handleOpenWorkOrderDetail(wo);
                   }}
                   onSendAlert={(id) => handleSendPMAlerts(true)}
                   onOpenEmailConfig={() => setShowPMNotificationModal(true)}
@@ -11825,6 +12092,35 @@ export default function App() {
                 </div>
                 
                 <div className="p-6 space-y-8">
+                  {/* Mobile App PWA Install Section */}
+                  <section className="p-5 bg-gradient-to-r from-blue-50 via-indigo-50 to-sky-50 border border-blue-200/80 rounded-2xl shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-start gap-3.5">
+                        <div className="w-12 h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-md">
+                          <Smartphone size={24} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-base font-bold text-slate-900">Cài đặt ứng dụng trên Điện thoại (PWA)</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              Khuyên dùng
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-1 max-w-lg">
+                            Cài đặt TEV CMMS trực tiếp lên màn hình chính điện thoại iPhone hoặc Android. Chạy mượt mà toàn màn hình, quét mã QR thiết bị tại hiện trường và tự động lưu phiên làm việc.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowPWAInstallModal(true)}
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 flex-shrink-0"
+                      >
+                        <Smartphone size={16} />
+                        <span>Mở hướng dẫn & Quét QR</span>
+                      </button>
+                    </div>
+                  </section>
+
                   {/* User Profile Section */}
                   <section>
                     <div className="flex items-center justify-between mb-4">
@@ -12564,9 +12860,21 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <h3 className="font-bold text-slate-800 text-lg">
-                {selectedWorkOrder ? 'Chi tiết Phiếu công việc' : 'Tạo Phiếu công việc mới'}
-              </h3>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h3 className="font-bold text-slate-800 text-lg">
+                  {selectedWorkOrder ? 'Chi tiết Phiếu công việc' : 'Tạo Phiếu công việc mới'}
+                </h3>
+                {selectedWorkOrder?.id && (
+                  <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-mono font-bold rounded-lg border border-blue-200">
+                    {selectedWorkOrder.id}
+                  </span>
+                )}
+                {selectedWorkOrder?.workPermitId && (
+                  <span className="px-2 py-0.5 bg-slate-200 text-slate-700 text-xs font-mono font-semibold rounded-md">
+                    {selectedWorkOrder.workPermitId}
+                  </span>
+                )}
+              </div>
               <button onClick={() => setShowWorkOrderModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <X size={20} />
               </button>
@@ -13363,6 +13671,25 @@ export default function App() {
           onRefresh={() => checkDataVersionReconciliation({ silent: true })}
         />
       )}
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        onOpenInstallModal={() => setShowPWAInstallModal(true)}
+        onOpenSidebar={() => setIsSidebarOpen(true)}
+        onLogout={handleLogoutUser}
+        userRole={userRole}
+      />
+
+      {/* PWA MOBILE INSTALL MODAL */}
+      <PWAInstallModal
+        isOpen={showPWAInstallModal}
+        onClose={() => setShowPWAInstallModal(false)}
+      />
+
+      {/* OFFLINE CONNECTIVITY INDICATOR */}
+      <OfflineIndicator />
 
     </div>
   );

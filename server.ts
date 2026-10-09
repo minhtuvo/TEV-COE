@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
 import path from 'path';
+import fs from 'fs';
 import multer from 'multer';
 import { Readable } from 'stream';
 import {
@@ -124,9 +125,66 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Set up multer for file uploads (in-memory storage)
 const upload = multer({ storage: multer.memoryStorage() });
 
-// In-memory token storage for prototype (in production, use a database)
-// We'll store tokens by a simple session ID or just globally for this single-user prototype
-let globalTokens: any = null;
+// Persistent token storage on disk so Google Drive connection survives restarts and browser sessions
+const TOKENS_FILE = path.join(process.cwd(), '.data', 'google_tokens.json');
+
+const loadStoredTokens = () => {
+  try {
+    if (fs.existsSync(TOKENS_FILE)) {
+      const data = fs.readFileSync(TOKENS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      console.log('Restored persistent Google OAuth tokens from disk.');
+      return parsed;
+    }
+  } catch (e) {
+    console.warn('Could not read stored tokens from disk:', e);
+  }
+  return null;
+};
+
+const saveStoredTokens = (tokens: any) => {
+  try {
+    const dir = path.dirname(TOKENS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2), 'utf-8');
+    console.log('Successfully saved Google OAuth tokens to persistent disk.');
+  } catch (e) {
+    console.warn('Could not save tokens to disk:', e);
+  }
+};
+
+const clearStoredTokens = () => {
+  try {
+    if (fs.existsSync(TOKENS_FILE)) {
+      fs.unlinkSync(TOKENS_FILE);
+      console.log('Cleared persistent Google OAuth tokens from disk.');
+    }
+  } catch (e) {
+    console.warn('Could not remove stored tokens:', e);
+  }
+};
+
+let globalTokens: any = loadStoredTokens();
+
+// Helper to identify authentication & token expiration errors
+export const isAuthError = (error: any): boolean => {
+  if (!error) return false;
+  if (error.isAuthExpired) return true;
+  const msg = (error.message || '').toLowerCase();
+  const status = error.status || error.code || (error.response && error.response.status);
+  return (
+    status === 401 ||
+    msg.includes('no refresh token') ||
+    msg.includes('invalid_grant') ||
+    msg.includes('invalid credentials') ||
+    msg.includes('unauthenticated') ||
+    msg.includes('unauthorized') ||
+    msg.includes('login required') ||
+    msg.includes('token expired')
+  );
+};
 
 // Helper to get redirect URI based on the request origin
 const getRedirectUri = (req: express.Request) => {
@@ -159,8 +217,8 @@ app.get('/api/auth/google/url', (req, res) => {
     redirectUri
   );
 
-  // If forceConsent=true, force consent screen; otherwise use 'select_account' to avoid repeated warning screen
-  const prompt = req.query.forceConsent === 'true' ? 'consent' : 'select_account';
+  // Always use 'consent select_account' with access_type: offline so Google always grants a refresh_token
+  const prompt = 'consent select_account';
 
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -202,6 +260,7 @@ app.get(['/auth/callback', '/auth/callback/', '/api/auth/callback', '/api/auth/c
       tokens.refresh_token = globalTokens.refresh_token;
     }
     globalTokens = tokens; // Store globally for this session
+    saveStoredTokens(tokens); // Persist to disk so sessions stay connected across restarts
 
     // Send success message to parent window and close popup
     res.send(`
@@ -250,6 +309,7 @@ app.post('/api/auth/refresh', async (req, res) => {
       refresh_token: refreshed.credentials.refresh_token || refreshToken
     };
     globalTokens = newCredentials;
+    saveStoredTokens(newCredentials);
     res.json({ success: true, tokens: newCredentials });
   } catch (error: any) {
     console.error('Error refreshing Google token:', error);
@@ -257,18 +317,75 @@ app.post('/api/auth/refresh', async (req, res) => {
   }
 });
 
-// 3. Check Auth Status
-app.get('/api/auth/status', (req, res) => {
+// 3. Check Auth Status (Automatically restores persistent Google connection)
+app.get('/api/auth/status', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      return res.json({ isAuthenticated: true });
+    let tokens = getTokensFromRequest(req);
+    // If client has no token in request header, check if server has persistent stored tokens!
+    if (!tokens && globalTokens) {
+      tokens = globalTokens;
     }
-    res.json({ isAuthenticated: !!globalTokens });
+
+    if (!tokens) {
+      return res.json({ isAuthenticated: false });
+    }
+    
+    // Check if token is expired
+    const isExpired = tokens.expiry_date && tokens.expiry_date <= (Date.now() + 30000);
+    const hasRefreshToken = !!(tokens.refresh_token || globalTokens?.refresh_token);
+
+    if (isExpired && hasRefreshToken) {
+      // Auto-refresh in background so the user never has to re-authenticate!
+      try {
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET
+        );
+        oauth2Client.setCredentials({
+          refresh_token: tokens.refresh_token || globalTokens?.refresh_token
+        });
+        const refreshed = await oauth2Client.refreshAccessToken();
+        const newCredentials = {
+          ...tokens,
+          ...refreshed.credentials,
+          refresh_token: refreshed.credentials.refresh_token || tokens.refresh_token || globalTokens?.refresh_token
+        };
+        globalTokens = newCredentials;
+        saveStoredTokens(newCredentials);
+        tokens = newCredentials;
+        console.log('Successfully auto-renewed expired Google token in background.');
+      } catch (refreshErr: any) {
+        console.warn('Background token refresh failed:', refreshErr.message);
+      }
+    } else if (isExpired && !hasRefreshToken) {
+      globalTokens = null;
+      clearStoredTokens();
+      return res.status(401).json({ 
+        isAuthenticated: false, 
+        error: 'Phiên đăng nhập đã hết hạn (No refresh token). Vui lòng kết nối lại Google Drive.' 
+      });
+    }
+
+    res.json({ 
+      isAuthenticated: true,
+      tokens: {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token || globalTokens?.refresh_token,
+        expiry_date: tokens.expiry_date,
+        token_type: tokens.token_type || 'Bearer'
+      }
+    });
   } catch (error) {
     console.error('Error in auth status check:', error);
     res.status(500).json({ isAuthenticated: false, error: 'Internal server error' });
   }
+});
+
+// 3b. Disconnect Google Drive
+app.post('/api/auth/disconnect', (req, res) => {
+  globalTokens = null;
+  clearStoredTokens();
+  res.json({ success: true, message: 'Đã ngắt kết nối Google Drive' });
 });
 
 // Helper to extract clean spreadsheet ID
@@ -285,17 +402,25 @@ const extractSpreadsheetId = (input?: string): string => {
 // Helper to get tokens from request
 const getTokensFromRequest = (req: express.Request) => {
   const authHeader = req.headers.authorization;
+  let tokens: any = null;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const raw = authHeader.substring(7).trim();
     try {
-      return JSON.parse(raw);
+      tokens = JSON.parse(raw);
     } catch (e) {
       if (raw.length > 5) {
-        return { access_token: raw };
+        tokens = { access_token: raw };
       }
     }
   }
-  return globalTokens;
+  if (!tokens) {
+    tokens = globalTokens;
+  }
+  // Inherit refresh_token from globalTokens if client only had access_token
+  if (tokens && !tokens.refresh_token && globalTokens?.refresh_token) {
+    tokens.refresh_token = globalTokens.refresh_token;
+  }
+  return tokens;
 };
 
 // Standard column headers for TEV sheets
@@ -395,6 +520,12 @@ const resolveSpreadsheetIdAsync = async (req: express.Request, oauth2Client: any
       const meta = await sheets.spreadsheets.get({ spreadsheetId: explicit, fields: 'spreadsheetId,properties.title' });
       return { id: explicit, title: meta.data.properties?.title || 'TEV Service Flatform', isNewlyCreated: false };
     } catch (e: any) {
+      if (isAuthError(e)) {
+        const authErr = new Error('Phiên kết nối Google Drive đã hết hạn (No refresh token). Vui lòng kết nối lại tài khoản Google.');
+        (authErr as any).isAuthExpired = true;
+        (authErr as any).status = 401;
+        throw authErr;
+      }
       console.warn(`Provided spreadsheetId ${explicit} not accessible directly, searching Drive for 'TEV Service Flatform'...`);
     }
   }
@@ -414,6 +545,12 @@ const resolveSpreadsheetIdAsync = async (req: express.Request, oauth2Client: any
       return { id: found.id!, title: found.name || 'TEV Service Flatform', isNewlyCreated: false };
     }
   } catch (err: any) {
+    if (isAuthError(err)) {
+      const authErr = new Error('Phiên kết nối Google Drive đã hết hạn (No refresh token). Vui lòng kết nối lại tài khoản Google.');
+      (authErr as any).isAuthExpired = true;
+      (authErr as any).status = 401;
+      throw authErr;
+    }
     console.warn('Drive search for TEV Service Flatform warning:', err.message);
   }
 
@@ -429,6 +566,12 @@ const resolveSpreadsheetIdAsync = async (req: express.Request, oauth2Client: any
     return { id: newSheet.data.spreadsheetId!, title: 'TEV Service Flatform', isNewlyCreated: true };
   } catch (err: any) {
     console.error('Failed to auto-create spreadsheet:', err);
+    if (isAuthError(err)) {
+      const authErr = new Error('Phiên kết nối Google Drive đã hết hạn (No refresh token). Vui lòng kết nối lại tài khoản Google.');
+      (authErr as any).isAuthExpired = true;
+      (authErr as any).status = 401;
+      throw authErr;
+    }
     throw new Error('Không thể tìm thấy hoặc tự động tạo file Google Sheet "TEV Service Flatform". Vui lòng kiểm tra quyền Google Drive.');
   }
 };
@@ -437,7 +580,7 @@ const resolveSpreadsheetIdAsync = async (req: express.Request, oauth2Client: any
 app.get('/api/sheets/resolve-or-create', async (req, res) => {
   const tokens = getTokensFromRequest(req);
   if (!tokens) {
-    return res.status(401).json({ error: 'Not authenticated with Google' });
+    return res.status(401).json({ error: 'Not authenticated with Google', authExpired: true });
   }
 
   try {
@@ -457,9 +600,29 @@ app.get('/api/sheets/resolve-or-create', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error in resolve-or-create sheet:', error);
+    if (isAuthError(error)) {
+      globalTokens = null;
+      return res.status(401).json({ 
+        error: 'Phiên làm việc Google Drive đã hết hạn (No refresh token). Vui lòng bấm Kết nối Google Drive để xác thực lại.',
+        authExpired: true 
+      });
+    }
     res.status(500).json({ error: error.message || 'Lỗi khi tìm hoặc tạo file Google Sheet' });
   }
 });
+
+// In-memory cache for Google Sheets data to protect against Google API rate limits (Quota limits exceeded)
+let sheetsDataCache: {
+  data: any;
+  spreadsheetId: string;
+  spreadsheetTitle: string;
+  timestamp: number;
+} | null = null;
+const CACHE_TTL_MS = 60000; // 60 seconds cache
+
+const invalidateSheetsCache = () => {
+  sheetsDataCache = null;
+};
 
 // 4. Save Data to Google Sheets (Append)
 app.post('/api/sheets/append', async (req, res) => {
@@ -491,23 +654,41 @@ app.post('/api/sheets/append', async (req, res) => {
       }
     });
 
+    invalidateSheetsCache();
     res.json({ success: true, data: response.data, spreadsheetId });
   } catch (error: any) {
     console.error('Error appending to sheet:', error);
-    const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
-    if (isAuthError) {
+    if (isAuthError(error)) {
       globalTokens = null;
-      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.' });
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.', authExpired: true });
+    }
+    const isQuotaError = error.code === 429 || error.status === 429 || (error.message && (error.message.includes('Quota') || error.message.includes('quota') || error.message.includes('RATE_LIMIT_EXCEEDED')));
+    if (isQuotaError) {
+      return res.status(429).json({ error: 'Google Sheets API Rate Limit (60 requests/phút). Vui lòng đợi 30 giây rồi thử lại.' });
     }
     res.status(500).json({ error: error.message || 'Failed to save to Google Sheets' });
   }
 });
 
-// 5. Get Data from Google Sheets (Two-Way Sync Read)
+// 5. Get Data from Google Sheets (Two-Way Sync Read with Smart Caching & Quota Protection)
 app.get('/api/sheets/get', async (req, res) => {
   const tokens = getTokensFromRequest(req);
   if (!tokens) {
     return res.status(401).json({ error: 'Not authenticated with Google' });
+  }
+
+  const forceRefresh = req.query.force === 'true' || req.headers['x-force-refresh'] === 'true';
+  const now = Date.now();
+
+  // Return cached result if valid and not force-refreshing
+  if (!forceRefresh && sheetsDataCache && (now - sheetsDataCache.timestamp < CACHE_TTL_MS)) {
+    return res.json({ 
+      success: true, 
+      cached: true,
+      spreadsheetTitle: sheetsDataCache.spreadsheetTitle,
+      spreadsheetId: sheetsDataCache.spreadsheetId,
+      data: sheetsDataCache.data 
+    });
   }
 
   try {
@@ -547,8 +728,12 @@ app.get('/api/sheets/get', async (req, res) => {
       equipment: [] as any[][],
       transformers: [] as any[][],
       switchgears: [] as any[][],
+      breakers: [] as any[][],
       motors: [] as any[][],
       generators: [] as any[][],
+      cables: [] as any[][],
+      batteries: [] as any[][],
+      relays: [] as any[][],
       allSheets: allData,
       sheetNames
     };
@@ -564,28 +749,67 @@ app.get('/api/sheets/get', async (req, res) => {
         categorizedData.equipment = categorizedData.equipment.concat(rows);
       } else if (lowerName.includes('biến áp') || lowerName.includes('mba') || lowerName.includes('transformer')) {
         categorizedData.transformers = categorizedData.transformers.concat(rows);
-      } else if (lowerName.includes('tủ điện') || lowerName.includes('trung thế') || lowerName.includes('switchgear') || lowerName.includes('máy cắt') || lowerName.includes('breaker')) {
+      } else if (lowerName.includes('máy cắt') || lowerName.includes('breaker') || lowerName.includes('vcb') || lowerName.includes('acb')) {
+        categorizedData.breakers = categorizedData.breakers.concat(rows);
+      } else if (lowerName.includes('tủ điện') || lowerName.includes('trung thế') || lowerName.includes('switchgear') || lowerName.includes('rmu')) {
         categorizedData.switchgears = categorizedData.switchgears.concat(rows);
       } else if (lowerName.includes('động cơ') || lowerName.includes('motor')) {
         categorizedData.motors = categorizedData.motors.concat(rows);
       } else if (lowerName.includes('máy phát') || lowerName.includes('generator')) {
         categorizedData.generators = categorizedData.generators.concat(rows);
+      } else if (lowerName.includes('cáp điện') || lowerName.includes('cable') || lowerName.includes('cáp')) {
+        categorizedData.cables = categorizedData.cables.concat(rows);
+      } else if (lowerName.includes('pin') || lowerName.includes('ups') || lowerName.includes('bess') || lowerName.includes('battery') || lowerName.includes('ắc quy')) {
+        categorizedData.batteries = categorizedData.batteries.concat(rows);
+      } else if (lowerName.includes('rơ le') || lowerName.includes('relay') || lowerName.includes('role')) {
+        categorizedData.relays = categorizedData.relays.concat(rows);
       }
     });
 
+    const title = spreadsheet.data.properties?.title || 'TEV Service Flatform';
+
+    // Store in cache
+    sheetsDataCache = {
+      data: categorizedData,
+      spreadsheetId,
+      spreadsheetTitle: title,
+      timestamp: Date.now()
+    };
+
     res.json({ 
       success: true, 
-      spreadsheetTitle: spreadsheet.data.properties?.title || 'TEV Service Flatform',
+      spreadsheetTitle: title,
       spreadsheetId,
       data: categorizedData 
     });
   } catch (error: any) {
     console.error('Error getting data from sheet:', error);
-    const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
-    if (isAuthError) {
+    if (isAuthError(error)) {
       globalTokens = null;
-      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.' });
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và kết nối lại Google Drive.', authExpired: true });
     }
+
+    const isQuotaError = error.code === 429 || error.status === 429 || (error.message && (error.message.includes('Quota') || error.message.includes('quota') || error.message.includes('RATE_LIMIT_EXCEEDED') || error.message.includes('RESOURCE_EXHAUSTED')));
+    
+    // If Quota exceeded but we have existing cache, gracefully return cached data!
+    if (isQuotaError && sheetsDataCache) {
+      console.warn('Google Sheets API Quota exceeded. Serving cached data to avoid interruption.');
+      return res.json({
+        success: true,
+        cached: true,
+        warning: 'Google Sheets API Rate Limit. Đang hiển thị bản lưu tạm gần nhất.',
+        spreadsheetTitle: sheetsDataCache.spreadsheetTitle,
+        spreadsheetId: sheetsDataCache.spreadsheetId,
+        data: sheetsDataCache.data
+      });
+    }
+
+    if (isQuotaError) {
+      return res.status(429).json({ 
+        error: 'Google Sheets API đã chạm giới hạn tốc độ (Quota 60 requests/phút). Hệ thống đã bật bộ nhớ đệm tự động, vui lòng đợi 30-60 giây để hạn mức hồi phục.' 
+      });
+    }
+
     res.status(500).json({ error: error.message || 'Failed to get data from Google Sheets' });
   }
 });
@@ -920,6 +1144,7 @@ app.post('/api/sheets/sync-record', async (req, res) => {
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [rowValues] }
       });
+      invalidateSheetsCache();
       res.json({ success: true, action: 'updated', row: existingRowIndex, sheet: targetSheetTitle });
     } else {
       // If header is missing, write header first
@@ -938,10 +1163,19 @@ app.post('/api/sheets/sync-record', async (req, res) => {
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [rowValues] }
       });
+      invalidateSheetsCache();
       res.json({ success: true, action: 'appended', sheet: targetSheetTitle, details: appendRes.data });
     }
   } catch (error: any) {
     console.error('Error syncing record to sheet:', error);
+    if (isAuthError(error)) {
+      globalTokens = null;
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.', authExpired: true });
+    }
+    const isQuotaError = error.code === 429 || error.status === 429 || (error.message && (error.message.includes('Quota') || error.message.includes('quota') || error.message.includes('RATE_LIMIT_EXCEEDED')));
+    if (isQuotaError) {
+      return res.status(429).json({ error: 'Google Sheets API Rate Limit. Vui lòng đợi 30 giây rồi thử lại.' });
+    }
     res.status(500).json({ error: error.message || 'Failed to sync record to Google Sheets' });
   }
 });
@@ -1078,10 +1312,9 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error syncing to sheet:', error);
-    const isAuthError = error.code === 401 || error.status === 401 || (error.response && error.response.status === 401) || (error.message && error.message.includes('invalid_grant'));
-    if (isAuthError) {
+    if (isAuthError(error)) {
       globalTokens = null;
-      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.' });
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.', authExpired: true });
     }
     res.status(500).json({ error: error.message || 'Failed to sync to Google Sheets' });
   }
@@ -1160,6 +1393,10 @@ app.post('/api/sheets/init-tev-sheets', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error initializing sheets:', error);
+    if (isAuthError(error)) {
+      globalTokens = null;
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.', authExpired: true });
+    }
     res.status(500).json({ error: error.message || 'Failed to initialize TEV sheets' });
   }
 });
@@ -1886,7 +2123,10 @@ async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR !== 'true' ? undefined : false,
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

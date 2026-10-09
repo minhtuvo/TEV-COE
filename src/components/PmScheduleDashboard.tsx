@@ -23,6 +23,7 @@ import {
   CalendarDays,
   Sparkles
 } from 'lucide-react';
+import { PmTimelineView } from './PmTimelineView';
 import {
   ResponsiveContainer,
   BarChart,
@@ -267,6 +268,7 @@ export const PmScheduleDashboard: React.FC<Props> = ({
   const [selectedFactory, setSelectedFactory] = useState('ALL');
   const [selectedPriority, setSelectedPriority] = useState('ALL');
   const [activeSubTab, setActiveSubTab] = useState<'OVERDUE' | 'DUE_SOON' | 'COMPLETED' | 'ALL'>('OVERDUE');
+  const [pmDisplayView, setPmDisplayView] = useState<'timeline' | 'dashboard' | 'table'>('timeline');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Combined PM work orders: use user-passed PM orders if available, augmented with realistic seed records

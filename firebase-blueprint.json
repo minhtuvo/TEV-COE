@@ -60,27 +60,52 @@
     },
     "Equipment": {
       "title": "Equipment",
-      "description": "Represents a transformer asset.",
+      "description": "Represents an electrical equipment asset (transformer, switchgear, motor, inverter, etc.).",
       "type": "object",
       "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique equipment code or tag ID"
+        },
         "name": {
           "type": "string",
-          "description": "Name of the transformer"
+          "description": "Name of the equipment"
         },
         "customerId": {
           "type": "string",
-          "description": "ID of the customer who owns this equipment"
+          "description": "ID or code of the customer who owns this equipment"
         },
         "customerName": {
           "type": "string",
-          "description": "Name of the customer (denormalized for easy display)"
+          "description": "Name of the customer (denormalized for display)"
+        },
+        "customer": {
+          "type": "string",
+          "description": "Customer company name"
+        },
+        "factory": {
+          "type": "string",
+          "description": "Factory or substation name"
         },
         "location": {
-          "type": "string"
+          "type": "string",
+          "description": "Installation location or feeder bay"
         },
         "status": {
           "type": "string",
           "enum": ["healthy", "warning", "critical"]
+        },
+        "health": {
+          "type": "number",
+          "description": "Health index (0-100)"
+        },
+        "criticality": {
+          "type": "string",
+          "description": "Criticality rating (A, B, C)"
+        },
+        "lastCheck": {
+          "type": "string",
+          "description": "Date of last inspection (DD/MM/YYYY)"
         },
         "lastInspection": {
           "type": "string"
@@ -101,14 +126,19 @@
           "type": "string"
         },
         "type": {
-          "type": "string"
+          "type": "string",
+          "description": "Equipment type (Máy biến áp, Tủ điện, Động cơ, Inverter, etc.)"
         },
         "createdAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
         }
       },
-      "required": ["name", "customerId", "createdAt"]
+      "required": ["name", "createdAt"]
     },
     "DgaReport": {
       "title": "DgaReport",

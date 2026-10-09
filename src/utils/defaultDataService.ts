@@ -467,3 +467,16 @@ export function getInitialReportsList(storedReports?: any[]): any[] {
   }
   return DEFAULT_SIMULATION_REPORTS;
 }
+
+/**
+ * Ensures initial work orders contain comprehensive CMMS & PM tickets if empty or partial.
+ */
+export function getInitialWorkOrdersList(storedOrders?: any[]): any[] {
+  if (Array.isArray(storedOrders) && storedOrders.length > 0) {
+    const existingIds = new Set(storedOrders.map(w => (w.id || '').toString().toLowerCase()));
+    const missingDefaults = DEFAULT_WORK_ORDERS.filter(w => !existingIds.has((w.id || '').toString().toLowerCase()));
+    return [...storedOrders, ...missingDefaults];
+  }
+  return DEFAULT_WORK_ORDERS;
+}
+

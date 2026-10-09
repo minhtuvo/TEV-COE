@@ -119,12 +119,19 @@ service cloud.firestore {
     }
 
     function isValidEquipment(data) {
-      return hasRequiredFields(['name', 'customerId', 'createdAt']) &&
+      return hasRequiredFields(['name', 'createdAt']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
-             data.customerId is string && data.customerId.size() > 0 && data.customerId.size() < 100 &&
+             data.createdAt is string &&
+             (!('id' in data) || (data.id is string && data.id.size() < 100)) &&
+             (!('customerId' in data) || (data.customerId is string && data.customerId.size() < 100)) &&
              (!('customerName' in data) || (data.customerName is string && data.customerName.size() < 200)) &&
+             (!('customer' in data) || (data.customer is string && data.customer.size() < 200)) &&
+             (!('factory' in data) || (data.factory is string && data.factory.size() < 200)) &&
              (!('location' in data) || (data.location is string && data.location.size() < 500)) &&
              (!('status' in data) || (data.status in ['healthy', 'warning', 'critical'])) &&
+             (!('health' in data) || (data.health is number)) &&
+             (!('criticality' in data) || (data.criticality is string && data.criticality.size() < 10)) &&
+             (!('lastCheck' in data) || (data.lastCheck is string && data.lastCheck.size() < 100)) &&
              (!('lastInspection' in data) || (data.lastInspection is string && data.lastInspection.size() < 100)) &&
              (!('nextInspection' in data) || (data.nextInspection is string && data.nextInspection.size() < 100)) &&
              (!('manufacturer' in data) || (data.manufacturer is string && data.manufacturer.size() < 200)) &&
@@ -132,7 +139,7 @@ service cloud.firestore {
              (!('power' in data) || (data.power is string && data.power.size() < 100)) &&
              (!('voltage' in data) || (data.voltage is string && data.voltage.size() < 100)) &&
              (!('type' in data) || (data.type is string && data.type.size() < 100)) &&
-             data.createdAt is string;
+             (!('updatedAt' in data) || (data.updatedAt is string));
     }
 
     function isValidDgaReport(data) {
@@ -167,18 +174,18 @@ service cloud.firestore {
     }
 
     function isValidWorkOrder(data) {
-      return hasRequiredFields(['title', 'equipmentId', 'customerId', 'status', 'priority', 'type', 'createdAt']) &&
+      return hasRequiredFields(['title', 'equipmentId', 'customerId', 'createdAt']) &&
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
              (data.equipmentId is string || data.equipmentId is list) &&
              data.customerId is string && data.customerId.size() > 0 && data.customerId.size() < 100 &&
-             data.status in ["initiated", "approved", "planned", "scheduled", "in-progress", "completed", "cancelled", "overdue"] &&
-             data.priority in ['low', 'medium', 'high', 'urgent'] &&
-             data.type in ["preventive", "corrective", "inspection", "emergency", "unplanned"] &&
-             (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() < 100)) &&
-             (!('description' in data) || (data.description is string && data.description.size() < 2000)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 2000)) &&
-             (!('attachments' in data) || (data.attachments is list && data.attachments.size() < 20)) &&
-             (!('usedMaterials' in data) || (data.usedMaterials is list && data.usedMaterials.size() < 50)) &&
+             (!('status' in data) || (data.status is string)) &&
+             (!('priority' in data) || (data.priority is string)) &&
+             (!('type' in data) || (data.type is string)) &&
+             (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() < 200)) &&
+             (!('description' in data) || (data.description is string && data.description.size() < 4000)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 4000)) &&
+             (!('attachments' in data) || (data.attachments is list && data.attachments.size() < 50)) &&
+             (!('usedMaterials' in data) || (data.usedMaterials is list || data.usedMaterials is string)) &&
              (!('responsibleApprove' in data) || (data.responsibleApprove is string)) &&
              (!('responsibleDo' in data) || (data.responsibleDo is string)) &&
              (!('workPermitId' in data) || (data.workPermitId is string)) &&
@@ -222,16 +229,15 @@ service cloud.firestore {
     }
 
     match /customers/{customerId} {
-      allow read: if isAdmin() || isCustomerOwner(customerId);
+      allow read: if true;
       allow create: if isAdmin() && isValidCustomer(request.resource.data);
       allow update: if isAdmin() && isValidCustomer(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /equipment/{equipmentId} {
-      allow read: if isAdmin() || isCustomerOwner(resource.data.customerId);
-      allow create: if isAdmin() && isValidEquipment(request.resource.data);
-      allow update: if isAdmin() && isValidEquipment(request.resource.data);
+      allow read: if true;
+      allow create, update: if isAuthenticated() && isValidEquipment(request.resource.data);
       allow delete: if isAdmin();
     }
 
@@ -243,16 +249,13 @@ service cloud.firestore {
     }
 
     match /workOrders/{orderId} {
-      allow read: if isAdmin() || isCustomerOwner(resource.data.customerId);
-      allow create: if isAdmin() && isValidWorkOrder(request.resource.data);
-      allow update: if isAuthenticated() && isValidWorkOrder(request.resource.data) && (
-        isAdmin() || (isCustomerOwner(resource.data.customerId) && areImmutableFieldsUnchanged(['createdAt', 'equipmentId', 'customerId']))
-      );
+      allow read: if true;
+      allow create, update: if isAuthenticated() && isValidWorkOrder(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /inventory/{itemId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow create: if isAuthenticated() && isValidInventoryItem(request.resource.data);
       allow update: if isAuthenticated() && isValidInventoryItem(request.resource.data);
       allow delete: if isAdmin();
@@ -264,7 +267,7 @@ service cloud.firestore {
     }
 
     match /reports/{reportId} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isAuthenticated();
     }
 
