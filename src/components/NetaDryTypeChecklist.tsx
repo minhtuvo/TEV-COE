@@ -25,6 +25,7 @@ import {
   Camera
 } from 'lucide-react';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
@@ -109,7 +110,7 @@ interface Props {
 }
 
 export const NetaDryTypeChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaDryTypePayload>(DEFAULT_SAMPLE_DATA);
+  const [data, setData] = useAtsFormSync<NetaDryTypePayload>('neta-dry-type', DEFAULT_SAMPLE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);

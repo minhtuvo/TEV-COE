@@ -33,6 +33,7 @@ import {
   performDeterministicBatteryFloodedAnalysis
 } from '../../server/netaBatteryFloodedAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
@@ -96,7 +97,7 @@ export const SAMPLE_BATTERY_FLOODED_FSE_DATA: NetaBatteryFloodedInputPayload = {
 };
 
 export const NetaBatteryFloodedChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaBatteryFloodedInputPayload>(SAMPLE_BATTERY_FLOODED_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaBatteryFloodedInputPayload>('neta-battery-flooded', SAMPLE_BATTERY_FLOODED_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaBatteryFloodedEvaluationResult | null>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);

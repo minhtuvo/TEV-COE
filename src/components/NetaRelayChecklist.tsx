@@ -31,6 +31,7 @@ import { TevReportPrintModal } from './TevReportPrintModal';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -97,7 +98,7 @@ export const SAMPLE_RELAY_FSE_DATA: NetaRelayInputPayload = {
 };
 
 export const NetaRelayChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaRelayInputPayload>(SAMPLE_RELAY_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaRelayInputPayload>('neta-relay', SAMPLE_RELAY_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaRelayEvaluationResult | null>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);

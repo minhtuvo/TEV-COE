@@ -174,16 +174,22 @@ service cloud.firestore {
     }
 
     function isValidWorkOrder(data) {
-      return hasRequiredFields(['title', 'equipmentId', 'customerId', 'createdAt']) &&
+      return hasRequiredFields(['title', 'createdAt']) &&
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             (data.equipmentId is string || data.equipmentId is list) &&
-             data.customerId is string && data.customerId.size() > 0 && data.customerId.size() < 100 &&
+             (!('id' in data) || (data.id is string && data.id.size() < 100)) &&
+             (!('equipmentId' in data) || (data.equipmentId is string || data.equipmentId is list)) &&
+             (!('equipmentName' in data) || (data.equipmentName is string)) &&
+             (!('customerId' in data) || (data.customerId is string)) &&
+             (!('customer' in data) || (data.customer is string)) &&
+             (!('factory' in data) || (data.factory is string)) &&
              (!('status' in data) || (data.status is string)) &&
              (!('priority' in data) || (data.priority is string)) &&
              (!('type' in data) || (data.type is string)) &&
              (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() < 200)) &&
              (!('description' in data) || (data.description is string && data.description.size() < 4000)) &&
              (!('notes' in data) || (data.notes is string && data.notes.size() < 4000)) &&
+             (!('dueDate' in data) || (data.dueDate is string)) &&
+             (!('completedDate' in data) || (data.completedDate is string)) &&
              (!('attachments' in data) || (data.attachments is list && data.attachments.size() < 50)) &&
              (!('usedMaterials' in data) || (data.usedMaterials is list || data.usedMaterials is string)) &&
              (!('responsibleApprove' in data) || (data.responsibleApprove is string)) &&
@@ -192,11 +198,14 @@ service cloud.firestore {
              (!('blockingRequired' in data) || (data.blockingRequired is bool)) &&
              (!('isUnplanned' in data) || (data.isUnplanned is bool)) &&
              (!('failureCode' in data) || (data.failureCode is string)) &&
+             (!('rootCause' in data) || (data.rootCause is string)) &&
              (!('pmFrequency' in data) || (data.pmFrequency is string)) &&
              (!('estimatedTime' in data) || (data.estimatedTime is number)) &&
+             (!('actualTimeSpent' in data) || (data.actualTimeSpent is number)) &&
              (!('laborCount' in data) || (data.laborCount is number)) &&
              (!('laborCost' in data) || (data.laborCost is number)) &&
              (!('partCost' in data) || (data.partCost is number)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
              data.createdAt is string;
     }
 
@@ -250,25 +259,23 @@ service cloud.firestore {
 
     match /workOrders/{orderId} {
       allow read: if true;
-      allow create, update: if isAuthenticated() && isValidWorkOrder(request.resource.data);
+      allow create, update: if isValidWorkOrder(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /inventory/{itemId} {
       allow read: if true;
-      allow create: if isAuthenticated() && isValidInventoryItem(request.resource.data);
-      allow update: if isAuthenticated() && isValidInventoryItem(request.resource.data);
+      allow create, update: if isValidInventoryItem(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /reports/{reportId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /_connection_test_/ping {

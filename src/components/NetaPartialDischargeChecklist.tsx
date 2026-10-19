@@ -33,6 +33,7 @@ import {
   evaluatePdSensorItem
 } from '../../server/netaPartialDischargeAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -85,7 +86,7 @@ const SAMPLE_PD_DATA: NetaPdInputPayload = {
 };
 
 export const NetaPartialDischargeChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaPdInputPayload>(SAMPLE_PD_DATA);
+  const [data, setData] = useAtsFormSync<NetaPdInputPayload>('neta-pd', SAMPLE_PD_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaPdEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);

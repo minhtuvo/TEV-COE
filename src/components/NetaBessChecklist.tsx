@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { NetaBessInputPayload, NetaBessEvaluationResult } from '../../server/netaBessAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -69,7 +70,7 @@ const SAMPLE_BESS_DATA: NetaBessInputPayload = {
 };
 
 export const NetaBessChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaBessInputPayload>(SAMPLE_BESS_DATA);
+  const [data, setData] = useAtsFormSync<NetaBessInputPayload>('neta-bess', SAMPLE_BESS_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaBessEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);

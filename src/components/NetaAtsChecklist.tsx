@@ -37,6 +37,7 @@ import { TevReportPrintModal } from './TevReportPrintModal';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -160,7 +161,7 @@ export const SAMPLE_ATS_PASS_DATA: NetaAtsInputPayload = {
 };
 
 export const NetaAtsChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaAtsInputPayload>(SAMPLE_ATS_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaAtsInputPayload>('neta-ats', SAMPLE_ATS_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaAtsEvaluationResult | null>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);

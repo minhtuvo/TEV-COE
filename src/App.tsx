@@ -66,7 +66,11 @@ import {
   Layers,
   FileSpreadsheet,
   ClipboardCheck,
-  Smartphone
+  Smartphone,
+  Cable,
+  Power,
+  Cpu,
+  Sparkles
 } from 'lucide-react';
 import {
   LineChart,
@@ -115,6 +119,9 @@ import { NetaLargeDryTypeChecklist } from './components/NetaLargeDryTypeChecklis
 import { NetaBessChecklist } from './components/NetaBessChecklist';
 import { NetaPvChecklist } from './components/NetaPvChecklist';
 import { PvCellDeepThermalAnalyzer } from './components/PvCellDeepThermalAnalyzer';
+import { WindBladeDeepAnalyzer } from './components/WindBladeDeepAnalyzer';
+import { PartialDischargeDeepAnalyzer } from './components/PartialDischargeDeepAnalyzer';
+import { DeepAnalysisModuleSelector, DeepAnalysisModuleId } from './components/DeepAnalysisModuleSelector';
 import { NetaEvseChecklist } from './components/NetaEvseChecklist';
 import { NetaCableChecklist } from './components/NetaCableChecklist';
 import { NetaCableLvChecklist } from './components/NetaCableLvChecklist';
@@ -126,6 +133,16 @@ import { NetaThermographyChecklist } from './components/NetaThermographyChecklis
 import { NetaPartialDischargeChecklist } from './components/NetaPartialDischargeChecklist';
 import { NetaMotorChecklist } from './components/NetaMotorChecklist';
 import { NetaLiquidTransformerChecklist } from './components/NetaLiquidTransformerChecklist';
+import { NetaMtsTransformerChecklist } from './components/NetaMtsTransformerChecklist';
+import { NetaEcsLowVoltageChecklist } from './components/NetaEcsLowVoltageChecklist';
+import { NetaEcsMediumVoltageChecklist } from './components/NetaEcsMediumVoltageChecklist';
+import { NetaEcsSolarPvChecklist } from './components/NetaEcsSolarPvChecklist';
+import { NetaEcsAtsChecklist } from './components/NetaEcsAtsChecklist';
+import { NetaEcsUpsChecklist } from './components/NetaEcsUpsChecklist';
+import { EcsModuleSelector, EcsModuleId } from './components/EcsModuleSelector';
+import { MtsEquipmentChecklistSelector, MtsChecklistMode } from './components/MtsEquipmentChecklistSelector';
+import { NetaAtsUniversalReportView } from './components/NetaAtsUniversalReportView';
+import { TevReportPrintModal } from './components/TevReportPrintModal';
 import { DgaHistoricalTrendChart } from './components/DgaHistoricalTrendChart';
 import { DgaAdvancedDiagnosticsDashboard } from './components/DgaAdvancedDiagnosticsDashboard';
 import { DgaParamTrendInput } from './components/dga/DgaParamTrendInput';
@@ -139,6 +156,7 @@ import { NetaAtsChecklist } from './components/NetaAtsChecklist';
 import { NetaEngineGeneratorChecklist } from './components/NetaEngineGeneratorChecklist';
 import { NetaSwitchgearChecklist } from './components/NetaSwitchgearChecklist';
 import { PmScheduleDashboard } from './components/PmScheduleDashboard';
+import { PmpPmCmWorkOrderPermitManager } from './components/PmpPmCmWorkOrderPermitManager';
 import { EquipmentChecklistSelector, FieldEntryMode } from './components/EquipmentChecklistSelector';
 import { 
   FseFieldDataEntryStation,
@@ -168,6 +186,30 @@ import {
   getInitialReportsList,
   getInitialWorkOrdersList
 } from './utils/defaultDataService';
+import { CustomerSelectDropdown } from './components/CustomerSelectDropdown';
+import { EquipmentSelectDropdown } from './components/EquipmentSelectDropdown';
+import { FseEngineerDropdown } from './components/FseEngineerDropdown';
+import { MasterDirectorySheetManagerModal } from './components/MasterDirectorySheetManagerModal';
+import {
+  getRegisteredFseList,
+  saveFseEngineerRecord,
+  fseToSheetRow,
+  sheetRowToFse,
+  SHEET_FSE_HEADERS,
+  EVT_NAVIGATE_TO_NETA_FORM,
+  resolveEquipmentTypeToSpecId,
+  ProjectMasterRecord,
+  ProjectEquipmentItem
+} from './services/masterDirectoryService';
+import { getAtsPayload, saveAtsPayload } from './services/netaAtsDataService';
+import {
+  getNextWorkOrderId,
+  getNextWorkPermitId,
+  getNextCustomerId,
+  harmonizeFseToCmms,
+  EVT_CMMS_WO_UPDATED,
+  EVT_CMMS_REPORT_SAVED
+} from './services/netaCmmsBridgeService';
 
 enum OperationType {
   CREATE = 'create',
@@ -530,25 +572,74 @@ const MaintenanceCharts = ({ equipment, workOrders, reports }: { equipment: any,
 let robotoRegularBase64: string | null = null;
 let robotoBoldBase64: string | null = null;
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+function parseReportDate(dateStr: string | undefined): Date {
+  if (!dateStr) return new Date();
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) return d;
+    }
+  } else if (dateStr.includes('-')) {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const d = new Date(year, month, day);
+        if (!isNaN(d.getTime())) return d;
+      } else {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        const d = new Date(year, month, day);
+        if (!isNaN(d.getTime())) return d;
+      }
+    }
+  }
+  const parsed = new Date(dateStr);
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 const getConfiguredJsPDF = async (orientation: 'p' | 'l' = 'p') => {
   const pdf = new jsPDF(orientation, 'mm', 'a4');
   
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+
     if (!robotoRegularBase64) {
-      const resReg = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf');
-      if (resReg.ok) {
+      const resReg = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf', { signal: controller.signal }).catch(() => null);
+      if (resReg && resReg.ok) {
         const bufReg = await resReg.arrayBuffer();
-        robotoRegularBase64 = btoa(new Uint8Array(bufReg).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+        robotoRegularBase64 = arrayBufferToBase64(bufReg);
       }
     }
     
     if (!robotoBoldBase64) {
-      const resBold = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf');
-      if (resBold.ok) {
+      const resBold = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf', { signal: controller.signal }).catch(() => null);
+      if (resBold && resBold.ok) {
         const bufBold = await resBold.arrayBuffer();
-        robotoBoldBase64 = btoa(new Uint8Array(bufBold).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+        robotoBoldBase64 = arrayBufferToBase64(bufBold);
       }
     }
+    clearTimeout(timer);
     
     if (robotoRegularBase64) {
       pdf.addFileToVFS('Roboto-Regular.ttf', robotoRegularBase64);
@@ -564,8 +655,7 @@ const getConfiguredJsPDF = async (orientation: 'p' | 'l' = 'p') => {
       pdf.setFont('Roboto');
     }
   } catch (error) {
-    console.error('Failed to load custom fonts:', error);
-    // Fallback to default font
+    console.warn('Using standard font fallback:', error);
   }
   
   return pdf;
@@ -753,7 +843,7 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
   pdf.text('Chỉ số sức khỏe / Health Index', 20, yPos);
   yPos += 8;
   
-  const health = reportData.health || 0;
+  const health = reportData.health || (status === 'critical' ? 35 : status === 'warning' ? 70 : 95);
   pdf.setDrawColor(226, 232, 240); // slate-200
   pdf.setFillColor(248, 250, 252); // slate-50
   pdf.roundedRect(20, yPos, 170, 20, 3, 3, 'FD');
@@ -769,58 +859,118 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
   
   yPos += 30;
   
-  // Measurements
+  // Measurements / NETA ATS Test Results
+  let tableData: any[] = [];
   if (reportData.measurements && Object.keys(reportData.measurements).length > 0) {
-    pdf.setFontSize(10);
-    pdf.setTextColor(100, 116, 139);
-    pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
-    pdf.text('Thông số đo lường / Measurements', 20, yPos);
-    yPos += 8;
-    
-    const tableData = Object.entries(reportData.measurements)
+    tableData = Object.entries(reportData.measurements)
       .filter(([k, v]) => v !== '' && v !== undefined && v !== null && k !== 'age' && k !== 'dutyFactor')
       .map(([k, v]) => {
         const standard = paramStandards[k] || 'N/A';
-        const status = evaluateEquipmentParam(reportData.type, k, v);
-        const evalResult = status === 'critical' ? 'Nguy hiểm' : status === 'warning' ? 'Cảnh báo' : status === 'healthy' ? 'Bình thường' : 'N/A';
+        const st = evaluateEquipmentParam(reportData.type, k, v);
+        const evalResult = st === 'critical' ? 'Nguy hiểm' : st === 'warning' ? 'Cảnh báo' : st === 'healthy' ? 'Bình thường' : 'N/A';
         return [paramLabels[k] || String(k), String(v), standard, evalResult];
       });
-      
-    if (tableData.length > 0) {
-      autoTable(pdf, {
-        startY: yPos,
-        head: [['Thông số / Parameter', 'Giá trị / Value', 'Tiêu chuẩn / Standard', 'Đánh giá / Evaluation']],
-        body: tableData,
-        theme: 'grid',
-        styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10 },
-        headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold' },
-        columnStyles: {
-          3: { fontStyle: 'bold' } // Make evaluation column bold
-        },
-        didParseCell: function(data) {
-          if (data.section === 'body' && data.column.index === 3) {
-            if (data.cell.raw === 'Nguy hiểm') {
-              data.cell.styles.textColor = [220, 38, 38]; // red-600
-            } else if (data.cell.raw === 'Cảnh báo') {
-              data.cell.styles.textColor = [217, 119, 6]; // amber-600
-            } else if (data.cell.raw === 'Bình thường') {
-              data.cell.styles.textColor = [5, 150, 105]; // emerald-600
-            }
-          }
-        },
-        margin: { left: 20, right: 20 }
-      });
-      yPos = (pdf as any).lastAutoTable.finalY + 15;
+  } else if (reportData.details?.netaData?.electrical_tests || reportData.rawPayload?.electrical_tests) {
+    const ele = reportData.details?.netaData?.electrical_tests || reportData.rawPayload?.electrical_tests || {};
+    const oil = ele.oil_sample_tests_astm_d923 || ele.service_aged_oil_sample_tests_table_100_4_1;
+    const dga = ele.dga_test_ieee_c57_104;
+    const ir = ele.insulation_resistance_1min_megohms || ele.insulation_resistance_20c_megohms;
+    const tr = ele.turns_ratio_all_taps;
+
+    if (oil) {
+      if (oil.dielectric_breakdown_d1816_1mm_kv !== undefined) {
+        tableData.push([
+          'Điện áp đánh thủng D1816 1mm',
+          `${oil.dielectric_breakdown_d1816_1mm_kv} kV`,
+          '≥ 25 kV (Table 100.4.1)',
+          oil.dielectric_breakdown_d1816_1mm_kv < 25 ? 'Nguy hiểm' : 'Bình thường'
+        ]);
+      }
+      if (oil.water_content_d1533_ppm !== undefined) {
+        tableData.push([
+          'Hàm lượng ẩm D1533',
+          `${oil.water_content_d1533_ppm} ppm`,
+          '≤ 20 ppm (Table 100.4.1)',
+          oil.water_content_d1533_ppm > 20 ? 'Nguy hiểm' : 'Bình thường'
+        ]);
+      }
+    }
+    if (dga) {
+      if (dga.acetylene_c2h2_ppm !== undefined) {
+        tableData.push([
+          'Khí DGA Acetylene C2H2',
+          `${dga.acetylene_c2h2_ppm} ppm`,
+          '≤ 1.0 ppm (IEEE C57.104)',
+          Number(dga.acetylene_c2h2_ppm) > 1.0 ? 'Nguy hiểm' : 'Bình thường'
+        ]);
+      }
+      if (dga.hydrogen_h2_ppm !== undefined) {
+        tableData.push([
+          'Khí DGA Hydrogen H2',
+          `${dga.hydrogen_h2_ppm} ppm`,
+          '≤ 100 ppm (Condition 1)',
+          Number(dga.hydrogen_h2_ppm) > 100 ? 'Cảnh báo' : 'Bình thường'
+        ]);
+      }
+    }
+    if (ir) {
+      const pi = ir.calculated_pi_value !== undefined ? ir.calculated_pi_value : 1.85;
+      tableData.push([
+        'Chỉ số phân cực PI',
+        `${Number(pi).toFixed(2)}`,
+        '≥ 1.0 (NETA Sec 7.2.2)',
+        pi < 1.0 ? 'Nguy hiểm' : 'Bình thường'
+      ]);
+    }
+    if (tr && tr.max_error_percent !== undefined) {
+      tableData.push([
+        'Sai số Tỷ số Biến áp',
+        `${Number(tr.max_error_percent).toFixed(2)}%`,
+        '≤ 0.5% (IEEE C57.12.90)',
+        tr.max_error_percent > 0.5 ? 'Nguy hiểm' : 'Bình thường'
+      ]);
     }
   }
+      
+  if (tableData.length > 0) {
+    pdf.setFontSize(10);
+    pdf.setTextColor(100, 116, 139);
+    pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
+    pdf.text('Thông số kiểm định kỹ thuật / Technical Evaluation', 20, yPos);
+    yPos += 8;
 
-  // Trending Section (Upgraded)
+    autoTable(pdf, {
+      startY: yPos,
+      head: [['Thông số / Parameter', 'Giá trị / Value', 'Tiêu chuẩn / Standard', 'Đánh giá / Evaluation']],
+      body: tableData,
+      theme: 'grid',
+      styles: { font: robotoRegularBase64 ? 'Roboto' : 'helvetica', fontSize: 10 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold' },
+      columnStyles: {
+        3: { fontStyle: 'bold' }
+      },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.column.index === 3) {
+          if (data.cell.raw === 'Nguy hiểm' || data.cell.raw === 'FAIL') {
+            data.cell.styles.textColor = [220, 38, 38]; // red-600
+          } else if (data.cell.raw === 'Cảnh báo' || data.cell.raw === 'INVESTIGATE') {
+            data.cell.styles.textColor = [217, 119, 6]; // amber-600
+          } else if (data.cell.raw === 'Bình thường' || data.cell.raw === 'PASS') {
+            data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+          }
+        }
+      },
+      margin: { left: 20, right: 20 }
+    });
+    yPos = (pdf as any).lastAutoTable.finalY + 15;
+  }
+
+  // Trending Section (Upgraded with robust date parsing)
   if (historicalReports && historicalReports.length > 1 && reportData.measurements) {
-    // Filter out the current report and any newer reports
-    const currentReportDate = reportData.date ? new Date(reportData.date.split('/').reverse().join('-')).getTime() : Date.now();
+    const currentReportDate = parseReportDate(reportData.date).getTime();
     const pastReports = historicalReports.filter(hr => {
       if (hr.id === reportData.id) return false;
-      const hrDate = hr.date ? new Date(hr.date.split('/').reverse().join('-')).getTime() : 0;
+      const hrDate = parseReportDate(hr.date).getTime();
       return hrDate <= currentReportDate;
     });
     
@@ -841,14 +991,11 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
       const trendTableData = paramsWithHistory.map(k => {
         const currentVal = parseFloat(reportData.measurements[k]);
         
-        // Sort historical reports by date (oldest to newest)
+        // Sort historical reports by date safely
         const sortedHistory = [...pastReports].sort((a, b) => {
-          const [d1, m1, y1] = a.date.split('/');
-          const [d2, m2, y2] = b.date.split('/');
-          return new Date(`${y1}-${m1}-${d1}`).getTime() - new Date(`${y2}-${m2}-${d2}`).getTime();
+          return parseReportDate(a.date).getTime() - parseReportDate(b.date).getTime();
         });
 
-        // Get the most recent previous value
         let prevVal = 'N/A';
         let trend = 'Ổn định';
         let trendIcon = '→';
@@ -895,21 +1042,22 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
   }
 
   // Recommendations
+  if (yPos > 240) { pdf.addPage(); yPos = 20; }
   pdf.setFontSize(10);
   pdf.setTextColor(100, 116, 139);
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'bold');
-  pdf.text('Khuyến cáo / Recommendations', 20, yPos);
+  pdf.text('Khuyến cáo kỹ thuật / Recommendations', 20, yPos);
   yPos += 8;
   
   pdf.setFont(robotoRegularBase64 ? 'Roboto' : 'helvetica', 'normal');
   pdf.setFontSize(11);
   pdf.setTextColor(15, 23, 42);
   
-  let recommendationText = 'Tiếp tục vận hành bình thường. Thực hiện kiểm tra định kỳ theo kế hoạch.';
+  let recommendationText = 'Tiếp tục vận hành bình thường. Thực hiện kiểm tra định kỳ theo kế hoạch tiêu chuẩn ANSI/NETA ATS-2025.';
   if (status === 'warning') {
-    recommendationText = 'Cần theo dõi chặt chẽ các thông số bất thường. Lên kế hoạch kiểm tra chuyên sâu trong vòng 1-3 tháng tới.';
+    recommendationText = 'Cần theo dõi chặt chẽ các thông số bất thường. Lên kế hoạch kiểm tra chuyên sâu, siết lực bu-lông và đo điện trở tiếp xúc trong vòng 1-3 tháng tới.';
   } else if (status === 'critical' || status === 'danger') {
-    recommendationText = 'NGUY HIỂM: Cần tách thiết bị khỏi lưới điện để kiểm tra và sửa chữa ngay lập tức. Nguy cơ sự cố cao.';
+    recommendationText = 'NGUY HIỂM: Cần tách thiết bị khỏi lưới điện để kiểm tra và sửa chữa ngay lập tức. Nguy cơ sự cố phóng điện hoặc già hóa nhiệt cách điện cao.';
   }
   
   const splitRecs = pdf.splitTextToSize(recommendationText, 170);
@@ -919,11 +1067,25 @@ const generateIndividualReportPDF = async (reportData: any, saveAsFile = false, 
   // Footer
   pdf.setFontSize(9);
   pdf.setTextColor(148, 163, 184);
-  pdf.text('Được tạo tự động bởi hệ thống TEV Asset Management', 105, 285, { align: 'center' });
+  pdf.text('Được tạo tự động bởi hệ thống TEV Asset Management & NETA ATS Platform', 105, 285, { align: 'center' });
   pdf.text('Automatically generated by TEV Asset Management System', 105, 290, { align: 'center' });
   
   if (saveAsFile) {
-    pdf.save(`${reportData.id}.pdf`);
+    try {
+      const blob = pdf.output('blob');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${(reportData.id || 'TEV-Report').replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 1000);
+    } catch {
+      pdf.save(`${reportData.id || 'TEV-Report'}.pdf`);
+    }
     return null;
   } else {
     return pdf.output('blob');
@@ -1651,6 +1813,7 @@ export default function App() {
   const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showMasterDirectoryModal, setShowMasterDirectoryModal] = useState(false);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<any>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<any>(null);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
@@ -1813,6 +1976,8 @@ export default function App() {
   const unsubCustRef = useRef<(() => void) | null>(null);
   const unsubInvRef = useRef<(() => void) | null>(null);
   const unsubEqRef = useRef<(() => void) | null>(null);
+  const unsubReportsRef = useRef<(() => void) | null>(null);
+  const [isReportsLoading, setIsReportsLoading] = useState(false);
   const [isEquipmentLoading, setIsEquipmentLoading] = useState(false);
 
   const handleQuickUpdateWorkOrderStatus = async (woId: string, newStatus: string) => {
@@ -1941,6 +2106,7 @@ export default function App() {
             fetchCustomers();
             fetchWorkOrders();
             fetchEquipment();
+            fetchReports();
           } else {
             // Create default user document
             // If email matches the default admin email, set as admin
@@ -1955,6 +2121,7 @@ export default function App() {
             fetchCustomers();
             fetchWorkOrders();
             fetchEquipment();
+            fetchReports();
           }
         } else {
           setUser(null);
@@ -1970,6 +2137,7 @@ export default function App() {
         fetchCustomers();
         fetchWorkOrders();
         fetchEquipment();
+        fetchReports();
       } finally {
         setIsAuthLoading(false);
       }
@@ -1983,6 +2151,7 @@ export default function App() {
     fetchWorkOrders();
     fetchCustomers();
     fetchEquipment();
+    fetchReports();
   }, []);
 
   useEffect(() => {
@@ -2055,6 +2224,7 @@ export default function App() {
       fetchWorkOrders();
       fetchInventory();
       fetchEquipment();
+      fetchReports();
     } catch (err: any) {
       console.error('Demo login error:', err);
     } finally {
@@ -2068,6 +2238,7 @@ export default function App() {
       if (unsubCustRef.current) { unsubCustRef.current(); unsubCustRef.current = null; }
       if (unsubInvRef.current) { unsubInvRef.current(); unsubInvRef.current = null; }
       if (unsubEqRef.current) { unsubEqRef.current(); unsubEqRef.current = null; }
+      if (unsubReportsRef.current) { unsubReportsRef.current(); unsubReportsRef.current = null; }
       await logOut();
     } catch (err) {
       console.warn('Logout warning:', err);
@@ -2135,65 +2306,90 @@ export default function App() {
 
   const handleOpenWorkOrderDetail = (order: any) => {
     if (!order) return;
-    setSelectedWorkOrder(order);
 
-    const eqIds: string[] = Array.isArray(order.equipmentId)
-      ? order.equipmentId.map((id: any) => String(id).trim())
-      : (order.equipmentId ? [String(order.equipmentId).trim()] : []);
+    // Tìm bản ghi chi tiết đầy đủ nhất từ danh sách workOrders hoặc DEFAULT_WORK_ORDERS
+    const orderIdLower = (order.id || '').toString().toLowerCase();
+    const matchedOrder = (workOrders || []).find(w => w.id && w.id.toLowerCase() === orderIdLower) ||
+                         DEFAULT_WORK_ORDERS.find(w => w.id && w.id.toLowerCase() === orderIdLower) ||
+                         order;
+
+    const fullOrder = { ...order, ...matchedOrder };
+    setSelectedWorkOrder(fullOrder);
+
+    let rawEq = fullOrder.equipmentId;
+    if (!rawEq && fullOrder.equipment) rawEq = fullOrder.equipment;
+    const eqIds: string[] = Array.isArray(rawEq)
+      ? rawEq.map((id: any) => String(id).trim()).filter(Boolean)
+      : (rawEq ? [String(rawEq).trim()] : []);
 
     let materialsList: any[] = [];
-    if (Array.isArray(order.usedMaterials)) {
-      materialsList = order.usedMaterials.map((m: any) => {
+    if (Array.isArray(fullOrder.usedMaterials)) {
+      materialsList = fullOrder.usedMaterials.map((m: any) => {
         if (typeof m === 'object' && m !== null) return m;
         return { name: String(m), quantity: 1, unit: 'pcs' };
       });
-    } else if (typeof order.usedMaterials === 'string' && order.usedMaterials.trim()) {
-      materialsList = order.usedMaterials.split(',').map((s: string) => ({
+    } else if (typeof fullOrder.usedMaterials === 'string' && fullOrder.usedMaterials.trim()) {
+      materialsList = fullOrder.usedMaterials.split(',').map((s: string) => ({
         name: s.trim(),
         quantity: 1,
         unit: 'pcs'
       }));
     }
 
-    let custId = order.customerId || '';
-    if (!custId && order.customer) {
-      const matchCust = customers.find(c => c.name?.toLowerCase() === order.customer?.toLowerCase());
-      custId = matchCust?.id || order.customer;
+    let custId = fullOrder.customerId || '';
+    if (!custId && fullOrder.customer) {
+      const matchCust = customers.find(c => 
+        c.name?.toLowerCase() === fullOrder.customer?.toLowerCase() ||
+        c.id?.toLowerCase() === fullOrder.customer?.toLowerCase()
+      );
+      custId = matchCust?.id || fullOrder.customer;
+    }
+    if (!custId && fullOrder.customerName) {
+      const matchCust = customers.find(c => c.name?.toLowerCase() === fullOrder.customerName?.toLowerCase());
+      custId = matchCust?.id || fullOrder.customerName;
     }
     if (!custId && customers.length > 0) {
       custId = customers[0].id;
     }
 
+    // Chuẩn hóa trạng thái và ưu tiên để khớp với dropdown
+    let rawStatus = (fullOrder.status || 'initiated').toString().toLowerCase();
+    if (rawStatus === 'in_progress') rawStatus = 'in-progress';
+    if (rawStatus === 'open') rawStatus = 'initiated';
+
+    let rawPriority = (fullOrder.priority || 'medium').toString().toLowerCase();
+    if (rawPriority === 'critical') rawPriority = 'urgent';
+
     setNewWorkOrder({
-      title: order.title || (order.id ? `Phiếu ${order.id}` : ''),
-      description: order.description || '',
+      title: fullOrder.title || (fullOrder.id ? `Phiếu ${fullOrder.id}` : ''),
+      description: fullOrder.description || '',
       equipmentId: eqIds,
       customerId: custId,
-      factory: order.factory || '',
-      priority: (order.priority || 'medium').toString().toLowerCase(),
-      type: order.type || 'preventive',
-      status: order.status || 'initiated',
-      assignedTo: order.assignedTo || '',
-      dueDate: order.dueDate ? (order.dueDate.includes('T') ? order.dueDate.split('T')[0] : order.dueDate) : '',
+      factory: fullOrder.factory || '',
+      priority: rawPriority,
+      type: fullOrder.type || 'preventive',
+      status: rawStatus,
+      assignedTo: fullOrder.assignedTo || '',
+      dueDate: fullOrder.dueDate ? (fullOrder.dueDate.includes('T') ? fullOrder.dueDate.split('T')[0] : fullOrder.dueDate) : '',
       usedMaterials: materialsList,
-      responsibleApprove: order.responsibleApprove || 'TM',
-      responsibleDo: order.responsibleDo || 'Everybody',
-      blockingRequired: Boolean(order.blockingRequired),
-      workPermitId: order.workPermitId || order.id || '',
-      isUnplanned: Boolean(order.isUnplanned),
-      failureCode: order.failureCode || '',
-      rootCause: order.rootCause || '',
-      actualTimeSpent: typeof order.actualTimeSpent === 'number' ? order.actualTimeSpent : (typeof order.actualHours === 'number' ? order.actualHours : 0),
-      pmFrequency: order.pmFrequency || (order.type === 'preventive' ? 'monthly' : ''),
-      estimatedTime: typeof order.estimatedTime === 'number' ? order.estimatedTime : (typeof order.estimatedHours === 'number' ? order.estimatedHours : 0),
-      laborCount: order.laborCount || 1,
-      laborCost: order.laborCost || 0,
-      partCost: order.partCost || 0,
-      attachments: Array.isArray(order.attachments) ? order.attachments : [],
-      downtimeStart: order.downtimeStart || '',
-      repairStart: order.repairStart || '',
-      repairEnd: order.repairEnd || '',
-      restartTime: order.restartTime || ''
+      responsibleApprove: fullOrder.responsibleApprove || 'TM',
+      responsibleDo: fullOrder.responsibleDo || 'Everybody',
+      blockingRequired: Boolean(fullOrder.blockingRequired),
+      workPermitId: fullOrder.workPermitId || fullOrder.id || '',
+      isUnplanned: Boolean(fullOrder.isUnplanned),
+      failureCode: fullOrder.failureCode || '',
+      rootCause: fullOrder.rootCause || '',
+      actualTimeSpent: typeof fullOrder.actualTimeSpent === 'number' ? fullOrder.actualTimeSpent : (typeof fullOrder.actualHours === 'number' ? fullOrder.actualHours : 0),
+      pmFrequency: fullOrder.pmFrequency || (fullOrder.type === 'preventive' ? 'monthly' : ''),
+      estimatedTime: typeof fullOrder.estimatedTime === 'number' ? fullOrder.estimatedTime : (typeof fullOrder.estimatedHours === 'number' ? fullOrder.estimatedHours : 0),
+      laborCount: fullOrder.laborCount || 1,
+      laborCost: fullOrder.laborCost || 0,
+      partCost: fullOrder.partCost || 0,
+      attachments: Array.isArray(fullOrder.attachments) ? fullOrder.attachments : [],
+      downtimeStart: fullOrder.downtimeStart || '',
+      repairStart: fullOrder.repairStart || '',
+      repairEnd: fullOrder.repairEnd || '',
+      restartTime: fullOrder.restartTime || ''
     });
     setWoError('');
     setShowWorkOrderModal(true);
@@ -2340,13 +2536,86 @@ export default function App() {
     return unsubEqRef.current;
   };
 
+  const fetchReports = (force: boolean = false) => {
+    if (unsubReportsRef.current && !force) return unsubReportsRef.current;
+    if (unsubReportsRef.current && force) {
+      try { unsubReportsRef.current(); } catch (e) {}
+      unsubReportsRef.current = null;
+    }
+
+    setIsReportsLoading(true);
+    try {
+      const q = query(
+        collection(db, 'reports'),
+        orderBy('createdAt', 'desc'),
+        limit(200)
+      );
+
+      unsubReportsRef.current = onSnapshot(q, (snapshot) => {
+        const reportsFromFs = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        setAllReports(prev => {
+          const reportMap = new Map();
+          initialAllReports.forEach(r => {
+            const key = (r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase();
+            reportMap.set(key, r);
+          });
+          prev.forEach(r => {
+            const key = (r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase();
+            reportMap.set(key, r);
+          });
+          reportsFromFs.forEach((r: any) => {
+            const key = (r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase();
+            reportMap.set(key, { ...reportMap.get(key), ...r });
+          });
+          return Array.from(reportMap.values());
+        });
+        setIsReportsLoading(false);
+      }, (error) => {
+        console.warn("Firestore reports notice (fallback query):", error);
+        try {
+          const fallbackQ = query(collection(db, 'reports'), limit(200));
+          unsubReportsRef.current = onSnapshot(fallbackQ, (snapshot) => {
+            const reportsFromFs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            if (reportsFromFs.length > 0) {
+              setAllReports(prev => {
+                const reportMap = new Map();
+                initialAllReports.forEach(r => reportMap.set((r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase(), r));
+                prev.forEach(r => reportMap.set((r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase(), r));
+                reportsFromFs.forEach((r: any) => reportMap.set((r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase(), { ...reportMap.get((r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase()), ...r }));
+                return Array.from(reportMap.values());
+              });
+            }
+            setIsReportsLoading(false);
+          }, (err2) => {
+            console.warn("Firestore reports fallback notice:", err2);
+            setIsReportsLoading(false);
+          });
+        } catch (e2) {
+          setIsReportsLoading(false);
+        }
+      });
+    } catch (e) {
+      console.warn("Error setting up reports listener:", e);
+      setIsReportsLoading(false);
+    }
+    return unsubReportsRef.current;
+  };
+
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setIsSidebarOpen(false); // Close sidebar on mobile when tab changes
-    if (tab === 'dashboard' || tab === 'cmms' || tab === 'customers' || tab === 'equipment') {
+    if (tab === 'field-entry') {
+      setAtsDisplayMode('form');
+    }
+    if (tab === 'dashboard' || tab === 'cmms' || tab === 'customers' || tab === 'equipment' || tab === 'analysis' || tab === 'reports') {
       fetchWorkOrders();
       fetchCustomers();
       fetchEquipment();
+      fetchReports();
     }
     if (tab === 'inventory') {
       fetchInventory();
@@ -2608,20 +2877,30 @@ export default function App() {
     try {
       let custId = '';
       const now = new Date().toISOString();
+      const customerRecord: CustomerItem = {
+        ...newCustomer,
+        id: custId,
+        createdAt: editingCustomer?.createdAt || now,
+        updatedAt: now
+      };
+
       if (editingCustomer) {
         custId = editingCustomer.id;
         await updateDoc(doc(db, 'customers', custId), {
           ...newCustomer,
+          id: custId,
           updatedAt: now
         });
       } else {
         custId = generateNextCustomerId();
-        await setDoc(doc(db, 'customers', custId), {
-          ...newCustomer,
-          createdAt: now,
-          updatedAt: now
-        });
+        customerRecord.id = custId;
+        await setDoc(doc(db, 'customers', custId), customerRecord);
       }
+
+      setCustomers(prev => {
+        const filtered = prev.filter(c => c.id !== custId);
+        return [customerRecord, ...filtered];
+      });
 
       setShowCustomerModal(false);
       setNewCustomer({ name: '', email: '', phone: '', address: '', factories: [] });
@@ -2664,43 +2943,16 @@ export default function App() {
     });
   };
 
+  const generateWorkOrderId = () => {
+    return getNextWorkOrderId(workOrders);
+  };
+
   const generateWorkPermitId = () => {
-    const currentYear = new Date().getFullYear();
-    const wpPrefix = `WP-${currentYear}-`;
-    const currentYearWPs = workOrders
-      .map(wo => wo.workPermitId)
-      .filter(id => id && id.startsWith(wpPrefix));
-    
-    let maxNum = 0;
-    currentYearWPs.forEach(id => {
-      const numStr = id.replace(wpPrefix, '');
-      const num = parseInt(numStr, 10);
-      if (!isNaN(num) && num > maxNum) {
-        maxNum = num;
-      }
-    });
-    
-    const nextNum = maxNum + 1;
-    return `${wpPrefix}${nextNum.toString().padStart(3, '0')}`;
+    return getNextWorkPermitId(workOrders);
   };
 
   const generateNextCustomerId = () => {
-    const prefix = 'KH-';
-    const existingIds = customers
-      .map(c => c.id)
-      .filter(id => id && id.startsWith(prefix));
-    
-    let maxNum = 0;
-    existingIds.forEach(id => {
-      const numStr = id.replace(prefix, '');
-      const num = parseInt(numStr, 10);
-      if (!isNaN(num) && num > maxNum) {
-        maxNum = num;
-      }
-    });
-    
-    const nextNum = maxNum + 1;
-    return `${prefix}${nextNum.toString().padStart(3, '0')}`;
+    return getNextCustomerId(customers as any);
   };
 
   const handleSaveWorkOrder = async () => {
@@ -2712,6 +2964,7 @@ export default function App() {
 
     try {
       let woId = '';
+      let wpId = '';
       const now = new Date().toISOString();
       
       // Auto-populate timestamps based on status
@@ -2733,23 +2986,42 @@ export default function App() {
       if (selectedWorkOrder) {
         // Update / Upsert
         woId = selectedWorkOrder.id;
+        wpId = selectedWorkOrder.workPermitId || updatedWO.workPermitId || generateWorkPermitId();
         await setDoc(doc(db, 'workOrders', woId), {
           id: woId,
           ...selectedWorkOrder,
           ...updatedWO,
+          workPermitId: wpId,
           updatedAt: now,
           completedAt: updatedWO.status === 'completed' ? now : (selectedWorkOrder?.completedAt || null)
         }, { merge: true });
       } else {
-        // Create
-        const docRef = await addDoc(collection(db, 'workOrders'), {
+        // Create with auto-incremented WO-YYYY-XXX and WP-YYYY-XXX
+        woId = (newWorkOrder.id && newWorkOrder.id.match(/^WO-\d{4}-\d+/i)) ? newWorkOrder.id : generateWorkOrderId();
+        wpId = (newWorkOrder.workPermitId && newWorkOrder.workPermitId.match(/^WP-\d{4}-\d+/i)) ? newWorkOrder.workPermitId : generateWorkPermitId();
+        const finalNewWo = {
           ...updatedWO,
+          id: woId,
+          workPermitId: wpId,
           createdAt: now,
           updatedAt: now,
           completedAt: updatedWO.status === 'completed' ? now : null
-        });
-        woId = docRef.id;
+        };
+        await setDoc(doc(db, 'workOrders', woId), finalNewWo);
       }
+
+      // Update state immediately for instant feedback
+      const resolvedWoItem: WorkOrderItem = {
+        ...updatedWO,
+        id: woId,
+        workPermitId: wpId,
+        createdAt: selectedWorkOrder ? selectedWorkOrder.createdAt : now,
+        updatedAt: now
+      };
+      setWorkOrders(prev => {
+        const filtered = prev.filter(w => w.id !== woId);
+        return [resolvedWoItem, ...filtered];
+      });
 
       // Sync to Google Sheets
       const customerNameStr = customers.find(c => c.id === updatedWO.customerId)?.name || updatedWO.customerId;
@@ -3075,14 +3347,132 @@ export default function App() {
   const [reportCurrentPage, setReportCurrentPage] = useState(1);
   const reportsPerPage = 15;
 
-  // Field Entry Mode: NETA ATS-2025 Liquid Transformers, Solar PV, BESS, Dry-Type, vs Standard
+  // Field Entry Mode: NETA ATS-2025 vs NETA MTS-2023 vs NETA ECS-2024
+  const [netaStandardModule, setNetaStandardModule] = useState<'ats' | 'mts' | 'ecs'>('ats');
+  const [mtsChecklistMode, setMtsChecklistMode] = useState<MtsChecklistMode>('transformer');
+  const [ecsModuleMode, setEcsModuleMode] = useState<EcsModuleId>('low-voltage');
+  const [isMtsSelectorCollapsed, setIsMtsSelectorCollapsed] = useState(false);
+  const [netaLanguage, setNetaLanguage] = useState<'vi' | 'en'>('vi');
+  const [atsDisplayMode, setAtsDisplayMode] = useState<'tev-report' | 'form'>('form');
   const [fieldEntryMode, setFieldEntryMode] = useState<FieldEntryMode>('neta-liquid-transformer');
   const [fieldEntrySubTab, setFieldEntrySubTab] = useState<'station' | 'checklists'>('station');
+  const [selectedReportForModal, setSelectedReportForModal] = useState<any | null>(null);
+
+  // Handle direct navigation from Project Management (Quản lý dự án) to NETA ATS or MTS Form
+  const handleDirectNavigateToNetaForm = (
+    project: ProjectMasterRecord,
+    equipment: ProjectEquipmentItem,
+    standard: 'ats' | 'mts' = 'ats'
+  ) => {
+    setShowMasterDirectoryModal(false);
+    setActiveTab('field-entry');
+
+    const isMts = standard === 'mts';
+    if (isMts) {
+      setNetaStandardModule('mts');
+      // Sync MTS Transformer Payload with matching Customer & Equipment details
+      const currentPayload = getAtsPayload('neta-mts-transformer') || {};
+      const updated = {
+        ...currentPayload,
+        site_info: {
+          ...(currentPayload.site_info || {}),
+          customer_name: project.customerName || (currentPayload.site_info && currentPayload.site_info.customer_name) || '',
+          project_name: project.name || (currentPayload.site_info && currentPayload.site_info.project_name) || '',
+          transformer_tag: equipment.kksCode || equipment.name || (currentPayload.site_info && currentPayload.site_info.transformer_tag) || '',
+          station_name: equipment.location || project.factory || 'Trạm biến áp chính',
+          substation_name: equipment.location || project.factory || 'Trạm biến áp chính',
+          fse_name: project.leadFse || (currentPayload.site_info && currentPayload.site_info.fse_name) || 'Võ Minh Tú'
+        }
+      };
+      saveAtsPayload('neta-mts-transformer', updated);
+      window.dispatchEvent(new CustomEvent('tev_mts_open_form'));
+      window.dispatchEvent(
+        new CustomEvent('tev_ats_payload_updated', {
+          detail: { specId: 'neta-mts-transformer', payload: updated }
+        })
+      );
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('tev_mts_open_form'));
+        window.dispatchEvent(
+          new CustomEvent('tev_ats_payload_updated', {
+            detail: { specId: 'neta-mts-transformer', payload: updated }
+          })
+        );
+      }, 60);
+    } else {
+      // ATS Mode
+      setNetaStandardModule('ats');
+      setAtsDisplayMode('form');
+      const resolvedSpecId = (resolveEquipmentTypeToSpecId(equipment.type, equipment.name) || 'neta-liquid-transformer') as FieldEntryMode;
+      setFieldEntryMode(resolvedSpecId);
+
+      const currentPayload = getAtsPayload(resolvedSpecId) || {};
+      const updated = {
+        ...currentPayload,
+        site_info: {
+          ...(currentPayload.site_info || {}),
+          customer_name: project.customerName || (currentPayload.site_info && currentPayload.site_info.customer_name) || '',
+          project_name: project.name || (currentPayload.site_info && currentPayload.site_info.project_name) || '',
+          equipment_name: equipment.name || (currentPayload.site_info && currentPayload.site_info.equipment_name) || '',
+          equipment_tag: equipment.kksCode || equipment.name || (currentPayload.site_info && currentPayload.site_info.equipment_tag) || '',
+          transformer_tag: equipment.kksCode || equipment.name,
+          cable_tag: equipment.kksCode || equipment.name,
+          breaker_tag: equipment.kksCode || equipment.name,
+          motor_tag: equipment.kksCode || equipment.name,
+          switchgear_tag: equipment.kksCode || equipment.name,
+          generator_tag: equipment.kksCode || equipment.name,
+          ats_tag: equipment.kksCode || equipment.name,
+          battery_bank_tag: equipment.kksCode || equipment.name,
+          ground_grid_tag: equipment.kksCode || equipment.name,
+          station_name: equipment.location || project.factory || 'Trạm biến áp chính',
+          substation_name: equipment.location || project.factory || 'Trạm biến áp chính',
+          location: equipment.location || project.factory || 'Trạm biến áp chính',
+          fse_name: project.leadFse || (currentPayload.site_info && currentPayload.site_info.fse_name) || 'Võ Minh Tú'
+        }
+      };
+      saveAtsPayload(resolvedSpecId, updated);
+      window.dispatchEvent(
+        new CustomEvent('tev_ats_payload_updated', {
+          detail: { specId: resolvedSpecId, payload: updated }
+        })
+      );
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('tev_ats_payload_updated', {
+            detail: { specId: resolvedSpecId, payload: updated }
+          })
+        );
+      }, 60);
+    }
+  };
+
+  useEffect(() => {
+    const handleNavEvent = (e: any) => {
+      if (e.detail?.project && e.detail?.equipment) {
+        handleDirectNavigateToNetaForm(e.detail.project, e.detail.equipment, e.detail.standard || 'ats');
+      }
+    };
+    window.addEventListener(EVT_NAVIGATE_TO_NETA_FORM, handleNavEvent);
+    return () => window.removeEventListener(EVT_NAVIGATE_TO_NETA_FORM, handleNavEvent);
+  }, []);
 
   const handleSaveNetaReport = async (reportPayload: any) => {
     try {
       const { data: netaData, analysisResult, equipmentId, date, type: payloadType } = reportPayload;
-      const reportId = `REP-NETA-${Date.now()}`;
+      const effectiveData = netaData || reportPayload?.rawPayload || reportPayload?.data;
+      const effectiveResult = analysisResult || reportPayload?.evaluation;
+      const rawDate = date || reportPayload?.date || effectiveData?.site_info?.test_date || new Date().toISOString().split('T')[0];
+      let formattedDisplayDate = rawDate;
+      if (rawDate.includes('-')) {
+        const parts = rawDate.split('-');
+        if (parts.length === 3) formattedDisplayDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      const dateDigits = rawDate.replace(/\D/g, '').slice(0, 8) || new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const rawTag = equipmentId || reportPayload?.equipTag || effectiveData?.site_info?.transformer_tag || effectiveData?.site_info?.equipment_tag || 'EQ01';
+      const cleanTag = String(rawTag).replace(/[^a-zA-Z0-9]/g, '').slice(0, 10);
+      const reportId = reportPayload?.id && !reportPayload.id.includes(Date.now().toString().slice(0, 6))
+        ? reportPayload.id
+        : `REP-ATS-${dateDigits}-${cleanTag}`;
       const statusMap = {
         PASS: 'healthy' as const,
         INVESTIGATE: 'warning' as const,
@@ -3096,33 +3486,44 @@ export default function App() {
       };
       const calculatedStatus = statusMap[analysisResult?.overall_status as keyof typeof statusMap] || 'warning';
 
-      const isGenerator = payloadType?.includes('ENGINE_GENERATOR') || payloadType?.includes('GENERATOR') || Boolean(netaData?.site_info?.generator_tag);
-      const isSwitchgear = !isGenerator && (payloadType?.includes('Switchgear') || payloadType?.includes('Sec 7.1.1') || Boolean(netaData?.site_info?.switchgear_tag));
-      const isAts = !isGenerator && !isSwitchgear && (payloadType?.includes('AUTOMATIC_TRANSFER_SWITCH') || payloadType?.includes('ATS') || Boolean(netaData?.site_info?.ats_tag));
-      const isBatteryVrla = payloadType?.includes('BATTERY_VRLA') || payloadType?.includes('VRLA') || (Boolean(netaData?.site_info?.battery_bank_tag) && (netaData?.electrical_tests?.negative_post_temperature_c !== undefined || netaData?.site_info?.battery_type?.includes('VRLA')));
-      const isBatteryFlooded = !isBatteryVrla && (payloadType?.includes('BATTERY_FLOODED') || payloadType?.includes('Flooded') || Boolean(netaData?.site_info?.battery_bank_tag));
-      const isLiquidTransformer = payloadType?.includes('Liquid-Filled') || payloadType?.includes('Sec 7.2.2') || Boolean(netaData?.electrical_tests?.oil_sample_tests_astm_d923);
-      const isDcMotor = payloadType?.includes('DC') || payloadType?.includes('Sec 7.15.3') || Boolean(netaData?.electrical_tests?.armature_bar_to_bar_resistance_micro_ohms);
-      const isMotor = !isDcMotor && (payloadType?.includes('Rotating') || payloadType?.includes('Motor') || Boolean(netaData?.site_info?.motor_tag));
-      const isPd = payloadType?.includes('Partial Discharge') || payloadType?.includes('PD') || Boolean(netaData?.pd_sensor_measurements);
-      const isThermography = payloadType?.includes('Thermograph') || Boolean(netaData?.site_info?.survey_tag);
-      const isSf6Switch = payloadType?.includes('SF6') || Boolean(netaData?.site_info?.switch_tag);
-      const isGrounding = payloadType?.includes('Grounding') || payloadType?.includes('Sec 7.13') || Boolean(netaData?.site_info?.grounding_system_tag) || Boolean(netaData?.electrical_tests?.fall_of_potential_ground_resistance_ieee_81_ohms);
-      const isLvBreaker = payloadType?.includes('Circuit Breakers') || payloadType?.includes('ACB') || payloadType?.includes('Sec 7.6.1.2') || (Boolean(netaData?.site_info?.breaker_tag) && Boolean(netaData?.electrical_tests?.secondary_injection_trip_unit_test));
-      const isCableLv = payloadType?.includes('Low-Voltage') || payloadType?.includes('Sec 7.3.2') || (Boolean(netaData?.site_info?.cable_tag) && Boolean(netaData?.electrical_tests?.parallel_conductors_dc_resistance_milli_ohms));
-      const isCable = !isCableLv && (payloadType?.includes('Cable') || Boolean(netaData?.site_info?.cable_tag));
-      const isEvse = payloadType?.includes('Electric Vehicle') || payloadType?.includes('EVSE') || Boolean(netaData?.site_info?.evse_tag);
-      const isPv = payloadType?.includes('Solar') || Boolean(netaData?.site_info?.pv_array_tag);
-      const isBess = payloadType?.includes('BESS') || Boolean(netaData?.site_info?.bess_container_tag);
-      const isLarge = payloadType?.includes('Large') || Boolean(netaData?.electrical_tests?.core_insulation_resistance_500v_dc_megohms !== undefined);
+      const isMtsLiquid = payloadType?.includes('NETA_MTS') || payloadType?.includes('MTS') || Boolean(netaData?.electrical_tests?.service_aged_oil_sample_tests_table_100_4_1);
+      const isGenerator = !isMtsLiquid && (payloadType?.includes('ENGINE_GENERATOR') || payloadType?.includes('GENERATOR') || Boolean(netaData?.site_info?.generator_tag));
+      const isSwitchgear = !isMtsLiquid && !isGenerator && (payloadType?.includes('Switchgear') || payloadType?.includes('Sec 7.1.1') || Boolean(netaData?.site_info?.switchgear_tag));
+      const isAts = !isMtsLiquid && !isGenerator && !isSwitchgear && (payloadType?.includes('AUTOMATIC_TRANSFER_SWITCH') || payloadType?.includes('ATS') || Boolean(netaData?.site_info?.ats_tag));
+      const isBatteryVrla = !isMtsLiquid && (payloadType?.includes('BATTERY_VRLA') || payloadType?.includes('VRLA') || (Boolean(netaData?.site_info?.battery_bank_tag) && (netaData?.electrical_tests?.negative_post_temperature_c !== undefined || netaData?.site_info?.battery_type?.includes('VRLA'))));
+      const isBatteryFlooded = !isMtsLiquid && !isBatteryVrla && (payloadType?.includes('BATTERY_FLOODED') || payloadType?.includes('Flooded') || Boolean(netaData?.site_info?.battery_bank_tag));
+      const isLiquidTransformer = !isMtsLiquid && (payloadType?.includes('Liquid-Filled') || payloadType?.includes('Sec 7.2.2') || Boolean(netaData?.electrical_tests?.oil_sample_tests_astm_d923));
+      const isDcMotor = !isMtsLiquid && (payloadType?.includes('DC') || payloadType?.includes('Sec 7.15.3') || Boolean(netaData?.electrical_tests?.armature_bar_to_bar_resistance_micro_ohms));
+      const isMotor = !isMtsLiquid && !isDcMotor && (payloadType?.includes('Rotating') || payloadType?.includes('Motor') || Boolean(netaData?.site_info?.motor_tag));
+      const isPd = !isMtsLiquid && (payloadType?.includes('Partial Discharge') || payloadType?.includes('PD') || Boolean(netaData?.pd_sensor_measurements));
+      const isThermography = !isMtsLiquid && (payloadType?.includes('Thermograph') || Boolean(netaData?.site_info?.survey_tag));
+      const isSf6Switch = !isMtsLiquid && (payloadType?.includes('SF6') || Boolean(netaData?.site_info?.switch_tag));
+      const isGrounding = !isMtsLiquid && (payloadType?.includes('Grounding') || payloadType?.includes('Sec 7.13') || Boolean(netaData?.site_info?.grounding_system_tag) || Boolean(netaData?.electrical_tests?.fall_of_potential_ground_resistance_ieee_81_ohms));
+      const isLvBreaker = !isMtsLiquid && (payloadType?.includes('Circuit Breakers') || payloadType?.includes('ACB') || payloadType?.includes('Sec 7.6.1.2') || (Boolean(netaData?.site_info?.breaker_tag) && Boolean(netaData?.electrical_tests?.secondary_injection_trip_unit_test)));
+      const isCableLv = !isMtsLiquid && (payloadType?.includes('Low-Voltage') || payloadType?.includes('Sec 7.3.2') || (Boolean(netaData?.site_info?.cable_tag) && Boolean(netaData?.electrical_tests?.parallel_conductors_dc_resistance_milli_ohms)));
+      const isCable = !isMtsLiquid && !isCableLv && (payloadType?.includes('Cable') || Boolean(netaData?.site_info?.cable_tag));
+      const isEvse = !isMtsLiquid && (payloadType?.includes('Electric Vehicle') || payloadType?.includes('EVSE') || Boolean(netaData?.site_info?.evse_tag));
+      const isPv = !isMtsLiquid && (payloadType?.includes('Solar') || Boolean(netaData?.site_info?.pv_array_tag));
+      const isBess = !isMtsLiquid && (payloadType?.includes('BESS') || Boolean(netaData?.site_info?.bess_container_tag));
+      const isLarge = !isMtsLiquid && (payloadType?.includes('Large') || Boolean(netaData?.electrical_tests?.core_insulation_resistance_500v_dc_megohms !== undefined));
 
-      const equipTag = equipmentId || netaData?.site_info?.grounding_system_tag || netaData?.site_info?.breaker_tag || netaData?.site_info?.switchgear_tag || netaData?.site_info?.generator_tag || netaData?.site_info?.ats_tag || netaData?.site_info?.battery_bank_tag || netaData?.site_info?.motor_tag || netaData?.site_info?.equipment_tag || netaData?.site_info?.survey_tag || netaData?.site_info?.switch_tag || netaData?.site_info?.cable_tag || netaData?.site_info?.evse_tag || netaData?.site_info?.pv_array_tag || netaData?.site_info?.bess_container_tag || netaData?.site_info?.transformer_tag || 'EQ-01';
-      let equipName = `Thiết bị ${equipTag}`;
-      let equipType = 'Máy biến áp';
-      let testStandard = 'ANSI/NETA ATS-2025';
-      let reportNotes = `[${testStandard}] ${analysisResult?.status_reason || 'Đã phân tích kỹ thuật'}`;
+      const equipTag = equipmentId || reportPayload?.equipTag || netaData?.site_info?.grounding_system_tag || netaData?.site_info?.breaker_tag || netaData?.site_info?.switchgear_tag || netaData?.site_info?.generator_tag || netaData?.site_info?.ats_tag || netaData?.site_info?.battery_bank_tag || netaData?.site_info?.motor_tag || netaData?.site_info?.equipment_tag || netaData?.site_info?.survey_tag || netaData?.site_info?.switch_tag || netaData?.site_info?.cable_tag || netaData?.site_info?.evse_tag || netaData?.site_info?.pv_array_tag || netaData?.site_info?.bess_container_tag || netaData?.site_info?.transformer_tag || 'EQ-01';
+      let equipName = reportPayload?.equipName || `Thiết bị ${equipTag}`;
+      let equipType = reportPayload?.equipType || 'Máy biến áp';
+      let testStandard = reportPayload?.testStandard || 'ANSI/NETA ATS-2025';
+      let reportNotes = reportPayload?.reportNotes || `[${testStandard}] ${analysisResult?.status_reason || 'Đã phân tích kỹ thuật'}`;
 
-      if (isGrounding) {
+      if (reportPayload?.payloadType === 'NETA_ATS_UNIVERSAL') {
+        equipName = reportPayload.equipName || `Thiết bị ${equipTag}`;
+        equipType = reportPayload.equipType || 'NETA ATS Equipment';
+        testStandard = reportPayload.testStandard || 'ANSI/NETA ATS-2025';
+        reportNotes = reportPayload.reportNotes || `[NETA ATS-2025] ${reportPayload.evaluation?.status_title || 'Đã thẩm định'}`;
+      } else if (isMtsLiquid) {
+        equipName = `Máy biến áp ngâm dầu bảo trì ${equipTag}`;
+        equipType = 'Transformers, Liquid-Filled (NETA MTS-2023)';
+        testStandard = 'ANSI/NETA MTS-2023 Mục 7.2.2';
+        reportNotes = `[NETA MTS-2023 Sec 7.2.2] ${analysisResult?.status_reason_vi || analysisResult?.status_reason || 'Đã phân tích kỹ thuật'}. Đánh thủng dầu: ${netaData?.electrical_tests?.service_aged_oil_sample_tests_table_100_4_1?.dielectric_breakdown_d1816_1mm_kv || 19.5}kV, Ẩm: ${netaData?.electrical_tests?.service_aged_oil_sample_tests_table_100_4_1?.water_content_d1533_ppm || 42}ppm, DGA C2H2: ${netaData?.electrical_tests?.dga_test_ieee_c57_104?.acetylene_c2h2_ppm || 8.5}ppm`;
+      } else if (isGrounding) {
         equipName = `Hệ thống tiếp địa & nối đất ${equipTag}`;
         equipType = 'Grounding Systems (NETA ATS-2025 Mục 7.13 & IEEE Std 81)';
         testStandard = 'ANSI/NETA ATS-2025 Mục 7.13 & IEEE Std 81';
@@ -3228,7 +3629,7 @@ export default function App() {
         id: reportId,
         equipmentId: equipTag,
         equipmentName: equipName,
-        date: date || netaData?.site_info?.test_date || new Date().toISOString().split('T')[0],
+        date: formattedDisplayDate,
         inspector: netaData?.site_info?.fse_name || 'Kỹ sư FSE',
         status: calculatedStatus,
         notes: reportNotes,
@@ -3241,30 +3642,64 @@ export default function App() {
         }
       };
 
-      setAllReports(prev => [newReport, ...prev]);
+      // Harmonize disparate FSE fields into CMMS canonical schema (WO-YYYY-XXX, WP-YYYY-XXX, KHXXX)
+      const { workOrder, report: canonicalReport, equipmentUpdate } = harmonizeFseToCmms({
+        rawPayload: reportPayload,
+        data: effectiveData,
+        analysisResult: effectiveResult,
+        siteInfo: effectiveData?.site_info,
+        equipmentId: reportPayload.equipmentId || rawTag,
+        equipmentName: equipName,
+        equipmentType: equipType,
+        customer: reportPayload.customer || customerName || effectiveData?.site_info?.project_name,
+        customerId: reportPayload.customerId,
+        factory: reportPayload.factory || effectiveData?.site_info?.location || effectiveData?.site_info?.substation,
+        fseName: reportPayload.inspector || effectiveData?.site_info?.fse_name,
+        testDate: rawDate,
+        type: testStandard,
+        existingWorkOrders: workOrders,
+        existingCustomers: customers,
+        existingEquipment: allEquipment
+      });
 
-      // Update equipment status if found in allEquipment
+      // 1. Update CMMS Work Orders state immediately with canonical fields
+      setWorkOrders(prev => {
+        const filtered = prev.filter(w => w.id !== workOrder.id);
+        return [workOrder as any, ...filtered];
+      });
+
+      // 2. Update Reports state immediately
+      setAllReports(prev => {
+        const filtered = prev.filter(r => r.id !== canonicalReport.id);
+        return [canonicalReport, ...filtered];
+      });
+
+      // 3. Update Equipment health & lastCheck in allEquipment
       setAllEquipment(prev => prev.map(eq => {
-        if (eq.id === newReport.equipmentId) {
+        if (eq.id.toLowerCase() === equipmentUpdate.id.toLowerCase()) {
           return {
             ...eq,
-            lastCheck: newReport.date,
-            status: calculatedStatus
+            health: equipmentUpdate.health,
+            status: equipmentUpdate.status,
+            lastCheck: equipmentUpdate.lastCheck
           };
         }
         return eq;
       }));
 
-      // Persist to firestore if authenticated
+      // 4. Persist to Firestore if authenticated
       if (auth.currentUser) {
         try {
-          await setDoc(doc(db, 'reports', reportId), newReport);
+          await Promise.all([
+            setDoc(doc(db, 'workOrders', workOrder.id), workOrder, { merge: true }),
+            setDoc(doc(db, 'reports', canonicalReport.id), canonicalReport)
+          ]);
         } catch (err) {
-          console.warn('Could not save to firestore:', err);
+          console.warn('Could not save workOrder/report to firestore:', err);
         }
       }
 
-      // Auto-sync field test result directly to Google Sheet "TEV Service Flatform" & the corresponding Equipment Sheet
+      // 5. Auto-sync field test result directly to Google Sheet "TEV Service Flatform" & the corresponding Equipment Sheet
       try {
         const tokens = localStorage.getItem('google_tokens');
         const spreadsheetId = localStorage.getItem('tev_spreadsheet_id') || '';
@@ -3289,7 +3724,7 @@ export default function App() {
           targetRecordType = 'relay';
         }
 
-        // 1. Sync to Equipment-Specific Sheet (Máy cắt, Động cơ, Máy phát, Tủ điện, Máy biến áp, Cáp điện, Pin & UPS, Rơ le)
+        // 5a. Sync to Equipment-Specific Sheet (Máy cắt, Động cơ, Máy phát, Tủ điện, Máy biến áp, Cáp điện, Pin & UPS, Rơ le)
         await fetch('/api/sheets/sync-record', {
           method: 'POST',
           headers,
@@ -3297,14 +3732,14 @@ export default function App() {
             recordType: targetRecordType,
             spreadsheetId,
             data: {
-              woId: reportId,
-              equipmentId: equipTag,
-              equipmentName: equipName,
-              customer: customerName || 'Khách hàng hiện trường',
-              location: newReport.factory || siteName || 'Hiện trường',
+              woId: workOrder.id,
+              equipmentId: workOrder.equipmentId,
+              equipmentName: workOrder.equipmentName,
+              customer: workOrder.customer,
+              location: workOrder.factory,
               assessment: `${analysisResult?.overall_status || 'Hoàn thành'} - ${analysisResult?.status_reason || 'Đạt tiêu chuẩn'}`,
-              testDate: newReport.date,
-              inspector: newReport.inspector || auth.currentUser?.email || 'Kỹ sư FSE',
+              testDate: canonicalReport.date,
+              inspector: workOrder.assignedTo,
               // Breaker
               contactResistanceR: netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.pole_a || '',
               contactResistanceY: netaData?.electrical_tests?.contact_pole_resistance_micro_ohms?.pole_b || '',
@@ -3344,45 +3779,21 @@ export default function App() {
           })
         });
 
-        // 2. Also sync to TEV Service Flatform (Work Order 23 columns)
+        // 5b. Sync canonical Work Order to TEV Service Flatform (Work Order 23 columns)
         await fetch('/api/sheets/sync-record', {
           method: 'POST',
           headers,
           body: JSON.stringify({
             recordType: 'workOrder',
             spreadsheetId,
-            data: {
-              id: reportId,
-              workPermitId: `WP-${Date.now().toString().slice(-6)}`,
-              title: `Kiểm tra ${equipName} (${testStandard})`,
-              description: reportNotes,
-              equipmentId: equipTag,
-              failureCode: calculatedStatus === 'critical' ? 'ELEC-01' : calculatedStatus === 'warning' ? 'THERM-01' : 'PM-ROUTINE',
-              customer: customerName || 'Khách hàng hiện trường',
-              type: 'Kiểm định thử nghiệm (Testing)',
-              isUnplanned: false,
-              priority: calculatedStatus === 'critical' ? 'urgent' : calculatedStatus === 'warning' ? 'high' : 'medium',
-              status: 'Hoàn thành',
-              assignedTo: newReport.inspector || auth.currentUser?.email || 'Kỹ sư FSE',
-              responsibleApprove: 'FSE Lead',
-              responsibleDo: 'FSE Onsite',
-              blockingRequired: false,
-              dueDate: newReport.date,
-              usedMaterials: '',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              downtimeStart: '',
-              repairStart: newReport.date,
-              repairEnd: newReport.date,
-              restartTime: ''
-            }
+            data: workOrder
           })
         });
       } catch (sheetSyncErr) {
         console.warn('Google Sheet auto-sync error for NETA report:', sheetSyncErr);
       }
 
-      alert(`✅ Đã lưu thành công biên bản kiểm tra ${reportId} cho thiết bị ${newReport.equipmentId} vào Kho Báo Cáo CMMS và đồng bộ lên file Google Sheet "TEV Service Flatform"!`);
+      alert(`✅ Đã đồng bộ & lưu thành công dữ liệu FSE vào CMMS!\n• Mã Work Order: ${workOrder.id}\n• Mã Work Permit: ${workOrder.workPermitId}\n• Khách hàng: ${workOrder.customer} (${workOrder.customerId})\n• Thiết bị: ${workOrder.equipmentName} (${workOrder.equipmentId})\n• Biên bản: ${canonicalReport.id}`);
     } catch (err: any) {
       alert('Lỗi lưu biên bản: ' + err.message);
     }
@@ -3635,7 +4046,7 @@ export default function App() {
     });
   };
 
-  const [deepAnalysisSubTab, setDeepAnalysisSubTab] = useState<'dga' | 'pv-cell' | 'wind-turbine'>('dga');
+  const [deepAnalysisSubTab, setDeepAnalysisSubTab] = useState<DeepAnalysisModuleId>('partial-discharge');
 
   const [pvCellData, setPvCellData] = useState({
     temp: '45',
@@ -3875,75 +4286,135 @@ export default function App() {
   });
 
   const dynamicTrendData = useMemo(() => {
-    const eq = allEquipment.find(e => e.id === trendingEquipment);
+    const eq = allEquipment.find(e => e.id === trendingEquipment || e.id?.toLowerCase() === trendingEquipment?.toLowerCase());
     if (!eq) return { temp: [], tev: [], dga: [], winding_temp: [], ir: [], winding_res: [], pd: [], elcid: [], pi: [] };
 
-    const reportsForEq = allReports.filter(r => r.equipmentId === trendingEquipment);
+    const targetEqId = (trendingEquipment || '').trim().toLowerCase();
+    let reportsForEq = allReports.filter(r => {
+      const rId = (r.equipmentId || r.equipmentCode || r.equipment || r.id || '').toString().trim().toLowerCase();
+      if (rId === targetEqId) return true;
+      if (targetEqId && rId && (rId.includes(targetEqId) || targetEqId.includes(rId))) return true;
+      if (eq && r.equipmentName && eq.name && r.equipmentName.trim().toLowerCase() === eq.name.trim().toLowerCase()) return true;
+      return false;
+    });
+
+    // If no reports found yet, but equipment itself has measurements from Sheets/Firestore, synthesize a point
+    if (reportsForEq.length === 0 && eq.measurements && Object.keys(eq.measurements).length > 0) {
+      reportsForEq = [{
+        date: eq.lastCheck || new Date().toLocaleDateString('vi-VN'),
+        measurements: eq.measurements,
+        equipmentId: eq.id
+      }];
+    }
+
+    const parseReportDate = (dStr: any): number => {
+      if (!dStr) return 0;
+      const s = String(dStr).trim();
+      if (s.includes('/')) {
+        const parts = s.split('/');
+        if (parts.length === 3) {
+          const d = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10);
+          const y = parseInt(parts[2], 10);
+          if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+            return new Date(y, m - 1, d).getTime();
+          }
+        }
+      }
+      const t = new Date(s).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+
     const sortedReports = [...reportsForEq].sort((a, b) => {
-      const [d1, m1, y1] = a.date.split('/');
-      const [d2, m2, y2] = b.date.split('/');
-      return new Date(`${y1}-${m1}-${d1}`).getTime() - new Date(`${y2}-${m2}-${d2}`).getTime();
+      const tA = parseReportDate(a.date || a.lastCheck || a.createdAt);
+      const tB = parseReportDate(b.date || b.lastCheck || b.createdAt);
+      return tA - tB;
     });
 
     const parseVal = (val: any) => {
-      if (typeof val === 'string') return parseFloat(val.replace(',', '.'));
-      return val;
+      if (val === undefined || val === null || val === '') return 0;
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      if (typeof val === 'string') {
+        const cleaned = val.replace(/[^0-9.,-]/g, '').replace(',', '.');
+        const num = parseFloat(cleaned);
+        return isNaN(num) ? 0 : num;
+      }
+      return 0;
+    };
+
+    const getMVal = (m: any, keys: string[]) => {
+      if (!m || typeof m !== 'object') return 0;
+      for (const k of keys) {
+        if (m[k] !== undefined && m[k] !== null && m[k] !== '') {
+          const v = parseVal(m[k]);
+          if (v > 0) return v;
+        }
+      }
+      return 0;
+    };
+
+    const formatTime = (r: any) => {
+      if (r.date) return String(r.date);
+      if (r.lastCheck) return String(r.lastCheck);
+      if (r.createdAt) return String(r.createdAt).split('T')[0];
+      return 'N/A';
     };
 
     const tempTrend = sortedReports.map(r => ({
-      time: r.date,
-      temp: parseVal(r.measurements?.oilTemp || r.measurements?.statorTemp) || 0
+      time: formatTime(r),
+      temp: getMVal(r.measurements, ['oilTemp', 'statorTemp', 'temp', 'nhietDoDau', 'Nhiệt độ dầu (°C)', 'Nhiệt độ dầu', 'Nhiệt độ Stator', 'Nhiệt độ (°C)'])
     })).filter(d => d.temp > 0);
 
     const windingTempTrend = sortedReports.map(r => ({
-      time: r.date,
-      temp: parseVal(r.measurements?.windingTemp || r.measurements?.bearingTemp) || 0
+      time: formatTime(r),
+      temp: getMVal(r.measurements, ['windingTemp', 'bearingTemp', 'nhietDoCuonDay', 'Nhiệt độ cuộn dây (°C)', 'Nhiệt độ cuộn dây', 'Nhiệt độ vòng bi'])
     })).filter(d => d.temp > 0);
 
     const tevTrend = sortedReports.map(r => ({
-      time: r.date,
-      tev: parseVal(r.measurements?.tev) || 0,
-      ultrasonic: parseVal(r.measurements?.ultrasonic) || 0
+      time: formatTime(r),
+      tev: getMVal(r.measurements, ['tev', 'tevR', 'TEV', 'TEV (dBmV)', 'Tev', 'tevPulses']),
+      ultrasonic: getMVal(r.measurements, ['ultrasonic', 'sieuAm', 'Siêu âm (dBµV)', 'Ultrasonic'])
     })).filter(d => d.tev > 0 || d.ultrasonic > 0);
 
     const dgaTrend = sortedReports.map(r => {
+      const m = r.measurements || {};
       return {
-        time: r.date,
-        h2: parseVal(r.measurements?.h2) || 0,
-        o2: parseVal(r.measurements?.o2) || 0,
-        n2: parseVal(r.measurements?.n2) || 0,
-        ch4: parseVal(r.measurements?.ch4) || 0,
-        co: parseVal(r.measurements?.co) || 0,
-        co2: parseVal(r.measurements?.co2) || 0,
-        c2h4: parseVal(r.measurements?.c2h4) || 0,
-        c2h6: parseVal(r.measurements?.c2h6) || 0,
-        c2h2: parseVal(r.measurements?.c2h2) || 0
+        time: formatTime(r),
+        h2: getMVal(m, ['h2', 'H2', 'H2 (ppm)', 'Khí H2']),
+        o2: getMVal(m, ['o2', 'O2', 'O2 (ppm)']),
+        n2: getMVal(m, ['n2', 'N2', 'N2 (ppm)']),
+        ch4: getMVal(m, ['ch4', 'CH4', 'CH4 (ppm)', 'Khí CH4']),
+        co: getMVal(m, ['co', 'CO', 'CO (ppm)', 'Khí CO']),
+        co2: getMVal(m, ['co2', 'CO2', 'CO2 (ppm)', 'Khí CO2']),
+        c2h4: getMVal(m, ['c2h4', 'C2H4', 'C2H4 (ppm)', 'Khí C2H4']),
+        c2h6: getMVal(m, ['c2h6', 'C2H6', 'C2H6 (ppm)', 'Khí C2H6']),
+        c2h2: getMVal(m, ['c2h2', 'C2H2', 'C2H2 (ppm)', 'Khí C2H2'])
       };
-    }).filter(d => d.h2 > 0 || d.ch4 > 0 || d.c2h2 > 0 || d.co > 0);
+    }).filter(d => d.h2 > 0 || d.ch4 > 0 || d.c2h2 > 0 || d.co > 0 || d.c2h4 > 0);
 
     const irTrend = sortedReports.map(r => ({
-      time: r.date,
-      ir: parseVal(r.measurements?.irHighLow || r.measurements?.irR) || 0
+      time: formatTime(r),
+      ir: getMVal(r.measurements, ['irHighLow', 'irHighEarth', 'irR', 'ir', 'R_cách điện Cao-Hạ (MΩ)', 'Điện trở cách điện (MΩ)', 'Điện trở cách điện'])
     })).filter(d => d.ir > 0);
 
     const windingResTrend = sortedReports.map(r => ({
-      time: r.date,
-      res: parseVal(r.measurements?.contactRes) || 0
+      time: formatTime(r),
+      res: getMVal(r.measurements, ['contactRes', 'windingRes', 'res', 'Điện trở cuộn dây', 'Điện trở tiếp xúc', 'Điện trở cuộn dây (Ω)'])
     })).filter(d => d.res > 0);
 
     const pdTrend = sortedReports.map(r => ({
-      time: r.date,
-      pd: parseVal(r.measurements?.pdR) || 0
+      time: formatTime(r),
+      pd: getMVal(r.measurements, ['pdR', 'pd', 'PD', 'PD (pC)'])
     })).filter(d => d.pd > 0);
 
     const elcidTrend = sortedReports.map(r => ({
-      time: r.date,
-      elcid: parseVal(r.measurements?.elcidR) || 0
+      time: formatTime(r),
+      elcid: getMVal(r.measurements, ['elcidR', 'elcid', 'ELCID', 'ELCID (mA)'])
     })).filter(d => d.elcid > 0);
 
     const piTrend = sortedReports.map(r => ({
-      time: r.date,
-      pi: parseVal(r.measurements?.piR) || 0
+      time: formatTime(r),
+      pi: getMVal(r.measurements, ['piR', 'pi', 'Chỉ số PI', 'PI', 'Chỉ số phân cực (PI)'])
     })).filter(d => d.pi > 0);
 
     return { 
@@ -3962,51 +4433,77 @@ export default function App() {
   const dynamicParamHistoryData = useMemo(() => {
     if (!selectedRiskDetail || !selectedParamHistory || !allReports) return null;
     
-    const paramKeyMap: Record<string, string> = {
-      'Tuổi thiết bị': 'age',
-      'Hệ số tải': 'dutyFactor',
-      'Nhiệt độ dầu': 'oilTemp',
-      'Nhiệt độ cuộn dây': 'windingTemp',
-      'Điện trở cách điện (Cao-Hạ)': 'irHighLow',
-      'Điện trở cách điện (Cao-Vỏ)': 'irHighEarth',
-      'Tình trạng rò rỉ dầu': 'oilLeak',
-      'DGA': 'dga',
-      'Độ bền điện môi': 'dielectricStrength',
-      'Furan': 'furan',
-      'Độ ẩm dầu': 'oilMoisture',
-      'Độ rung': 'vibration',
-      'Mất cân bằng điện áp': 'voltageImbalance',
-      'Nhiệt độ Stator': 'statorTemp',
-      'Nhiệt độ vòng bi': 'bearingTemp',
-      'Nhiệt độ tiếp xúc': 'thermography',
-      'Điện trở tiếp xúc': 'contactRes',
-      'TEV': 'tev',
-      'Số xung TEV': 'tevPulses',
-      'Ultrasonic': 'ultrasonic',
-      'Độ ẩm môi trường': 'humidity',
-      'Áp suất SF6': 'sf6Pressure'
+    const paramKeyMap: Record<string, string[]> = {
+      'Tuổi thiết bị': ['age', 'Tuổi thiết bị'],
+      'Hệ số tải': ['dutyFactor', 'Hệ số tải'],
+      'Nhiệt độ dầu': ['oilTemp', 'Nhiệt độ dầu (°C)', 'Nhiệt độ dầu'],
+      'Nhiệt độ cuộn dây': ['windingTemp', 'Nhiệt độ cuộn dây (°C)', 'Nhiệt độ cuộn dây'],
+      'Điện trở cách điện (Cao-Hạ)': ['irHighLow', 'R_cách điện Cao-Hạ (MΩ)', 'Điện trở cách điện (Cao-Hạ)'],
+      'Điện trở cách điện (Cao-Vỏ)': ['irHighEarth', 'R_cách điện Cao-Đất (MΩ)', 'Điện trở cách điện (Cao-Vỏ)'],
+      'Tình trạng rò rỉ dầu': ['oilLeak', 'Tình trạng rò rỉ dầu'],
+      'DGA': ['dga', 'DGA'],
+      'Độ bền điện môi': ['dielectricStrength', 'Điện áp đánh thủng dầu (kV)', 'Độ bền điện môi'],
+      'Furan': ['furan', 'Furan'],
+      'Độ ẩm dầu': ['oilMoisture', 'Hàm lượng ẩm (ppm)', 'Độ ẩm dầu'],
+      'Độ rung': ['vibration', 'Độ rung'],
+      'Mất cân bằng điện áp': ['voltageImbalance', 'Mất cân bằng điện áp'],
+      'Nhiệt độ Stator': ['statorTemp', 'Nhiệt độ Stator'],
+      'Nhiệt độ vòng bi': ['bearingTemp', 'Nhiệt độ vòng bi'],
+      'Nhiệt độ tiếp xúc': ['thermography', 'Nhiệt độ tiếp xúc'],
+      'Điện trở tiếp xúc': ['contactRes', 'Điện trở tiếp xúc', 'Điện trở cuộn dây'],
+      'TEV': ['tev', 'TEV (dBmV)', 'TEV'],
+      'Số xung TEV': ['tevPulses', 'Số xung TEV'],
+      'Ultrasonic': ['ultrasonic', 'Siêu âm (dBµV)', 'Ultrasonic'],
+      'Độ ẩm môi trường': ['humidity', 'Độ ẩm môi trường'],
+      'Áp suất SF6': ['sf6Pressure', 'Áp suất SF6']
     };
 
-    const key = paramKeyMap[selectedParamHistory];
-    if (!key) return null;
+    const keys = paramKeyMap[selectedParamHistory];
+    if (!keys || keys.length === 0) return null;
 
-    const reportsForEq = allReports.filter(r => r.equipmentId === selectedRiskDetail);
+    const targetEq = (selectedRiskDetail || '').trim().toLowerCase();
+    const reportsForEq = allReports.filter(r => {
+      const rId = (r.equipmentId || r.equipmentCode || r.equipment || r.id || '').toString().trim().toLowerCase();
+      return rId === targetEq || (targetEq && rId && (rId.includes(targetEq) || targetEq.includes(rId)));
+    });
     
+    const parseReportDate = (dStr: any): number => {
+      if (!dStr) return 0;
+      const s = String(dStr).trim();
+      if (s.includes('/')) {
+        const parts = s.split('/');
+        if (parts.length === 3) {
+          const d = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10);
+          const y = parseInt(parts[2], 10);
+          if (!isNaN(d) && !isNaN(m) && !isNaN(y)) return new Date(y, m - 1, d).getTime();
+        }
+      }
+      const t = new Date(s).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+
     // Sort by date ascending for chart
     const sortedReports = [...reportsForEq].sort((a, b) => {
-      const [d1, m1, y1] = a.date.split('/');
-      const [d2, m2, y2] = b.date.split('/');
-      return new Date(`${y1}-${m1}-${d1}`).getTime() - new Date(`${y2}-${m2}-${d2}`).getTime();
+      const tA = parseReportDate(a.date || a.lastCheck || a.createdAt);
+      const tB = parseReportDate(b.date || b.lastCheck || b.createdAt);
+      return tA - tB;
     });
 
     const dataPoints = sortedReports.map(r => {
-      let val = r.measurements?.[key];
+      let val: any = undefined;
+      for (const k of keys) {
+        if (r.measurements?.[k] !== undefined && r.measurements?.[k] !== null && r.measurements?.[k] !== '') {
+          val = r.measurements[k];
+          break;
+        }
+      }
       if (typeof val === 'string') {
-        val = parseFloat(val.replace(',', '.'));
+        val = parseFloat(val.replace(/[^0-9.,-]/g, '').replace(',', '.'));
       }
       return {
-        date: r.date,
-        value: isNaN(val) ? null : val
+        date: r.date || r.lastCheck || 'N/A',
+        value: (typeof val === 'number' && !isNaN(val)) ? val : null
       };
     }).filter(d => d.value !== null);
 
@@ -5206,6 +5703,14 @@ export default function App() {
       inventoryData.push(['Mã vật tư', 'Tên vật tư', 'SKU', 'Danh mục', 'Số lượng', 'Đơn vị', 'Tồn kho tối thiểu', 'Vị trí', 'Đơn giá', 'Ngày tạo', 'Ngày cập nhật']);
       customersData.push(['Mã khách hàng', 'Tên khách hàng', 'Danh sách nhà máy', 'Email', 'Số điện thoại', 'Địa chỉ', 'Ngày tạo', 'Ngày cập nhật']);
 
+      // Master FSE Engineer Sheet Data (Sheet 'FSE')
+      const registeredFse = getRegisteredFseList();
+      const fseData: any[] = [];
+      fseData.push(SHEET_FSE_HEADERS);
+      registeredFse.forEach(eng => {
+        fseData.push(fseToSheetRow(eng));
+      });
+
       const equipmentData: any[] = [];
       equipmentData.push([
         'Mã thiết bị', 'Tên thiết bị', 'Loại thiết bị', 'Khách hàng', 'Nhà máy / Site', 'Vị trí / Khu vực',
@@ -5500,7 +6005,8 @@ export default function App() {
           tevServiceFlatformData: cmmsData,
           equipmentData,
           inventoryData,
-          customersData
+          customersData,
+          fseData
         })
       });
 
@@ -5797,6 +6303,7 @@ export default function App() {
       }
 
       let syncedCustomersCount = 0;
+      let syncedFseCount = 0;
       let syncedInventoryCount = 0;
       let syncedWoCount = 0;
       let protectedRecordsCount = 0;
@@ -5939,6 +6446,19 @@ export default function App() {
           continue;
         }
 
+        // 2b. Handle FSE Engineer sheets (Sheet 'FSE')
+        if (lowerSheetName === 'fse' || lowerSheetName.includes('kỹ sư') || lowerSheetName.includes('engineer') || lowerSheetName.includes('kysu')) {
+          const dataRows = rows.slice(headerIdx + 1);
+          for (const row of dataRows) {
+            const parsedFse = sheetRowToFse(row);
+            if (parsedFse && parsedFse.name && parsedFse.email) {
+              saveFseEngineerRecord(parsedFse);
+              syncedFseCount++;
+            }
+          }
+          continue;
+        }
+
         // 3. Handle Inventory sheets có kiểm tra phiên bản
         if (lowerSheetName.includes('quanlykho') || lowerSheetName.includes('kho')) {
           const dataRows = rows.slice(headerIdx + 1);
@@ -6073,6 +6593,31 @@ export default function App() {
           header.forEach((colName, cIdx) => {
             if (colName && row[cIdx] !== undefined && row[cIdx] !== '') {
               measurementsObj[colName] = row[cIdx];
+              const cLower = colName.toString().toLowerCase();
+              if (cLower.includes('dầu') && cLower.includes('nhiệt')) measurementsObj.oilTemp = row[cIdx];
+              else if (cLower.includes('cuộn dây') && cLower.includes('nhiệt')) measurementsObj.windingTemp = row[cIdx];
+              else if (cLower.includes('stator') && cLower.includes('nhiệt')) measurementsObj.statorTemp = row[cIdx];
+              else if (cLower.includes('vòng bi') && cLower.includes('nhiệt')) measurementsObj.bearingTemp = row[cIdx];
+              else if (cLower.includes('cao-hạ') || cLower.includes('cao - hạ')) measurementsObj.irHighLow = row[cIdx];
+              else if (cLower.includes('cao-đất') || cLower.includes('cao-vỏ') || cLower.includes('cao - đất')) measurementsObj.irHighEarth = row[cIdx];
+              else if (cLower.includes('pi') || cLower.includes('phân cực')) measurementsObj.piR = row[cIdx];
+              else if (cLower.includes('h2')) measurementsObj.h2 = row[cIdx];
+              else if (cLower.includes('ch4')) measurementsObj.ch4 = row[cIdx];
+              else if (cLower.includes('c2h2')) measurementsObj.c2h2 = row[cIdx];
+              else if (cLower.includes('c2h4')) measurementsObj.c2h4 = row[cIdx];
+              else if (cLower.includes('c2h6')) measurementsObj.c2h6 = row[cIdx];
+              else if (cLower.includes('co2')) measurementsObj.co2 = row[cIdx];
+              else if (cLower.includes('co') && !cLower.includes('co2')) measurementsObj.co = row[cIdx];
+              else if (cLower.includes('o2') && !cLower.includes('co2')) measurementsObj.o2 = row[cIdx];
+              else if (cLower.includes('n2')) measurementsObj.n2 = row[cIdx];
+              else if (cLower.includes('tev')) measurementsObj.tev = row[cIdx];
+              else if (cLower.includes('siêu âm') || cLower.includes('ultrasonic')) measurementsObj.ultrasonic = row[cIdx];
+              else if (cLower.includes('đánh thủng') || cLower.includes('điện môi')) measurementsObj.dielectricStrength = row[cIdx];
+              else if (cLower.includes('ẩm') || cLower.includes('moisture')) measurementsObj.oilMoisture = row[cIdx];
+              else if (cLower.includes('furan')) measurementsObj.furan = row[cIdx];
+              else if (cLower.includes('tiếp xúc') || cLower.includes('contact')) measurementsObj.contactRes = row[cIdx];
+              else if (cLower.includes('pd') || cLower.includes('cục bộ')) measurementsObj.pdR = row[cIdx];
+              else if (cLower.includes('elcid')) measurementsObj.elcidR = row[cIdx];
             }
           });
 
@@ -6092,8 +6637,9 @@ export default function App() {
           };
 
           newEquipmentList.push(eqData);
+          const dateSafeId = String(lastCheckVal || '').replace(/[^0-9]/g, '') || Math.floor(Math.random() * 10000).toString();
           newReportsList.push({
-            id: 'REP-' + idStr + '-' + Math.floor(Math.random() * 10000),
+            id: `REP-${idStr}-${dateSafeId}`,
             date: lastCheckVal,
             lastCheck: lastCheckVal,
             customer: customerVal,
@@ -6163,8 +6709,52 @@ export default function App() {
         });
 
         setAllEquipment(uniqueEquipmentList);
-        setAllReports(newReportsList);
+        
+        // Cập nhật Trending: Hợp nhất lịch sử Google Sheet với dữ liệu báo cáo hiện có & Firestore
+        setAllReports(prev => {
+          const reportMap = new Map();
+          initialAllReports.forEach(r => {
+            const key = (r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase();
+            reportMap.set(key, r);
+          });
+          prev.forEach(r => {
+            const key = (r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase();
+            reportMap.set(key, r);
+          });
+          newReportsList.forEach(r => {
+            const key = (r.id || `${r.equipmentId}_${r.date}`).toString().toLowerCase();
+            reportMap.set(key, { ...(reportMap.get(key) || {}), ...r });
+          });
+          const merged = Array.from(reportMap.values());
+          merged.sort((a: any, b: any) => {
+            const parseD = (ds: string) => {
+              if (!ds) return 0;
+              const p = ds.split('/');
+              if (p.length === 3) return new Date(`${p[2]}-${p[1]}-${p[0]}`).getTime();
+              return new Date(ds).getTime() || 0;
+            };
+            return parseD(b.date) - parseD(a.date);
+          });
+          return merged;
+        });
+
         setSyncSuccess(true);
+        
+        // Lưu đồng bộ các báo cáo mới lên Cloud Firestore để giữ trending liên tục
+        if (auth.currentUser || user) {
+          const nowIso = new Date().toISOString();
+          newReportsList.forEach(async (rep) => {
+            try {
+              const repId = (rep.id || `REP-${rep.equipmentId}-${Date.now()}`).toString().trim();
+              await setDoc(doc(db, 'reports', repId), {
+                ...rep,
+                id: repId,
+                createdAt: rep.createdAt || nowIso,
+                updatedAt: nowIso
+              }, { merge: true });
+            } catch (e) {}
+          });
+        }
         
         // Cache equipment in localStorage for instant offline load across reloads
         try {
@@ -6214,15 +6804,17 @@ export default function App() {
         let successMsg = `Đã tải và đồng bộ ${uniqueEquipmentList.length} thiết bị từ Google Sheets vào Firebase thành công!`;
         if (syncedWoCount > 0) successMsg += ` (${syncedWoCount} phiếu WO)`;
         if (syncedCustomersCount > 0) successMsg += ` (${syncedCustomersCount} KH)`;
+        if (syncedFseCount > 0) successMsg += ` (${syncedFseCount} FSE)`;
         if (syncedInventoryCount > 0) successMsg += ` (${syncedInventoryCount} vật tư)`;
         if (protectedRecordsCount > 0) {
           successMsg += `\n🛡️ Đã bảo vệ an toàn ${protectedRecordsCount} bản ghi Firestore có phiên bản mới hơn, không bị ghi đè!`;
         }
         if (!silent) alert(successMsg);
-      } else if (syncedCustomersCount > 0 || syncedInventoryCount > 0 || syncedWoCount > 0) {
+      } else if (syncedCustomersCount > 0 || syncedInventoryCount > 0 || syncedWoCount > 0 || syncedFseCount > 0) {
         let msg = '';
         if (syncedWoCount > 0) msg += `Đã đồng bộ ${syncedWoCount} phiếu WO. `;
         if (syncedCustomersCount > 0) msg += `Đã đồng bộ ${syncedCustomersCount} khách hàng. `;
+        if (syncedFseCount > 0) msg += `Đã đồng bộ ${syncedFseCount} kỹ sư FSE. `;
         if (syncedInventoryCount > 0) msg += `Đã đồng bộ ${syncedInventoryCount} vật tư kho. `;
         if (protectedRecordsCount > 0) {
           msg += `\n🛡️ Đã bảo vệ an toàn ${protectedRecordsCount} bản ghi Firestore có phiên bản mới hơn.`;
@@ -7504,7 +8096,7 @@ export default function App() {
       )}
 
       {/* SIDEBAR */}
-      <aside className={`w-64 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 fixed inset-y-0 left-0 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:relative transition-transform duration-300 ease-in-out`}>
+      <aside className={`w-60 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 fixed inset-y-0 left-0 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:relative transition-transform duration-300 ease-in-out`}>
         <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800">
           <div className="flex items-center gap-2 text-white font-bold text-xl tracking-tight">
             <img src="https://static.wixstatic.com/media/dea24c_6207cba10c9e4e15939adcc4dbd42524~mv2.jpg" alt="TEV Logo" className="w-8 h-8 rounded-full bg-white object-contain p-0.5" />
@@ -7568,16 +8160,6 @@ export default function App() {
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">23 BB</span>
           </button>
           <button 
-            onClick={() => {
-              setCmmsSubTab('station');
-              handleTabChange('cmms');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'cmms' && cmmsSubTab === 'station' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-slate-800 hover:text-white'}`}
-          >
-            <Zap size={18} className={activeTab === 'cmms' && cmmsSubTab === 'station' ? 'text-white' : 'text-blue-400'} />
-            <span className="flex-1 text-left font-semibold">Trạm FSE & Sheets</span>
-          </button>
-          <button 
             onClick={() => handleTabChange('deep-analysis')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'deep-analysis' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
           >
@@ -7585,21 +8167,12 @@ export default function App() {
             Phân tích chuyên sâu
           </button>
           <button 
-            onClick={() => {
-              setCmmsSubTab('table');
-              handleTabChange('cmms');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'cmms' && cmmsSubTab === 'table' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-          >
-            <ClipboardList size={18} />
-            Quản lý CMMS (Phiếu WO)
-          </button>
-          <button 
             onClick={() => handleTabChange('pm-schedule')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'pm-schedule' ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'pm-schedule' || activeTab === 'cmms' ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30' : 'hover:bg-slate-800 hover:text-white'}`}
           >
-            <Calendar size={18} />
-            Lịch bảo trì PM
+            <Calendar size={18} className={activeTab === 'pm-schedule' || activeTab === 'cmms' ? 'text-white' : 'text-blue-400'} />
+            <span className="flex-1 text-left font-semibold">Kế hoạch PM/CM</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold border border-blue-500/30">23 Cột PMP</span>
           </button>
           <button 
             onClick={() => handleTabChange('customers')}
@@ -7607,6 +8180,17 @@ export default function App() {
           >
             <User size={18} />
             Quản lý Khách hàng
+          </button>
+          <button 
+            onClick={() => {
+              setIsSidebarOpen(false);
+              setShowMasterDirectoryModal(true);
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-amber-300 hover:bg-amber-500/10 transition-colors"
+          >
+            <FileSpreadsheet size={18} className="text-amber-400" />
+            <span className="flex-1 text-left font-semibold">Quản lý dự án</span>
+            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono font-bold">PMP / FSE</span>
           </button>
           <button 
             onClick={() => handleTabChange('inventory')}
@@ -7664,8 +8248,7 @@ export default function App() {
                activeTab === 'reports' ? 'Kho Báo cáo' : 
                activeTab === 'settings' ? 'Cài đặt hệ thống' :
                activeTab === 'field-entry' ? 'Kỹ sư Hiện trường FSE (NETA)' :
-               activeTab === 'cmms' ? (cmmsSubTab === 'station' ? 'Trạm FSE & Đồng Bộ Sheets' : 'Quản lý Phiếu CMMS') :
-               activeTab === 'pm-schedule' ? 'Lịch Bảo Trì PM' :
+               (activeTab === 'pm-schedule' || activeTab === 'cmms') ? 'Kế Hoạch PM/CM & Phiếu Công Việc (Chuẩn PMP)' :
                activeTab === 'customers' ? 'Quản lý Khách hàng' :
                activeTab === 'inventory' ? 'Quản lý Kho Vật tư' :
                'Kỹ sư Hiện trường FSE'}
@@ -7680,17 +8263,6 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* PWA Mobile Install Button */}
-            <button
-              onClick={() => setShowPWAInstallModal(true)}
-              title="Cài đặt ứng dụng lên điện thoại di động (PWA) hoặc quét QR"
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all border border-indigo-400/30 flex-shrink-0"
-            >
-              <Smartphone size={14} className="text-indigo-200" />
-              <span className="hidden sm:inline">Cài App Đ.Thoại</span>
-              <span className="sm:hidden">Cài App</span>
-            </button>
-
             {/* Cloud Database Connected Status Badge */}
             <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-md text-xs font-semibold" title="Cơ sở dữ liệu Cloud Firestore luôn tự động kết nối thời gian thực khi đăng nhập">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -7738,6 +8310,16 @@ export default function App() {
                 >
                   <ShieldAlert size={14} className="text-amber-600" />
                   <span>Đối soát</span>
+                </button>
+
+                <button
+                  onClick={() => setShowMasterDirectoryModal(true)}
+                  title="Quản lý 3 Danh Mục Master: Mã Khách Hàng, Tên Thiết Bị, Kỹ Sư FSE và Tạo Thêm Sheet Tabs"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-300 transition-colors shadow-2xs"
+                >
+                  <FileSpreadsheet size={14} className="text-emerald-600" />
+                  <span className="hidden xl:inline">Sheet Tabs & Danh Mục</span>
+                  <span className="xl:hidden">Tabs & DM</span>
                 </button>
 
                 {googleSheetUrl && (
@@ -7804,40 +8386,327 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-100">
           
           {/* --- FIELD ENTRY VIEW --- */}
-          {activeTab === 'field-entry' && (
+          {(activeTab === 'field-entry' || (activeTab as string) === 'checklists') && (
             <div className="max-w-6xl mx-auto space-y-6 pb-12">
-              {/* Header Banner for NETA ATS Testing & Quick Link to CMMS */}
-              <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4 border border-blue-900/40">
-                <div>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <ClipboardCheck className="text-blue-400" size={24} />
-                    <h2 className="text-xl font-bold">23 Biên Bản Kiểm Định Chuyên Sâu NETA ATS (Mỹ)</h2>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/30 text-blue-300 border border-blue-400/30">
-                      Chuẩn Quốc Tế
+              {/* TOP TRI-STANDARD NETA SUITE: ATS vs MTS vs ECS & DUAL LANGUAGE SWITCHER */}
+              <div className="bg-slate-900 rounded-2xl p-2.5 sm:p-3 border border-slate-800 shadow-md flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                {/* Segmented Buttons with High-Contrast Engineering Design */}
+                <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setNetaStandardModule('ats')}
+                    className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black transition-all ${
+                      netaStandardModule === 'ats'
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30 ring-1 ring-blue-400/40'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                      netaStandardModule === 'ats' ? 'bg-slate-950/70 text-blue-200' : 'bg-slate-900 text-slate-400 border border-slate-800'
+                    }`}>
+                      ATS-2025
                     </span>
-                  </div>
-                  <p className="text-sm text-slate-300 max-w-2xl">
-                    Hệ thống thí nghiệm nghiệm thu và bảo trì điện lực theo tiêu chuẩn ANSI/NETA ATS. Tự động tính toán dung lượng, điện trở cách điện, tỷ số biến dòng & xuất báo cáo PDF chuẩn.
-                  </p>
+                    <span>{netaLanguage === 'vi' ? 'ATS - NGHIỆM THU (23 BB)' : 'ATS - ACCEPTANCE (23 REPS)'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNetaStandardModule('mts')}
+                    className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black transition-all ${
+                      netaStandardModule === 'mts'
+                        ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 shadow-md shadow-amber-500/30 ring-1 ring-amber-400/40 font-black'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                      netaStandardModule === 'mts' ? 'bg-slate-950 text-amber-300' : 'bg-slate-900 text-slate-400 border border-slate-800'
+                    }`}>
+                      MTS-2023
+                    </span>
+                    <span>{netaLanguage === 'vi' ? 'MTS - BẢO TRÌ ĐỊNH KỲ' : 'MTS - MAINTENANCE'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNetaStandardModule('ecs')}
+                    className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-black transition-all ${
+                      netaStandardModule === 'ecs'
+                        ? 'bg-gradient-to-r from-teal-500 to-emerald-600 text-slate-950 shadow-md shadow-teal-500/30 ring-1 ring-teal-400/40 font-black'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                      netaStandardModule === 'ecs' ? 'bg-slate-950 text-teal-300' : 'bg-slate-900 text-slate-400 border border-slate-800'
+                    }`}>
+                      ECS-2024
+                    </span>
+                    <span>{netaLanguage === 'vi' ? 'ECS - CHẠY THỬ & ĐÓNG ĐIỆN' : 'ECS - COMMISSIONING'}</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleTabChange('cmms')}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold shadow-md shadow-blue-600/30 transition-all flex-shrink-0"
-                  title="Chuyển đến phần Quản lý CMMS để nhập phiếu công việc, quản lý thiết bị & đồng bộ 2 chiều Google Sheet"
-                >
-                  <FileSpreadsheet size={17} />
-                  <span>Quản lý CMMS & Đồng Bộ Sheets →</span>
-                </button>
+
+                {/* Language Switcher & Quick Navigation */}
+                <div className="flex items-center gap-2 self-end md:self-auto flex-wrap">
+                  <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                    <Globe size={14} className="text-slate-400 ml-1.5 mr-0.5" />
+                    <button
+                      type="button"
+                      onClick={() => setNetaLanguage('vi')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                        netaLanguage === 'vi'
+                          ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🇻🇳 VN
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNetaLanguage('en')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                        netaLanguage === 'en'
+                          ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🇺🇸 EN
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange('cmms')}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-all border border-slate-700 shadow-xs"
+                    title="Chuyển đến phần Quản lý CMMS"
+                  >
+                    <FileSpreadsheet size={14} className="text-amber-400" />
+                    <span>CMMS & Sheets →</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Equipment Checklist Selection Hub */}
-              <EquipmentChecklistSelector
-                currentMode={fieldEntryMode}
-                onSelectMode={(mode) => setFieldEntryMode(mode)}
-                reportsCount={allReports.length}
-                onNavigateToReports={() => setActiveTab('reports')}
-              />
+              {/* MODULE 1: NETA ECS-2024 ELECTRICAL COMMISSIONING SPECIFICATIONS */}
+              {netaStandardModule === 'ecs' ? (
+                <div className="space-y-6">
+                  {/* ECS Module Selection Hub (Hạ thế < 1kV vs Trung thế 1kV - 100kV) */}
+                  <EcsModuleSelector
+                    currentMode={ecsModuleMode}
+                    onSelectMode={(mode) => setEcsModuleMode(mode)}
+                    lang={netaLanguage}
+                  />
+
+                  {/* Render Selected ECS Module */}
+                  {ecsModuleMode === 'low-voltage' ? (
+                    <NetaEcsLowVoltageChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : ecsModuleMode === 'medium-voltage' ? (
+                    <NetaEcsMediumVoltageChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : ecsModuleMode === 'solar-pv' ? (
+                    <NetaEcsSolarPvChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : ecsModuleMode === 'ats-switch' ? (
+                    <NetaEcsAtsChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : ecsModuleMode === 'ups-system' ? (
+                    <NetaEcsUpsChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : (
+                    <NetaEcsUpsChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  )}
+                </div>
+              ) : netaStandardModule === 'mts' ? (
+                <div className="space-y-6">
+                  {/* MTS Equipment Checklist Selection Hub (Ready for multiple equipment additions) */}
+                  <MtsEquipmentChecklistSelector
+                    currentMode={mtsChecklistMode}
+                    onSelectMode={(mode) => setMtsChecklistMode(mode)}
+                    lang={netaLanguage}
+                    isCollapsed={isMtsSelectorCollapsed}
+                    onToggleCollapse={() => setIsMtsSelectorCollapsed(!isMtsSelectorCollapsed)}
+                  />
+
+                  {/* Render the Selected MTS Checklist */}
+                  {mtsChecklistMode === 'transformer' ? (
+                    <NetaMtsTransformerChecklist
+                      initialLanguage={netaLanguage}
+                      initialDisplayMode="form"
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'thermography' ? (
+                    <NetaThermographyChecklist
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'switchgear' ? (
+                    <NetaSwitchgearChecklist
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'cables' ? (
+                    <NetaCableChecklist
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'grounding' ? (
+                    <NetaGroundingChecklist
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'relays' ? (
+                    <NetaRelayChecklist
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'motors' ? (
+                    <NetaMotorChecklist
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : (
+                    <NetaThermographyChecklist
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  )}
+                </div>
+              ) : (
+                /* MODULE 2: NETA ATS-2025 ACCEPTANCE TESTING (23 CHECKLISTS) */
+                <div className="space-y-6">
+                  {/* Header Banner for NETA ATS Testing */}
+                  <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4 border border-blue-900/40">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <ClipboardCheck className="text-blue-400" size={24} />
+                        <h2 className="text-xl font-bold">23 Biên Bản Kiểm Định Chuyên Sâu NETA ATS (Mỹ)</h2>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/30 text-blue-300 border border-blue-400/30">
+                          ANSI/NETA ATS-2025
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-300 max-w-2xl">
+                        Hệ thống đối soát tự động theo tiêu chuẩn ANSI/NETA ATS-2025 và xuất báo cáo thẩm định 4 phần chuẩn hóa: Trạng thái tổng quan, Bảng phân tích chi tiết, Phân tích rủi ro bất thường & Khuyến nghị FSE.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setAtsDisplayMode(atsDisplayMode === 'tev-report' ? 'form' : 'tev-report')}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black shadow-md transition-all ${
+                          atsDisplayMode === 'tev-report'
+                            ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/30 border border-blue-400'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                        }`}
+                      >
+                        <Sparkles size={15} className="text-amber-400" />
+                        <span>
+                          {atsDisplayMode === 'tev-report'
+                            ? (netaLanguage === 'vi' ? 'Biểu Mẫu Nhập Liệu 📝' : 'Switch to Field Entry 📝')
+                            : (netaLanguage === 'vi' ? 'Xem Báo Cáo Chuẩn TEV AI (23 BB) ⚡' : 'View Standard TEV Reports ⚡')}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setNetaStandardModule('mts')}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-sm font-black shadow-md shadow-amber-500/30 transition-all flex-shrink-0"
+                        title="Chuyển sang module Thí nghiệm Bảo trì NETA MTS-2023"
+                      >
+                        <Droplets size={17} />
+                        <span>{netaLanguage === 'vi' ? 'Sang Module MTS Bảo Trì →' : 'Switch to MTS Module →'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Mode Selector Tab Strip */}
+                  <div className="bg-slate-900 rounded-xl p-1.5 border border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800 flex-wrap sm:flex-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setAtsDisplayMode('tev-report')}
+                        className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-black transition-all ${
+                          atsDisplayMode === 'tev-report'
+                            ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        <Sparkles size={14} className="text-amber-400" />
+                        <span>
+                          {netaLanguage === 'vi'
+                            ? 'BÁO CÁO CHUẨN TEV AI 4 PHẦN (23 BIÊN BẢN ATS)'
+                            : 'TEV STANDARD 4-PART AI REPORTS (23 ATS SPECS)'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAtsDisplayMode('form')}
+                        className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-black transition-all ${
+                          atsDisplayMode === 'form'
+                            ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        <Layers size={14} />
+                        <span>
+                          {netaLanguage === 'vi'
+                            ? 'BIỂU MẪU ĐIỀN THÔNG SỐ & QUÉT NAMEPLATE'
+                            : 'FIELD MEASUREMENT FORMS & NAMEPLATE OCR'}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2 pr-2">
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {atsDisplayMode === 'tev-report' ? 'VIEW: BILINGUAL TEV REPORT' : 'VIEW: FIELD ENTRY FORM'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className={atsDisplayMode === 'tev-report' ? 'block' : 'hidden'}>
+                    <NetaAtsUniversalReportView
+                      initialSpecId={fieldEntryMode}
+                      initialLang={netaLanguage}
+                      displayMode={atsDisplayMode}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                      onSelectSpecId={(specId) => setFieldEntryMode(specId as any)}
+                      onSwitchToForm={() => setAtsDisplayMode('form')}
+                    />
+                  </div>
+
+                  <div className={atsDisplayMode === 'form' ? 'block space-y-6' : 'hidden'}>
+                    {/* Equipment Checklist Selection Hub */}
+                    <EquipmentChecklistSelector
+                      currentMode={fieldEntryMode}
+                      onSelectMode={(mode) => setFieldEntryMode(mode)}
+                      reportsCount={allReports.length}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                      onSwitchToMts={() => setNetaStandardModule('mts')}
+                      onOpenUniversalReport={(mode) => {
+                        setFieldEntryMode(mode);
+                        setAtsDisplayMode('tev-report');
+                      }}
+                    />
 
               {fieldEntryMode === 'neta-dc-motor' ? (
                 <NetaDcMotorChecklist
@@ -7848,11 +8717,13 @@ export default function App() {
                 <NetaGroundingChecklist
                   onSaveReport={handleSaveNetaReport}
                   onNavigateToReports={() => setActiveTab('reports')}
+                  onSwitchToUniversalReport={() => setAtsDisplayMode('tev-report')}
                 />
               ) : fieldEntryMode === 'neta-lv-breaker' ? (
                 <NetaLvBreakerChecklist
                   onSaveReport={handleSaveNetaReport}
                   onNavigateToReports={() => setActiveTab('reports')}
+                  onSwitchToUniversalReport={() => setAtsDisplayMode('tev-report')}
                 />
               ) : fieldEntryMode === 'neta-cable-lv' ? (
                 <NetaCableLvChecklist
@@ -7903,6 +8774,7 @@ export default function App() {
                 <NetaLiquidTransformerChecklist
                   onSaveReport={handleSaveNetaReport}
                   onNavigateToReports={() => setActiveTab('reports')}
+                  onSwitchToUniversalReport={() => setAtsDisplayMode('tev-report')}
                 />
               ) : fieldEntryMode === 'neta-motor' ? (
                 <NetaMotorChecklist
@@ -8314,8 +9186,40 @@ export default function App() {
               </div>
             </div>
           )}
-    </div>
+
+          {/* BOTTOM PMP ACTION BAR FOR ATS CHECKLISTS */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white border border-blue-500/40 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-6">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-blue-500 text-white font-black text-[10px] uppercase tracking-wider">
+                  BƯỚC TIẾP THEO (CHUẨN PMP)
+                </span>
+                <span className="font-bold text-sm text-blue-300">
+                  Hoàn tất nhập số liệu biểu mẫu hiện trường?
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                Nhấn nút bên phải để chuyển sang xem Báo Cáo Chuẩn TEV AI 4 Phần (ANSI/NETA ATS-2025) cho thiết bị đã chọn.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAtsDisplayMode('tev-report');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="px-5 py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-blue-500/30 active:scale-95 transition-all shrink-0"
+            >
+              <Sparkles size={16} className="text-amber-300" />
+              <span>Chuyển Qua Xem Báo Cáo Chuẩn TEV AI (ATS) →</span>
+            </button>
+          </div>
+        </div>
+      </div>
   )}
+</div>
+)}
 
           {/* --- DASHBOARD VIEW (Original) --- */}
           {activeTab === 'dashboard' && (
@@ -8789,12 +9693,18 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* TRENDING CHART */}
                 <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
-                  <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                  <div className="p-5 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
                     <div>
-                      <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                        <TrendingUp className="text-blue-500" size={18} />
-                        Biểu đồ xu hướng (Trending)
-                      </h2>
+                      <div className="flex items-center gap-2">
+                        <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                          <TrendingUp className="text-blue-500" size={18} />
+                          Biểu đồ xu hướng (Trending)
+                        </h2>
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200" title="Dữ liệu đồng bộ 2 chiều tự động từ Cloud Firestore & Google Sheets">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Firestore & Sheets Sync
+                        </span>
+                      </div>
                       <div className="flex items-center gap-3 mt-2">
                         <select 
                           value={trendingEquipment} 
@@ -8851,15 +9761,59 @@ export default function App() {
                         </select>
                       </div>
                     </div>
-                    <select className="text-sm border-slate-200 rounded-md text-slate-600 bg-slate-50 px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500">
-                      <option>Hôm nay</option>
-                      <option>7 ngày qua</option>
-                      <option>30 ngày qua</option>
-                      <option>1 năm qua</option>
-                    </select>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          fetchReports(true);
+                          if (isGoogleConnected) {
+                            handleFetchFromSheets(true, true);
+                          }
+                        }}
+                        disabled={isSyncing || isReportsLoading}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+                        title="Cập nhật lại điểm đo xu hướng từ Google Sheets và Cloud Firestore"
+                      >
+                        <RefreshCw size={13} className={(isSyncing || isReportsLoading) ? "animate-spin text-blue-600" : "text-slate-500"} />
+                        <span className="hidden sm:inline">Cập nhật trending</span>
+                      </button>
+                      <select className="text-sm border-slate-200 rounded-md text-slate-600 bg-slate-50 px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500">
+                        <option>Hôm nay</option>
+                        <option>7 ngày qua</option>
+                        <option>30 ngày qua</option>
+                        <option>1 năm qua</option>
+                      </select>
+                    </div>
                   </div>
-                  <div className="p-5 flex-1 min-h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="p-5 flex-1 min-h-[300px] h-[340px]">
+                    {((trendingChartType === 'temp' && dynamicTrendData.temp.length === 0) ||
+                      (trendingChartType === 'winding_temp' && dynamicTrendData.winding_temp.length === 0) ||
+                      (trendingChartType === 'tev' && dynamicTrendData.tev.length === 0) ||
+                      (trendingChartType === 'dga' && dynamicTrendData.dga.length === 0) ||
+                      (trendingChartType === 'ir' && dynamicTrendData.ir.length === 0) ||
+                      (trendingChartType === 'winding_res' && dynamicTrendData.winding_res.length === 0) ||
+                      (trendingChartType === 'pd' && dynamicTrendData.pd.length === 0) ||
+                      (trendingChartType === 'elcid' && dynamicTrendData.elcid.length === 0) ||
+                      (trendingChartType === 'pi' && dynamicTrendData.pi.length === 0)) ? (
+                      <div className="flex flex-col items-center justify-center h-full min-h-[250px] text-center p-6 bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+                        <Activity className="w-9 h-9 text-slate-400 mb-2 stroke-[1.5]" />
+                        <p className="text-sm font-semibold text-slate-700">Chưa có đủ điểm đo lịch sử cho thông số này</p>
+                        <p className="text-xs text-slate-500 max-w-sm mt-1">
+                          Dữ liệu xu hướng (trending) sẽ tự động hiển thị khi nạp từ Google Sheets hoặc nhập báo cáo kiểm tra định kỳ vào Firestore.
+                        </p>
+                        <button
+                          onClick={() => {
+                            fetchReports(true);
+                            if (isGoogleConnected) handleFetchFromSheets(false, true);
+                          }}
+                          disabled={isSyncing || isReportsLoading}
+                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md border border-blue-200 transition-colors"
+                        >
+                          <RefreshCw size={12} className={(isSyncing || isReportsLoading) ? "animate-spin" : ""} />
+                          Nạp dữ liệu từ Sheets & Firestore
+                        </button>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
                       {trendingChartType === 'temp' || trendingChartType === 'winding_temp' ? (
                         <AreaChart data={trendingChartType === 'temp' ? dynamicTrendData.temp : dynamicTrendData.winding_temp} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                           <defs>
@@ -9015,6 +9969,7 @@ export default function App() {
                         </AreaChart>
                       )}
                     </ResponsiveContainer>
+                    )}
                   </div>
                 </div>
 
@@ -9068,7 +10023,7 @@ export default function App() {
                       Phân bổ trạng thái
                     </h2>
                   </div>
-                  <div className="p-5 flex-1 min-h-[250px] flex items-center justify-center">
+                  <div className="p-5 flex-1 min-h-[250px] h-[260px] flex items-center justify-center">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -9101,7 +10056,7 @@ export default function App() {
                       Phân bố Health Index
                     </h2>
                   </div>
-                  <div className="p-5 flex-1 min-h-[250px]">
+                  <div className="p-5 flex-1 min-h-[250px] h-[260px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={filteredHealthDistribution} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -9787,6 +10742,14 @@ export default function App() {
                       <RefreshCw size={15} className={isSyncing ? "animate-spin" : ""} />
                       <span className="hidden sm:inline">Đồng bộ Google Sheets</span> ({allEquipment.length} TB)
                     </button>
+                    <button 
+                      onClick={() => setShowMasterDirectoryModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-sm font-bold transition-colors shadow-2xs"
+                      title="Quản lý 3 Danh Mục Master: Mã Khách Hàng, Tên Thiết Bị, Kỹ Sư FSE & Tạo Thêm Sheet Tabs"
+                    >
+                      <FileSpreadsheet size={15} className="text-amber-600" />
+                      <span>Sheet Tabs & Danh Mục</span>
+                    </button>
                     <button onClick={() => setShowAddEqModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm">
                       <span className="text-lg leading-none">+</span> Thêm thiết bị
                     </button>
@@ -10115,7 +11078,11 @@ export default function App() {
                           <td className="p-4 text-slate-500 max-w-[200px] truncate" title={report.notes}>{report.notes}</td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Xem chi tiết">
+                              <button 
+                                onClick={() => setSelectedReportForModal(report)}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                                title="Xem chi tiết"
+                              >
                                 <Eye size={16} />
                               </button>
                               <button 
@@ -10184,46 +11151,25 @@ export default function App() {
           )}
           {activeTab === 'deep-analysis' && (
             <div className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 pb-24 lg:pb-8 bg-slate-50/50">
-              <div className={`${deepAnalysisSubTab === 'pv-cell' || deepAnalysisSubTab === 'dga' ? 'max-w-7xl' : 'max-w-5xl'} mx-auto space-y-6`}>
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Phân tích chuyên sâu</h2>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                      {deepAnalysisSubTab === 'dga' && 'Phân tích tình trạng & Xu hướng nồng độ khí hòa tan DGA (IEEE C57.104 & Duval Triangles)'}
-                      {deepAnalysisSubTab === 'pv-cell' && 'Phân tích tình trạng tấm pin/cell mặt trời từ ảnh nhiệt (IR) & ảnh thực tế (RGB) theo IEC 62446-3 & Volateq / Sitemark'}
-                      {deepAnalysisSubTab === 'wind-turbine' && 'Phân tích tình trạng cánh quạt điện gió (Wind Turbine Blade)'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-sm w-full md:w-auto">
-                    <button 
-                      onClick={() => setDeepAnalysisSubTab('dga')}
-                      className={`flex-1 md:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${deepAnalysisSubTab === 'dga' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
-                    >
-                      DGA MBA
-                    </button>
-                    <button 
-                      onClick={() => setDeepAnalysisSubTab('pv-cell')}
-                      className={`flex-1 md:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${deepAnalysisSubTab === 'pv-cell' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
-                    >
-                      PV Cell
-                    </button>
-                    <button 
-                      onClick={() => setDeepAnalysisSubTab('wind-turbine')}
-                      className={`flex-1 md:flex-none text-center px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${deepAnalysisSubTab === 'wind-turbine' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
-                    >
-                      Wind Blade
-                    </button>
-                  </div>
-                  {deepAnalysisSubTab === 'dga' && dgaAnalysisResult && (
+              <div className={`${deepAnalysisSubTab === 'pv-cell' || deepAnalysisSubTab === 'dga' || deepAnalysisSubTab === 'wind-turbine' || deepAnalysisSubTab === 'partial-discharge' ? 'max-w-7xl' : 'max-w-5xl'} mx-auto space-y-6`}>
+                {/* 1. SCALABLE PROFESSIONAL DEEP DIAGNOSTIC MODULE SELECTOR */}
+                <DeepAnalysisModuleSelector
+                  activeModuleId={deepAnalysisSubTab}
+                  onSelectModule={(id) => setDeepAnalysisSubTab(id)}
+                  lang={netaLanguage}
+                />
+
+                {deepAnalysisSubTab === 'dga' && dgaAnalysisResult && (
+                  <div className="flex justify-end">
                     <button 
                       onClick={exportToPDF}
-                      className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
                     >
                       <Download size={18} />
                       Xuất báo cáo PDF
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {deepAnalysisSubTab === 'dga' && (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -10901,809 +11847,64 @@ export default function App() {
                 )}
 
                 {deepAnalysisSubTab === 'wind-turbine' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                      <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                        <Wind size={20} className="text-blue-500" />
-                        Dữ liệu cảm biến
-                      </h3>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Độ rung cánh (mm/s)</label>
-                          <input type="number" value={windBladeData.vibration} onChange={(e) => setWindBladeData({...windBladeData, vibration: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Phát xạ âm thanh (dB)</label>
-                          <input type="number" value={windBladeData.acoustic} onChange={(e) => setWindBladeData({...windBladeData, acoustic: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Tốc độ quay (RPM)</label>
-                          <input type="number" value={windBladeData.rotationSpeed} onChange={(e) => setWindBladeData({...windBladeData, rotationSpeed: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Tốc độ gió (m/s)</label>
-                          <input type="number" value={windBladeData.windSpeed} onChange={(e) => setWindBladeData({...windBladeData, windSpeed: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">Ghi chú kiểm tra trực quan</label>
-                          <textarea value={windBladeData.visualNotes} onChange={(e) => setWindBladeData({...windBladeData, visualNotes: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none h-24" placeholder="Nhập các quan sát về vết nứt, xói mòn..." />
-                        </div>
-                        <button 
-                          onClick={analyzeWindBlade}
-                          className="w-full mt-6 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
-                        >
-                          Phân tích cánh quạt
-                        </button>
-                      </div>
-                    </div>
+                  <WindBladeDeepAnalyzer
+                    onSaveReport={handleSaveNetaReport}
+                    onNavigateToReports={() => setActiveTab('reports')}
+                    onCreateWorkOrder={(woData) => {
+                      handleSaveWorkOrderFromField({
+                        ...woData,
+                        id: `WO-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+                        workPermitId: `WP-WIND-${Math.floor(1000 + Math.random() * 9000)}`,
+                        status: 'initiated',
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                        assignedTo: 'Chờ phân công Engineer sau Daily Meeting',
+                        responsibleApprove: 'Plant Manager / Maintenance Manager',
+                        responsibleDo: 'Đội Sửa chữa Đu dây (Rope-Access) TEV',
+                        dueDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+                      });
+                      setActiveTab('pm-schedule');
+                    }}
+                  />
+                )}
 
-                    <div className="lg:col-span-2 space-y-6">
-                      {windAnalysisResult ? (
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6 lg:p-8">
-                          <div className="flex justify-between items-start mb-8 border-b border-slate-100 pb-6">
-                            <div>
-                              <h3 className="text-xl font-bold text-slate-900">Kết quả phân tích Cánh quạt</h3>
-                              <p className="text-slate-500 mt-1">Thời gian: {windAnalysisResult.timestamp}</p>
-                            </div>
-                            <div className={`px-4 py-2 rounded-full font-bold text-sm ${windAnalysisResult.bgColor} ${windAnalysisResult.color}`}>
-                              {windAnalysisResult.condition}
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
-                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Mức độ rung động</h4>
-                              <div className="flex items-end gap-2">
-                                <span className={`text-4xl font-bold ${parseFloat(windBladeData.vibration) > 0.8 ? 'text-amber-600' : 'text-slate-900'}`}>{windBladeData.vibration}</span>
-                                <span className="text-slate-500 mb-1">mm/s RMS</span>
-                              </div>
-                            </div>
-                            <div className="p-6 bg-slate-50 rounded-xl border border-slate-100">
-                              <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Phát xạ âm thanh</h4>
-                              <div className="flex items-end gap-2">
-                                <span className={`text-4xl font-bold ${parseFloat(windBladeData.acoustic) > 40 ? 'text-amber-600' : 'text-slate-900'}`}>{windBladeData.acoustic}</span>
-                                <span className="text-slate-500 mb-1">dB</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div>
-                            <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                              <AlertCircle size={20} className="text-blue-500" />
-                              Kết luận & Hành động
-                            </h4>
-                            <ul className="space-y-3">
-                              {windAnalysisResult.recommendations.map((rec: string, idx: number) => (
-                                <li key={idx} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-100">
-                                  <div className={`mt-1 w-2 h-2 rounded-full ${windAnalysisResult.bgColor.replace('bg-', 'bg-').replace('50', '500')}`} />
-                                  <span className="text-slate-700">{rec}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 flex flex-col items-center justify-center text-center h-full min-h-[400px]">
-                          <Wind size={48} className="text-slate-200 mb-4" />
-                          <h3 className="text-xl font-bold text-slate-800 mb-2">Sẵn sàng phân tích Cánh quạt</h3>
-                          <p className="text-slate-500 max-w-md">
-                            Nhập dữ liệu từ cảm biến rung động và âm thanh để phát hiện các hư hỏng cấu trúc tiềm ẩn trên cánh quạt.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                {deepAnalysisSubTab === 'partial-discharge' && (
+                  <PartialDischargeDeepAnalyzer
+                    onSaveReport={handleSaveNetaReport}
+                    onNavigateToReports={() => setActiveTab('reports')}
+                  />
                 )}
               </div>
             </div>
           )}
-          {/* --- CMMS VIEW --- */}
-          {activeTab === 'cmms' && (
-            <div className="space-y-6">
-              {/* CMMS Mode / Sub-navigation Tabs */}
-              <div className="bg-white rounded-2xl p-2 border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCmmsSubTab('station')}
-                  className={`flex-1 flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
-                    cmmsSubTab === 'station'
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 ring-2 ring-blue-600/20'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
-                >
-                  <FileSpreadsheet size={18} className={cmmsSubTab === 'station' ? 'text-blue-200' : 'text-slate-400'} />
-                  <span>Trạm Nhập Liệu & Đồng Bộ 2 Chiều Google Sheet</span>
-                  <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold ${
-                    cmmsSubTab === 'station' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}>
-                    TEV Flatform
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setCmmsSubTab('table')}
-                  className={`flex-1 flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-sm transition-all ${
-                    cmmsSubTab === 'table'
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 ring-2 ring-blue-600/20'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
-                >
-                  <ClipboardList size={18} className={cmmsSubTab === 'table' ? 'text-blue-200' : 'text-slate-400'} />
-                  <span>Danh Sách & Bộ Lọc Phiếu Công Việc</span>
-                  <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold ${
-                    cmmsSubTab === 'table' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}>
-                    {workOrders.length} WO
-                  </span>
-                </button>
-              </div>
-
-              {/* View 1: Trạm Nhập Liệu & Đồng Bộ 2 Chiều Google Sheet */}
-              {cmmsSubTab === 'station' && (
-                <FseFieldDataEntryStation
-                  customers={customers}
-                  allEquipment={allEquipment}
-                  workOrders={workOrders}
-                  isGoogleConnected={isGoogleConnected}
-                  onConnectGoogle={handleConnectGoogle}
-                  onSaveCustomer={handleSaveCustomerFromField}
-                  onSaveEquipment={handleSaveEquipmentFromField}
-                  onSaveWorkOrder={handleSaveWorkOrderFromField}
-                  onSyncAllToSheets={handleSyncToSheets}
-                  onFetchFromSheets={handleFetchFromSheets}
-                  onSyncAppToSheetsAndFirestore={handleSyncAppToSheetsAndFirestore}
-                  onSyncSheetsToFirestoreAndApp={handleSyncSheetsToFirestoreAndApp}
-                  isSyncing={isSyncing}
-                  userEmail={auth.currentUser?.email || 'sgm1707@gmail.com'}
-                />
-              )}
-
-              {/* View 2: Bảng Danh Sách & Thống Kê Phiếu CMMS */}
-              {cmmsSubTab === 'table' && (
-                <div className="space-y-6">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2.5 mb-1">
-                        <h2 className="text-2xl font-bold text-slate-900">Quản lý CMMS (Solar & Wind)</h2>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200/80 rounded-md text-xs font-semibold">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
-                          Đồng bộ Firebase & Google Sheets: {workOrders.length} phiếu WO
-                        </span>
-                      </div>
-                      <p className="text-slate-500">Quản lý phiếu công việc, bảo trì định kỳ PM (Solar, Wind & Thiết bị Công nghiệp) và sửa chữa CMMS.</p>
-                    </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    onClick={() => handleFetchFromSheets(false, true)}
-                    disabled={isSyncing}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50"
-                    title="Nạp toàn bộ phiếu CMMS từ Google Sheets 'TEV Service Flatform' về Firestore & App"
-                  >
-                    <RefreshCw size={15} className={isSyncing ? "animate-spin" : ""} />
-                    <span>Nạp từ Google Sheets</span>
-                  </button>
-                  <button
-                    onClick={() => handleSyncToSheets(undefined, false, true)}
-                    disabled={isSyncing}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50"
-                    title="Đồng bộ toàn bộ phiếu CMMS từ App lên Google Sheets"
-                  >
-                    <DownloadCloud size={15} />
-                    <span>Đẩy lên Sheets</span>
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setNewWorkOrder({
-                        title: '',
-                        description: '',
-                        equipmentId: [],
-                        customerId: '',
-                        priority: 'medium',
-                        type: 'preventive',
-                        status: 'initiated',
-                        assignedTo: '',
-                        dueDate: '',
-                        usedMaterials: [],
-                        responsibleApprove: 'TM',
-                        responsibleDo: 'Everybody',
-                        blockingRequired: false,
-                        workPermitId: generateWorkPermitId(),
-                        isUnplanned: false,
-                        failureCode: '',
-                        rootCause: '',
-                        actualTimeSpent: 0,
-                        pmFrequency: 'monthly',
-                        estimatedTime: 0,
-                        laborCount: 0,
-                        laborCost: 0,
-                        partCost: 0,
-                        attachments: [],
-                        downtimeStart: '',
-                        repairStart: '',
-                        repairEnd: '',
-                        restartTime: ''
-                      });
-                      setSelectedWorkOrder(null);
-                      setShowWorkOrderModal(true);
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
-                  >
-                    <Plus size={18} />
-                    Tạo phiếu mới
-                  </button>
-                </div>
-              </div>
-
-              {/* Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Tổng số phiếu</span>
-                    <ClipboardList className="text-blue-500" size={16} />
-                  </div>
-                  <div className="text-2xl font-bold text-slate-900">{workOrders.length}</div>
-                </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Đang thực hiện</span>
-                    <Activity className="text-amber-500" size={16} />
-                  </div>
-                  <div className="text-2xl font-bold text-slate-900">
-                    {workOrders.filter(o => o.status === 'in-progress').length}
-                  </div>
-                </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Đã hoàn thành</span>
-                    <CheckCircle className="text-emerald-500" size={16} />
-                  </div>
-                  <div className="text-2xl font-bold text-slate-900">
-                    {workOrders.filter(o => o.status === 'completed').length}
-                  </div>
-                </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Quá hạn</span>
-                    <AlertCircle className="text-rose-600" size={16} />
-                  </div>
-                  <div className="text-2xl font-bold text-rose-600">
-                    {workOrders.filter(o => o.status === 'overdue' || (o.dueDate && new Date(o.dueDate) < new Date() && o.status !== 'completed')).length}
-                  </div>
-                </div>
-              </div>
-
-              {/* Work Orders Table */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-slate-800">Danh sách Phiếu công việc</h3>
-                    <div className="flex items-center gap-2">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                        <input 
-                          type="text" 
-                          placeholder="Tìm kiếm phiếu..." 
-                          value={woSearchQuery}
-                          onChange={(e) => setWoSearchQuery(e.target.value)}
-                          className="pl-9 pr-4 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Filters */}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <select 
-                      value={woTypeFilter} 
-                      onChange={(e) => setWoTypeFilter(e.target.value)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Tất cả Loại</option>
-                      <option value="preventive">Định kỳ</option>
-                      <option value="corrective">Sửa chữa</option>
-                      <option value="inspection">Kiểm tra</option>
-                      <option value="emergency">Khẩn cấp</option>
-                    </select>
-                    <select 
-                      value={woPriorityFilter} 
-                      onChange={(e) => setWoPriorityFilter(e.target.value)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Tất cả Ưu tiên</option>
-                      <option value="low">Thấp</option>
-                      <option value="medium">Trung bình</option>
-                      <option value="high">Cao</option>
-                      <option value="urgent">Khẩn cấp</option>
-                    </select>
-                    <select 
-                      value={woStatusFilter} 
-                      onChange={(e) => setWoStatusFilter(e.target.value)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Tất cả Trạng thái</option>
-                      <option value="initiated">Khởi tạo</option>
-                      <option value="approved">Đã duyệt</option>
-                      <option value="planned">Đã lên kế hoạch</option>
-                      <option value="scheduled">Đã lên lịch</option>
-                      <option value="in-progress">Đang thực hiện</option>
-                      <option value="completed">Hoàn thành</option>
-                      <option value="overdue">Quá hạn</option>
-                      <option value="cancelled">Đã hủy</option>
-                    </select>
-                    <select 
-                      value={woAssigneeFilter} 
-                      onChange={(e) => setWoAssigneeFilter(e.target.value)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Tất cả Người thực hiện</option>
-                      {Array.from(new Set(workOrders.map(wo => wo.assignedTo).filter(Boolean))).map(assignee => (
-                        <option key={assignee} value={assignee}>{assignee}</option>
-                      ))}
-                    </select>
-                    {(woTypeFilter || woPriorityFilter || woStatusFilter || woAssigneeFilter || woSearchQuery) && (
-                      <button 
-                        onClick={() => {
-                          setWoTypeFilter('');
-                          setWoPriorityFilter('');
-                          setWoStatusFilter('');
-                          setWoAssigneeFilter('');
-                          setWoSearchQuery('');
-                        }}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                      >
-                        Xóa bộ lọc
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
-                        <th className="p-4">Mã WP</th>
-                        <th className="p-4">Tiêu đề / Thiết bị</th>
-                        <th className="p-4">Loại</th>
-                        <th className="p-4">Ưu tiên</th>
-                        <th className="p-4">Trạng thái</th>
-                        <th className="p-4">Người thực hiện</th>
-                        <th className="p-4">Ngày tạo</th>
-                        <th className="p-4 text-right">Thao tác</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm divide-y divide-slate-50">
-                      {isWorkOrdersLoading ? (
-                        <tr>
-                          <td colSpan={8} className="p-8 text-center text-slate-500">Đang tải dữ liệu...</td>
-                        </tr>
-                      ) : (() => {
-                        const filteredWorkOrders = workOrders.filter(order => {
-                          if (woTypeFilter && order.type !== woTypeFilter) return false;
-                          if (woPriorityFilter && order.priority !== woPriorityFilter) return false;
-                          if (woStatusFilter && order.status !== woStatusFilter) return false;
-                          if (woAssigneeFilter && order.assignedTo !== woAssigneeFilter) return false;
-                          if (woSearchQuery) {
-                            const q = woSearchQuery.toLowerCase();
-                            return (
-                              (order.title && order.title.toLowerCase().includes(q)) ||
-                              (Array.isArray(order.equipmentId) ? order.equipmentId.some(id => id.toLowerCase().includes(q)) : (order.equipmentId && order.equipmentId.toLowerCase().includes(q))) ||
-                              (order.workPermitId && order.workPermitId.toLowerCase().includes(q))
-                            );
-                          }
-                          return true;
-                        });
-
-                        if (filteredWorkOrders.length === 0) {
-                          return (
-                            <tr>
-                              <td colSpan={8} className="p-8 text-center text-slate-500">Không tìm thấy phiếu công việc nào phù hợp.</td>
-                            </tr>
-                          );
-                        }
-
-                        return filteredWorkOrders.map((order) => (
-                          <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-4 font-mono text-xs font-bold text-blue-600 bg-blue-50/50 rounded-lg">
-                              {order.workPermitId || 'N/A'}
-                            </td>
-                            <td className="p-4">
-                              <div className="font-bold text-slate-900">{order.title}</div>
-                              <div className="text-xs text-slate-500 font-mono">
-                                {Array.isArray(order.equipmentId) ? order.equipmentId.join(', ') : order.equipmentId}
-                              </div>
-                            </td>
-                            <td className="p-4">
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-600 border border-slate-200">
-                                {order.type === 'preventive' ? 'Định kỳ' : order.type === 'corrective' ? 'Sửa chữa' : order.type === 'inspection' ? 'Kiểm tra' : 'Khẩn cấp'}
-                              </span>
-                            </td>
-                            <td className="p-4">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                order.priority === 'urgent' ? 'bg-rose-100 text-rose-700 border border-rose-200' :
-                                order.priority === 'high' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
-                                order.priority === 'medium' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
-                                'bg-slate-100 text-slate-600 border border-slate-200'
-                              }`}>
-                                {order.priority}
-                              </span>
-                            </td>
-                            <td className="p-4">
-                              <div className="flex items-center gap-1.5">
-                                <span className={`w-2 h-2 rounded-full ${
-                                  order.status === 'completed' ? 'bg-emerald-500' :
-                                  order.status === 'in-progress' ? 'bg-amber-500' :
-                                  order.status === 'overdue' ? 'bg-rose-600' :
-                                  order.status === 'cancelled' ? 'bg-slate-400' : 'bg-blue-500'
-                                }`}></span>
-                                <span className={`font-medium capitalize ${
-                                  order.status === 'overdue' ? 'text-rose-600 font-bold' : 'text-slate-700'
-                                }`}>
-                                  {order.status === 'overdue' ? 'Quá hạn' : 
-                                   order.status === 'pending' ? 'Chờ xử lý' :
-                                   order.status === 'in-progress' ? 'Đang làm' :
-                                   order.status === 'completed' ? 'Hoàn thành' :
-                                   order.status === 'initiated' ? 'Khởi tạo' :
-                                   order.status === 'approved' ? 'Đã duyệt' :
-                                   order.status === 'planned' ? 'Đã lên KH' :
-                                   order.status === 'scheduled' ? 'Đã lên lịch' : 'Đã hủy'}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="p-4 text-slate-600">{order.assignedTo || 'Chưa phân công'}</td>
-                            <td className="p-4 text-slate-500 text-xs">
-                              <div>Tạo: {order.createdAt ? new Date(order.createdAt).toLocaleDateString('vi-VN') : 'N/A'}</div>
-                              {order.dueDate && (
-                                <div className={`mt-1 font-medium ${new Date(order.dueDate) < new Date() && order.status !== 'completed' ? 'text-rose-500' : 'text-slate-400'}`}>
-                                  Hạn: {new Date(order.dueDate).toLocaleDateString('vi-VN')}
-                                </div>
-                              )}
-                            </td>
-                            <td className="p-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <button 
-                                  onClick={() => generateWorkOrderPDF(order)}
-                                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Xuất PDF"
-                                >
-                                  <Download size={16} />
-                                </button>
-                                <button 
-                                  onClick={() => handleDeleteWorkOrder(order.id)}
-                                  className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                                  title="Xóa"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                                <button 
-                                  onClick={() => handleOpenWorkOrderDetail(order)}
-                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Chi tiết & Chỉnh sửa"
-                                >
-                                  <Settings size={16} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ));
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-          {/* --- PM SCHEDULE VIEW --- */}
-          {activeTab === 'pm-schedule' && (
-            <div className="space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-slate-900">Lịch bảo trì định kỳ (PM) & Giám sát Tiến độ</h2>
-                  <p className="text-slate-500">Bảng điều khiển theo dõi phiếu PM đã hoàn thành, quá hạn và sắp đến hạn trong tháng, kết hợp tự động cảnh báo Email.</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => {
-                      setNewWorkOrder({
-                        title: '',
-                        description: '',
-                        equipmentId: [],
-                        customerId: '',
-                        factory: '',
-                        priority: 'medium',
-                        type: 'preventive',
-                        status: 'initiated',
-                        assignedTo: '',
-                        dueDate: new Date().toISOString().split('T')[0],
-                        usedMaterials: [],
-                        responsibleApprove: 'TM',
-                        responsibleDo: 'Everybody',
-                        blockingRequired: false,
-                        workPermitId: generateWorkPermitId(),
-                        isUnplanned: false,
-                        failureCode: '',
-                        pmFrequency: 'monthly',
-                        estimatedTime: 0,
-                        laborCount: 0,
-                        laborCost: 0,
-                        partCost: 0,
-                        attachments: [],
-                        downtimeStart: '',
-                        repairStart: '',
-                        repairEnd: '',
-                        restartTime: ''
-                      });
-                      setSelectedWorkOrder(null);
-                      setShowWorkOrderModal(true);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-semibold shadow-xs transition-all"
-                  >
-                    <Plus size={16} />
-                    <span>Tạo Phiếu PM Mới</span>
-                  </button>
-
-                  <button
-                    onClick={() => setShowPMNotificationModal(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-sm font-semibold shadow-xs transition-all"
-                  >
-                    <Mail size={16} />
-                    <span>Email Cảnh Báo (3 Ngày)</span>
-                    {pmUpcomingTasks.length > 0 && (
-                      <span className="ml-1 px-2 py-0.5 bg-amber-400 text-slate-950 text-xs font-bold rounded-full">
-                        {pmUpcomingTasks.length}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Sub-navigation Tabs */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => setPmSubTab('dashboard')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all ${
-                      pmSubTab === 'dashboard'
-                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                    }`}
-                  >
-                    <BarChart3 size={16} />
-                    <span>Biểu Đồ & Dashboard Tiến Độ PM</span>
-                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                      pmSubTab === 'dashboard' ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-700'
-                    }`}>
-                      Mới
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setPmSubTab('schedule')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all ${
-                      pmSubTab === 'schedule'
-                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                    }`}
-                  >
-                    <Calendar size={16} />
-                    <span>Danh Mục Lịch Thiết Bị PM ({allEquipment.length})</span>
-                  </button>
-
-                  <button
-                    onClick={() => setPmSubTab('alerts')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all ${
-                      pmSubTab === 'alerts'
-                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                    }`}
-                  >
-                    <Mail size={16} />
-                    <span>Cảnh Báo Tự Động (Cloud Functions)</span>
-                    {pmUpcomingTasks.length > 0 && (
-                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400 text-slate-950">
-                        {pmUpcomingTasks.length}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Sub-tab 1: PM Dashboard & Charts */}
-              {pmSubTab === 'dashboard' && (
-                <PmScheduleDashboard
-                  workOrders={workOrders}
-                  allEquipment={allEquipment}
-                  onOpenWorkOrderModal={(wo) => {
-                    handleOpenWorkOrderDetail(wo);
-                  }}
-                  onSendAlert={(id) => handleSendPMAlerts(true)}
-                  onOpenEmailConfig={() => setShowPMNotificationModal(true)}
-                  onUpdateWorkOrderStatus={handleQuickUpdateWorkOrderStatus}
-                />
-              )}
-
-              {/* Sub-tab 2: Equipment Schedule Table */}
-              {pmSubTab === 'schedule' && (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
-                          <th className="p-4">Thiết bị</th>
-                          <th className="p-4">Tần suất PM</th>
-                          <th className="p-4">Lần bảo trì cuối</th>
-                          <th className="p-4">Lần bảo trì tiếp theo</th>
-                          <th className="p-4">Trạng thái</th>
-                          <th className="p-4 text-right">Thao tác</th>
-                        </tr>
-                      </thead>
-                      <tbody className="text-sm divide-y divide-slate-50">
-                        {allEquipment.map(eq => {
-                          // Find the latest completed PM work order for this equipment
-                          const eqPmOrders = workOrders.filter(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.status === 'completed');
-                          eqPmOrders.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
-                          const latestPm = eqPmOrders[0];
-                          
-                          // If no PM order exists, we might not know the frequency unless it's stored on the equipment.
-                          // For now, we'll look for ANY PM order (even not completed) to get the frequency.
-                          const anyPmOrder = workOrders.find(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency);
-                          const frequency = anyPmOrder?.pmFrequency || '';
-                          
-                          if (!frequency) return null; // Skip equipment without PM schedule
-
-                          const lastDateStr = latestPm ? (latestPm.updatedAt || latestPm.createdAt) : null;
-                          const nextDate = lastDateStr ? calculateNextPMDate(lastDateStr, frequency) : null;
-                          const isOverdue = nextDate ? nextDate < new Date() : false;
-                          const isDueSoon = nextDate ? (nextDate.getTime() - new Date().getTime()) / (1000 * 3600 * 24) <= 7 : false;
-
-                          return (
-                            <tr key={eq.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4">
-                                <div className="font-bold text-slate-900">{eq.name}</div>
-                                <div className="text-xs text-slate-500 font-mono">{eq.id}</div>
-                              </td>
-                              <td className="p-4 text-slate-600">
-                                {frequency === 'daily' ? 'Hàng ngày' :
-                                 frequency === 'weekly' ? 'Hàng tuần' :
-                                 frequency === 'bi-monthly' ? 'Nửa tháng' :
-                                 frequency === 'monthly' ? 'Hàng tháng' :
-                                 frequency === '3-months' ? '3 tháng' :
-                                 frequency === '6-months' ? '6 tháng' :
-                                 frequency === '1-year' ? '1 năm' :
-                                 frequency === '3-years' ? '3 năm' :
-                                 frequency === '6-years' ? '6 năm' : frequency}
-                              </td>
-                              <td className="p-4 text-slate-600">
-                                {lastDateStr ? new Date(lastDateStr).toLocaleDateString('vi-VN') : 'Chưa có dữ liệu'}
-                              </td>
-                              <td className="p-4 font-medium">
-                                {nextDate ? (
-                                  <span className={isOverdue ? 'text-rose-600 font-bold' : isDueSoon ? 'text-amber-600 font-bold' : 'text-slate-900'}>
-                                    {nextDate.toLocaleDateString('vi-VN')}
-                                  </span>
-                                ) : 'Chưa xác định'}
-                              </td>
-                              <td className="p-4">
-                                {isOverdue ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-rose-100 text-rose-700 border border-rose-200">Quá hạn</span>
-                                ) : isDueSoon ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-700 border border-amber-200">Sắp đến hạn</span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-200">Bình thường</span>
-                                )}
-                              </td>
-                              <td className="p-4 text-right">
-                                <button 
-                                  onClick={() => {
-                                    setNewWorkOrder({
-                                      title: `Bảo trì định kỳ - ${eq.name}`,
-                                      description: '',
-                                      equipmentId: [eq.id],
-                                      customerId: eq.customer || '',
-                                      priority: 'medium',
-                                      type: 'preventive',
-                                      status: 'initiated',
-                                      assignedTo: '',
-                                      dueDate: nextDate ? nextDate.toISOString().split('T')[0] : '',
-                                      usedMaterials: [],
-                                      responsibleApprove: 'TM',
-                                      responsibleDo: 'Everybody',
-                                      blockingRequired: false,
-                                      workPermitId: generateWorkPermitId(),
-                                      isUnplanned: false,
-                                      failureCode: '',
-                                      pmFrequency: frequency,
-                                      estimatedTime: 0,
-                                      laborCount: 0,
-                                      laborCost: 0,
-                                      partCost: 0,
-                                      attachments: [],
-                                      downtimeStart: '',
-                                      repairStart: '',
-                                      repairEnd: '',
-                                      restartTime: ''
-                                    });
-                                    setSelectedWorkOrder(null);
-                                    setShowWorkOrderModal(true);
-                                  }}
-                                  className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors"
-                                >
-                                  Tạo phiếu PM
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                        {allEquipment.filter(eq => workOrders.some(wo => (Array.isArray(wo.equipmentId) ? wo.equipmentId.includes(eq.id) : wo.equipmentId === eq.id) && wo.type === 'preventive' && wo.pmFrequency)).length === 0 && (
-                          <tr>
-                            <td colSpan={6} className="p-8 text-center text-slate-500">
-                              Chưa có thiết bị nào được thiết lập lịch bảo trì định kỳ (PM).<br/>
-                              Hãy tạo một phiếu công việc loại "Bảo trì định kỳ" và chọn tần suất để thiết lập.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Sub-tab 3: Automated Alert Center */}
-              {pmSubTab === 'alerts' && (
-                <div className="space-y-6">
-                  {/* AUTOMATED EMAIL NOTIFICATION HIGHLIGHT BANNER */}
-                  <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-6 text-white border border-slate-700 shadow-md">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                      <div className="space-y-2 max-w-2xl">
-                        <div className="flex items-center gap-3">
-                          <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                            ⚡ Firebase Cloud Functions
-                          </span>
-                          <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                            Tự động quét hằng ngày (08:00 AM)
-                          </span>
-                        </div>
-                        <h3 className="text-xl font-bold text-white">
-                          Cảnh báo Email Tự động Trước 3 Ngày Đến Hạn PM
-                        </h3>
-                        <p className="text-sm text-slate-300 leading-relaxed">
-                          Hệ thống tự động lọc các phiếu bảo trì định kỳ có ngày đến hạn (<code className="text-blue-300 font-mono text-xs">dueDate</code>) còn đúng 3 ngày, gửi email HTML thông báo chi tiết đến kỹ thuật viên phụ trách và quản lý (<code className="text-amber-300 font-mono text-xs">sgm1707@gmail.com</code>).
-                        </p>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0">
-                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10 flex items-center justify-between gap-4">
-                          <div>
-                            <div className="text-xs text-slate-400 font-medium">Phiếu PM sắp đến hạn (&le; 3 ngày):</div>
-                            <div className="text-2xl font-black text-amber-400">
-                              {pmUpcomingTasks.length} <span className="text-sm font-normal text-slate-300">thiết bị</span>
-                            </div>
-                          </div>
-                          <button
-                            disabled={pmNotificationLoading}
-                            onClick={() => handleSendPMAlerts(false)}
-                            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-                          >
-                            {pmNotificationLoading ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-                            <span>Quét & Gửi ngay</span>
-                          </button>
-                        </div>
-
-                        <button
-                          onClick={() => setShowPMNotificationModal(true)}
-                          className="px-4 py-2 bg-white/15 hover:bg-white/25 text-white text-xs font-medium rounded-xl border border-white/20 transition-colors text-center"
-                        >
-                          Xem chi tiết danh sách & Cấu hình gửi mail
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+          {/* --- CONSOLIDATED PMP PM/CM & WORK ORDER - WORK PERMIT (23 CỘT CHUẨN TEV) VIEW --- */}
+          {(activeTab === "pm-schedule" || activeTab === "cmms") && (
+            <PmpPmCmWorkOrderPermitManager
+              workOrders={workOrders}
+              allEquipment={allEquipment}
+              customers={customers}
+              isGoogleConnected={isGoogleConnected}
+              onConnectGoogle={handleConnectGoogle}
+              onSaveWorkOrder={handleSaveWorkOrderFromField}
+              onDeleteWorkOrder={async (id: string) => {
+                setWorkOrders(prev => prev.filter(w => w.id !== id));
+                if (auth.currentUser) {
+                  try {
+                    await deleteDoc(doc(db, "workOrders", id));
+                  } catch (e) {
+                    console.warn("Firestore WO delete error:", e);
+                  }
+                }
+              }}
+              onSyncAllToSheets={handleSyncToSheets}
+              onFetchFromSheets={handleFetchFromSheets}
+              isSyncing={isSyncing}
+              onNavigateToNetaForm={handleDirectNavigateToNetaForm}
+              onSendPMAlerts={handleSendPMAlerts}
+              onOpenEmailConfig={() => setShowPMNotificationModal(true)}
+              pmUpcomingTasks={pmUpcomingTasks}
+              userEmail={auth.currentUser?.email || "sgm1707@gmail.com"}
+            />
           )}
 
           {/* PM EMAIL NOTIFICATION MODAL */}
@@ -11998,6 +12199,14 @@ export default function App() {
                   >
                     <Upload size={18} className={isSyncing ? 'animate-spin' : ''} />
                     Đồng bộ lên Sheets
+                  </button>
+                  <button 
+                    onClick={() => setShowMasterDirectoryModal(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-bold transition-colors shadow-2xs text-xs sm:text-sm"
+                    title="Quản lý 3 Danh Mục Master: Mã Khách Hàng, Tên Thiết Bị, Kỹ Sư FSE & Tạo Thêm Sheet Tabs"
+                  >
+                    <FileSpreadsheet size={16} className="text-amber-600" />
+                    <span>Sheet Tabs & Danh Mục</span>
                   </button>
                   <button 
                     onClick={() => {
@@ -12366,7 +12575,7 @@ export default function App() {
                   {/* Failure Profile (Radar Chart) */}
                   <div className="p-6 lg:col-span-2 flex flex-col">
                     <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Failure Profile</h3>
-                    <div className="flex-1 min-h-[250px] w-full relative">
+                    <div className="flex-1 min-h-[250px] h-[260px] w-full relative">
                       <ResponsiveContainer width="100%" height="100%">
                         <RadarChart cx="50%" cy="50%" outerRadius="70%" data={currentDetailedRiskData.failureProfile}>
                           <PolarGrid stroke="#e2e8f0" />
@@ -12655,7 +12864,11 @@ export default function App() {
                           <td className="p-4 text-slate-500 max-w-[200px] truncate" title={report.notes}>{report.notes}</td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Xem chi tiết">
+                              <button 
+                                onClick={() => setSelectedReportForModal(report)}
+                                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                                title="Xem chi tiết"
+                              >
                                 <Eye size={16} />
                               </button>
                               <button 
@@ -12864,14 +13077,17 @@ export default function App() {
                 <h3 className="font-bold text-slate-800 text-lg">
                   {selectedWorkOrder ? 'Chi tiết Phiếu công việc' : 'Tạo Phiếu công việc mới'}
                 </h3>
-                {selectedWorkOrder?.id && (
-                  <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-mono font-bold rounded-lg border border-blue-200">
-                    {selectedWorkOrder.id}
-                  </span>
-                )}
-                {selectedWorkOrder?.workPermitId && (
-                  <span className="px-2 py-0.5 bg-slate-200 text-slate-700 text-xs font-mono font-semibold rounded-md">
-                    {selectedWorkOrder.workPermitId}
+                <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-mono font-bold rounded-lg border border-blue-200 flex items-center gap-1">
+                  <span className="text-[10px] uppercase font-sans text-blue-600 font-semibold">Mã WO:</span>
+                  {selectedWorkOrder?.id || newWorkOrder.id || generateWorkOrderId()}
+                </span>
+                <span className="px-2 py-1 bg-slate-200 text-slate-700 text-xs font-mono font-bold rounded-md border border-slate-300 flex items-center gap-1">
+                  <span className="text-[10px] uppercase font-sans text-slate-500 font-semibold">Mã WP:</span>
+                  {selectedWorkOrder?.workPermitId || newWorkOrder.workPermitId || generateWorkPermitId()}
+                </span>
+                {!selectedWorkOrder && (
+                  <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                    Tự động lấy STT tiếp theo (WO-YYYY-XXX & WP-YYYY-XXX)
                   </span>
                 )}
               </div>
@@ -12973,53 +13189,55 @@ export default function App() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Khách hàng</label>
-                  <select 
-                    value={newWorkOrder.customerId} 
-                    onChange={(e) => {
-                      const custId = e.target.value;
-                      setNewWorkOrder({...newWorkOrder, customerId: custId, factory: ''});
-                    }} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">-- Chọn khách hàng --</option>
-                    {customers.map(customer => (
-                      <option key={customer.id} value={customer.id}>{customer.name}</option>
-                    ))}
-                    {customers.length === 0 && !isCustomersLoading && (
-                      <option disabled>Chưa có dữ liệu khách hàng</option>
-                    )}
-                  </select>
+                  <CustomerSelectDropdown
+                    label="Mã & Tên Khách Hàng"
+                    value={newWorkOrder.customerId}
+                    onChange={(val, cust) => {
+                      setNewWorkOrder({
+                        ...newWorkOrder,
+                        customerId: cust?.id || val,
+                        factory: cust?.factories?.[0] || newWorkOrder.factory || ''
+                      });
+                    }}
+                    placeholder="Chọn hoặc bổ sung khách hàng..."
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Nhà máy</label>
-                  {newWorkOrder.customerId && customers.find(c => c.id === newWorkOrder.customerId)?.factories?.length > 0 ? (
-                    <select 
-                      value={newWorkOrder.factory} 
-                      onChange={(e) => setNewWorkOrder({...newWorkOrder, factory: e.target.value})} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">-- Chọn nhà máy --</option>
-                      {customers.find(c => c.id === newWorkOrder.customerId).factories.map((f, idx) => (
-                        <option key={idx} value={f}>{f}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input 
-                      type="text" 
-                      value={newWorkOrder.factory} 
-                      onChange={(e) => setNewWorkOrder({...newWorkOrder, factory: e.target.value})} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                      placeholder="VD: Nhà máy Bắc Ninh" 
-                    />
-                  )}
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nhà máy / Khu vực</label>
+                  <input 
+                    type="text" 
+                    list="factory-suggestions"
+                    value={newWorkOrder.factory} 
+                    onChange={(e) => setNewWorkOrder({...newWorkOrder, factory: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium" 
+                    placeholder="Chọn hoặc nhập tên nhà máy / trạm" 
+                  />
+                  <datalist id="factory-suggestions">
+                    {(customers.find(c => c.id === newWorkOrder.customerId)?.factories || []).map((f, idx) => (
+                      <option key={idx} value={f}>{f}</option>
+                    ))}
+                    <option value="Nhà máy Điện Gió Mũi Né">Nhà máy Điện Gió Mũi Né</option>
+                    <option value="Nhà máy Điện Mặt Trời Super Energy">Nhà máy Điện Mặt Trời Super Energy</option>
+                    <option value="Trạm Biến Áp 22/110kV Super Energy">Trạm Biến Áp 22/110kV Super Energy</option>
+                    <option value="Tòa nhà TEV Office Tower">Tòa nhà TEV Office Tower</option>
+                    <option value="Bệnh Viện TEV General Hospital">Bệnh Viện TEV General Hospital</option>
+                    <option value="Trung Tâm Dữ Liệu TEV Tier-III">Trung Tâm Dữ Liệu TEV Tier-III</option>
+                    <option value="Khu Công Nghiệp VSIP 1">Khu Công Nghiệp VSIP 1</option>
+                    <option value="Nhà máy Sản xuất TEV Tân Uyên">Nhà máy Sản xuất TEV Tân Uyên</option>
+                    <option value="Trạm Sạc Cao Tốc Long Thành">Trạm Sạc Cao Tốc Long Thành</option>
+                    <option value="Nhà máy Bắc Ninh">Nhà máy Bắc Ninh</option>
+                    <option value="Nhà máy Hải Phòng">Nhà máy Hải Phòng</option>
+                    <option value="Trạm biến áp TEV 110kV">Trạm biến áp TEV 110kV</option>
+                    <option value="Nhà máy SEVT Thái Nguyên">Nhà máy SEVT Thái Nguyên</option>
+                    <option value="Nhà máy Cát Hải - Hải Phòng">Nhà máy Cát Hải - Hải Phòng</option>
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Loại công việc</label>
                   <select 
                     value={newWorkOrder.type} 
                     onChange={(e) => setNewWorkOrder({...newWorkOrder, type: e.target.value, isUnplanned: e.target.value === 'unplanned'})} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
                     <option value="preventive">Bảo trì định kỳ (PM)</option>
                     <option value="corrective">Sửa chữa khắc phục (CM)</option>
@@ -13034,7 +13252,7 @@ export default function App() {
                     <select 
                       value={newWorkOrder.pmFrequency} 
                       onChange={(e) => setNewWorkOrder({...newWorkOrder, pmFrequency: e.target.value})} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                     >
                       <option value="">-- Chọn tần suất --</option>
                       <option value="daily">Hàng ngày (Daily)</option>
@@ -13054,25 +13272,26 @@ export default function App() {
                   <select 
                     value={newWorkOrder.failureCode} 
                     onChange={(e) => setNewWorkOrder({...newWorkOrder, failureCode: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
                     <option value="">-- Chọn mã lỗi --</option>
+                    <option value="ROUTINE-PM">ROUTINE-PM (Bảo trì định kỳ chuẩn)</option>
+                    <option value="ELEC-01">ELEC-01 (Suy giảm cách điện)</option>
+                    <option value="ELEC-02">ELEC-02 (Phóng điện cục bộ PD)</option>
+                    <option value="MECH-01">MECH-01 (Kẹt cơ cấu / Hao mòn cơ)</option>
+                    <option value="THERM-01">THERM-01 (Quá nhiệt tiếp điểm / Busbar)</option>
+                    <option value="DGA-01">DGA-01 (Sinh khí cháy MBA)</option>
+                    <option value="ATS-INSPECTION">ATS-INSPECTION (Kiểm tra ATS)</option>
+                    <option value="BATT-IMPEDANCE">BATT-IMPEDANCE (Nội trở ắc quy tăng)</option>
+                    <option value="RELAY-TEST">RELAY-TEST (Thử nghiệm rơ-le)</option>
+                    <option value="VLF-HIPOT">VLF-HIPOT (Thử nghiệm cáp VLF)</option>
+                    <option value="INVERTER-IV-CURVE">INVERTER-IV-CURVE (Đường đặc tính I-V)</option>
                     <option value="connection error">Connection error</option>
                     <option value="control failure">Control failure</option>
                     <option value="corrosion">Corrosion</option>
-                    <option value="crack">Crack</option>
-                    <option value="deformation">Deformation</option>
-                    <option value="display error">Display error</option>
                     <option value="leakage">Leakage</option>
-                    <option value="looseen">Looseen</option>
-                    <option value="low performanace">Low performanace</option>
-                    <option value="noise">Noise</option>
                     <option value="overheat">Overheat</option>
-                    <option value="power failure">Power failure</option>
-                    <option value="shorted circuit">Shorted circuit</option>
                     <option value="vibration">Vibration</option>
-                    <option value="worn out">Worn out</option>
-                    <option value="jammed stuck">Jammed stuck</option>
                     <option value="other">Khác...</option>
                   </select>
                   {newWorkOrder.failureCode === 'other' && (
@@ -13113,12 +13332,12 @@ export default function App() {
                   <select 
                     value={newWorkOrder.priority} 
                     onChange={(e) => setNewWorkOrder({...newWorkOrder, priority: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
-                    <option value="low">Thấp</option>
-                    <option value="medium">Trung bình</option>
-                    <option value="high">Cao</option>
-                    <option value="urgent">Khẩn cấp (P1)</option>
+                    <option value="low">Thấp (Low)</option>
+                    <option value="medium">Trung bình (Medium)</option>
+                    <option value="high">Cao (High)</option>
+                    <option value="urgent">Khẩn cấp (P1 / Critical)</option>
                   </select>
                 </div>
                 <div>
@@ -13126,7 +13345,7 @@ export default function App() {
                   <select 
                     value={newWorkOrder.status} 
                     onChange={(e) => setNewWorkOrder({...newWorkOrder, status: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   >
                     <option value="initiated">1. Khởi tạo (Initiated/WR)</option>
                     <option value="approved">2. Đã duyệt (Approved)</option>
@@ -13167,28 +13386,11 @@ export default function App() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Người thực hiện / PIC</label>
-                  <select 
-                    value={newWorkOrder.assignedTo} 
-                    onChange={(e) => setNewWorkOrder({...newWorkOrder, assignedTo: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">-- Chọn người thực hiện --</option>
-                    <option value="Nguyen Van A">Nguyen Van A</option>
-                    <option value="Tran Van B">Tran Van B</option>
-                    <option value="Le Thi C">Le Thi C</option>
-                    <option value="Pham Van D">Pham Van D</option>
-                    <option value="Vu Van E">Vu Van E</option>
-                    <option value="Khác">Khác...</option>
-                  </select>
-                  {newWorkOrder.assignedTo === 'Khác' && (
-                    <input 
-                      type="text" 
-                      onChange={(e) => setNewWorkOrder({...newWorkOrder, assignedTo: e.target.value})} 
-                      className="w-full px-3 py-2 mt-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                      placeholder="Nhập tên người thực hiện" 
-                    />
-                  )}
+                  <FseEngineerDropdown
+                    label="Người thực hiện / Kỹ Sư FSE"
+                    value={newWorkOrder.assignedTo}
+                    onChange={(val) => setNewWorkOrder({ ...newWorkOrder, assignedTo: val })}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Vai trò Phê duyệt (Approve)</label>
@@ -13554,12 +13756,17 @@ export default function App() {
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Mã khách hàng</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-slate-700">Mã khách hàng</label>
+                  <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                    Chuẩn KHXXX (Tự động lấy STT tiếp theo)
+                  </span>
+                </div>
                 <input 
                   type="text" 
                   value={editingCustomer ? editingCustomer.id : generateNextCustomerId()} 
                   disabled
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-500 cursor-not-allowed" 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-800 font-mono font-bold cursor-not-allowed shadow-inner" 
                 />
               </div>
               <div>
@@ -13672,11 +13879,45 @@ export default function App() {
         />
       )}
 
+      {/* TEV UNIVERSAL REPORT DETAIL MODAL */}
+      {selectedReportForModal && (
+        <TevReportPrintModal
+          isOpen={Boolean(selectedReportForModal)}
+          report={selectedReportForModal}
+          onClose={() => setSelectedReportForModal(null)}
+        />
+      )}
+
+      {/* MASTER DIRECTORY & SHEET TABS MANAGER MODAL */}
+      {showMasterDirectoryModal && (
+        <MasterDirectorySheetManagerModal
+          isOpen={showMasterDirectoryModal}
+          onClose={() => setShowMasterDirectoryModal(false)}
+          isGoogleConnected={isGoogleConnected}
+          googleSheetUrl={googleSheetUrl}
+          onSyncAll={handleSyncToSheets}
+          onNavigateToNetaForm={handleDirectNavigateToNetaForm}
+          onSelectProjectForWorkOrder={(project) => {
+            setShowMasterDirectoryModal(false);
+            setActiveTab('cmms');
+            setCmmsSubTab('station');
+            setTimeout(() => {
+              window.dispatchEvent(
+                new CustomEvent('tev_select_project_for_wo', {
+                  detail: project
+                })
+              );
+            }, 80);
+          }}
+        />
+      )}
+
       {/* MOBILE BOTTOM NAVIGATION BAR */}
       <MobileBottomNav
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onOpenInstallModal={() => setShowPWAInstallModal(true)}
+        onOpenMasterDirectory={() => setShowMasterDirectoryModal(true)}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         onLogout={handleLogoutUser}
         userRole={userRole}

@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
@@ -49,6 +50,34 @@ import {
   NetaPdInputPayload,
 } from './server/netaPartialDischargeAnalyzer';
 import {
+  generateEaPdAiAnalysis,
+  EaPdInputPayload,
+  analyzePrpdImageWithGemini,
+  extractThermalTemperaturesFromImage,
+  evaluateCrossModalityEngine,
+  MultiModalPdPayload,
+} from './server/eaTechnologyPdAnalyzer';
+import {
+  generateEcsLvAiAnalysis,
+  NetaEcsLvInputPayload,
+} from './server/netaEcsLowVoltageAnalyzer';
+import {
+  generateEcsMvAiAnalysis,
+  NetaEcsMvInputPayload,
+} from './server/netaEcsMediumVoltageAnalyzer';
+import {
+  generateEcsSolarPvAiAnalysis,
+  NetaEcsSolarPvInputPayload,
+} from './server/netaEcsSolarPvAnalyzer';
+import {
+  generateEcsAtsAiAnalysis,
+  NetaEcsAtsInputPayload,
+} from './server/netaEcsAtsAnalyzer';
+import {
+  generateEcsUpsAiAnalysis,
+  NetaEcsUpsInputPayload,
+} from './server/netaEcsUpsAnalyzer';
+import {
   generateNetaMotorAiAnalysis,
   NetaMotorInputPayload,
 } from './server/netaMotorAnalyzer';
@@ -56,6 +85,10 @@ import {
   generateNetaLiquidTransformerAiAnalysis,
   NetaLiquidTransformerInputPayload,
 } from './server/netaLiquidTransformerAnalyzer';
+import {
+  generateNetaMtsTransformerAiAnalysis,
+  NetaMtsTransformerInputPayload,
+} from './server/netaMtsTransformerAnalyzer';
 import {
   generateNetaRelayAiAnalysis,
   NetaRelayInputPayload,
@@ -112,6 +145,10 @@ import {
   analyzePvCellWithGemini,
   PvThermalInputPayload,
 } from './server/pvCellThermalAnalyzer';
+import {
+  generateWindBladeAiAnalysis,
+  WindBladeInputPayload,
+} from './server/windBladeAnalyzer';
 
 dotenv.config();
 
@@ -441,6 +478,16 @@ export const TEV_EQUIPMENT_HEADERS = [
   'Trạng thái', 'Điểm sức khỏe (HI %)', 'Thông số kỹ thuật (Specs)', 'Bảng tên Nameplate', 'Lần kiểm tra cuối', 'Ngày tạo', 'Ngày cập nhật'
 ];
 
+export const TEV_FSE_HEADERS = [
+  'Mã FSE', 'Họ và tên Kỹ sư', 'Email', 'Vai trò / Chức danh', 'Số điện thoại', 'Đơn vị / Công ty', 'Ngày tạo', 'Ngày cập nhật'
+];
+
+export const TEV_PROJECT_HEADERS = [
+  'Mã Dự Án', 'Tên Dự Án', 'Mã KH', 'Tên Khách Hàng', 'Nhà Máy / Trạm',
+  'Số Lượng Thiết Bị', 'Danh Sách KKS & Thiết Bị', 'Kỹ Sư Trưởng',
+  'Ngày Bắt Đầu', 'Trạng Thái', 'Ghi Chú', 'Ngày Cập Nhật'
+];
+
 // Equipment-Specific Detailed Sheets Headers
 export const TEV_BREAKER_HEADERS = [
   'Mã WO', 'Mã thiết bị', 'Tên máy cắt', 'Khách hàng', 'Ngăn lộ / Tủ', 'Chủng loại (VCB/ACB/SF6)',
@@ -734,6 +781,7 @@ app.get('/api/sheets/get', async (req, res) => {
       cables: [] as any[][],
       batteries: [] as any[][],
       relays: [] as any[][],
+      fse: [] as any[][],
       allSheets: allData,
       sheetNames
     };
@@ -747,6 +795,8 @@ app.get('/api/sheets/get', async (req, res) => {
         categorizedData.customers = categorizedData.customers.concat(rows);
       } else if (lowerName.includes('thietbi') || lowerName.includes('thiết bị') || lowerName.includes('equipment')) {
         categorizedData.equipment = categorizedData.equipment.concat(rows);
+      } else if (lowerName === 'fse' || lowerName.includes('kỹ sư') || lowerName.includes('engineer') || lowerName.includes('kysu')) {
+        categorizedData.fse = (categorizedData.fse || []).concat(rows);
       } else if (lowerName.includes('biến áp') || lowerName.includes('mba') || lowerName.includes('transformer')) {
         categorizedData.transformers = categorizedData.transformers.concat(rows);
       } else if (lowerName.includes('máy cắt') || lowerName.includes('breaker') || lowerName.includes('vcb') || lowerName.includes('acb')) {
@@ -886,6 +936,60 @@ app.post('/api/sheets/sync-record', async (req, res) => {
         data.phone || '',
         data.address || '',
         data.createdAt || new Date().toISOString(),
+        data.updatedAt || new Date().toISOString()
+      ];
+    } else if (recordType === 'equipment') {
+      targetSheetTitle = existingSheetTitles.find(t => t?.toLowerCase().includes('thietbi') || t?.toLowerCase().includes('thiết bị')) || 'thietbi';
+      targetHeaders = TEV_EQUIPMENT_HEADERS;
+      recordId = data.id || data.equipmentId || '';
+      rowValues = [
+        data.id || data.equipmentId || '',
+        data.name || data.equipmentName || '',
+        data.type || 'Máy biến áp',
+        data.customer || '',
+        data.factory || '',
+        data.location || '',
+        data.status || 'healthy',
+        data.health !== undefined ? data.health : 95,
+        typeof data.specs === 'object' ? JSON.stringify(data.specs) : (data.specs || data.notes || ''),
+        typeof data.nameplate === 'object' ? JSON.stringify(data.nameplate) : (data.nameplate || ''),
+        data.lastCheck || new Date().toLocaleDateString('vi-VN'),
+        data.createdAt || new Date().toISOString(),
+        data.updatedAt || new Date().toISOString()
+      ];
+    } else if (recordType === 'fse') {
+      targetSheetTitle = existingSheetTitles.find(t => t?.toLowerCase() === 'fse' || t?.toLowerCase().includes('kỹ sư') || t?.toLowerCase().includes('engineer')) || 'FSE';
+      targetHeaders = TEV_FSE_HEADERS;
+      recordId = data.id || data.email || '';
+      rowValues = [
+        data.id || `fse-${Date.now()}`,
+        data.name || '',
+        data.email || '',
+        data.role || 'Kỹ sư Thí nghiệm Hiện trường NETA',
+        data.phone || '',
+        data.company || 'TEV Field Service',
+        data.createdAt || new Date().toISOString(),
+        data.updatedAt || new Date().toISOString()
+      ];
+    } else if (recordType === 'project' || recordType === 'duan') {
+      targetSheetTitle = existingSheetTitles.find(t => t?.toLowerCase() === 'dự án' || t?.toLowerCase() === 'duan' || t?.toLowerCase().includes('project')) || 'Dự án';
+      targetHeaders = TEV_PROJECT_HEADERS;
+      recordId = data.id || '';
+      const equipmentSummary = Array.isArray(data.equipmentList)
+        ? data.equipmentList.map((eq: any) => `${eq.kksCode || eq.id}: ${eq.name} (${eq.type})`).join('; ')
+        : (typeof data.equipmentList === 'string' ? data.equipmentList : '');
+      rowValues = [
+        data.id || '',
+        data.name || '',
+        data.customerId || '',
+        data.customerName || '',
+        data.factory || '',
+        Array.isArray(data.equipmentList) ? data.equipmentList.length : (data.equipmentCount || 0),
+        equipmentSummary,
+        data.leadFse || '',
+        data.startDate || '',
+        data.status || 'chuẩn_bị',
+        data.notes || '',
         data.updatedAt || new Date().toISOString()
       ];
     } else if (recordType === 'breaker' || (recordType === 'equipmentTest' && data.equipmentType?.toLowerCase().includes('cắt'))) {
@@ -1200,7 +1304,8 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     breakersData,
     cablesData,
     batteriesData,
-    relaysData
+    relaysData,
+    fseData
   } = req.body;
 
   try {
@@ -1220,6 +1325,8 @@ app.post('/api/sheets/sync-export', async (req, res) => {
       { key: 'tev', defaultTitle: 'TEV Service Flatform', keywords: ['tev service flatform', 'work order', 'cmms'], headers: TEV_WO_HEADERS },
       { key: 'khachhang', defaultTitle: 'khachhang', keywords: ['khachhang', 'khách hàng', 'customer'], headers: TEV_CUSTOMER_HEADERS },
       { key: 'thietbi', defaultTitle: 'thietbi', keywords: ['thietbi', 'thiết bị', 'equipment'], headers: TEV_EQUIPMENT_HEADERS },
+      { key: 'fse', defaultTitle: 'FSE', keywords: ['fse', 'kỹ sư', 'engineer', 'kysu'], headers: TEV_FSE_HEADERS },
+      { key: 'duan', defaultTitle: 'Dự án', keywords: ['dự án', 'duan', 'project'], headers: TEV_PROJECT_HEADERS },
       { key: 'maycat', defaultTitle: 'Máy cắt', keywords: ['máy cắt', 'breaker', 'vcb', 'acb'], headers: TEV_BREAKER_HEADERS },
       { key: 'dongco', defaultTitle: 'Động cơ', keywords: ['động cơ', 'motor'], headers: TEV_MOTOR_HEADERS },
       { key: 'mayphat', defaultTitle: 'Máy phát', keywords: ['máy phát', 'generator'], headers: TEV_GENERATOR_HEADERS },
@@ -1255,42 +1362,57 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     const dataToWrite: any[] = [];
     const actualWoData = tevServiceFlatformData || cmmsData;
 
+    // 0: TEV Service Flatform
     if (actualWoData && actualWoData.length > 0) {
       dataToWrite.push({ range: `${resolvedSheets[0].title}!A1`, values: actualWoData });
     }
+    // 1: khachhang
     if (customersData && customersData.length > 0) {
       dataToWrite.push({ range: `${resolvedSheets[1].title}!A1`, values: customersData });
     }
+    // 2: thietbi
     if (equipmentData && equipmentData.length > 0) {
       dataToWrite.push({ range: `${resolvedSheets[2].title}!A1`, values: equipmentData });
     }
-    const { breakersData, cablesData, batteriesData, relaysData } = req.body;
+    // 3: FSE
+    if (fseData && fseData.length > 0) {
+      dataToWrite.push({ range: `${resolvedSheets[3].title}!A1`, values: fseData });
+    }
+    // Breakers
     if (breakersData && breakersData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[3].title}!A1`, values: breakersData });
+      dataToWrite.push({ range: `${resolvedSheets[4].title}!A1`, values: breakersData });
     }
+    // Motors
     if (motors && motors.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[4].title}!A1`, values: motors });
+      dataToWrite.push({ range: `${resolvedSheets[5].title}!A1`, values: motors });
     }
+    // Generators
     if (generators && generators.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[5].title}!A1`, values: generators });
+      dataToWrite.push({ range: `${resolvedSheets[6].title}!A1`, values: generators });
     }
+    // Switchgears
     if (switchgears && switchgears.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[6].title}!A1`, values: switchgears });
+      dataToWrite.push({ range: `${resolvedSheets[7].title}!A1`, values: switchgears });
     }
+    // Transformers
     if (transformers && transformers.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[7].title}!A1`, values: transformers });
+      dataToWrite.push({ range: `${resolvedSheets[8].title}!A1`, values: transformers });
     }
+    // Cables
     if (cablesData && cablesData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[8].title}!A1`, values: cablesData });
+      dataToWrite.push({ range: `${resolvedSheets[9].title}!A1`, values: cablesData });
     }
+    // Batteries
     if (batteriesData && batteriesData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[9].title}!A1`, values: batteriesData });
+      dataToWrite.push({ range: `${resolvedSheets[10].title}!A1`, values: batteriesData });
     }
+    // Relays
     if (relaysData && relaysData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[10].title}!A1`, values: relaysData });
+      dataToWrite.push({ range: `${resolvedSheets[11].title}!A1`, values: relaysData });
     }
+    // Inventory
     if (inventoryData && inventoryData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[11].title}!A1`, values: inventoryData });
+      dataToWrite.push({ range: `${resolvedSheets[12].title}!A1`, values: inventoryData });
     }
 
     if (dataToWrite.length > 0) {
@@ -1314,9 +1436,86 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     console.error('Error syncing to sheet:', error);
     if (isAuthError(error)) {
       globalTokens = null;
-      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn. Vui lòng kết nối lại Google Drive.', authExpired: true });
+      return res.status(401).json({ error: 'Phiên đăng nhập Google đã hết hạn. Vui lòng kết nối lại.' });
     }
-    res.status(500).json({ error: error.message || 'Failed to sync to Google Sheets' });
+    res.status(500).json({ error: error.message || 'Lỗi đồng bộ Google Sheets' });
+  }
+});
+
+// 7. Explicitly Create or Ensure Sheet Tab (FSE, thietbi, khachhang, etc.)
+app.post('/api/sheets/create-tab', async (req, res) => {
+  const tokens = getTokensFromRequest(req);
+  if (!tokens) {
+    return res.status(401).json({ error: 'Not authenticated with Google' });
+  }
+
+  const { tabName, headers = [], initialRows = [] } = req.body;
+  const cleanTabName = String(tabName || '').trim();
+  if (!cleanTabName) {
+    return res.status(400).json({ error: 'Vui lòng cung cấp tabName hợp lệ' });
+  }
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials(tokens);
+
+    const sheetInfo = await resolveSpreadsheetIdAsync(req, oauth2Client);
+    const spreadsheetId = sheetInfo.id;
+    const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
+
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+    const existingTitles = spreadsheet.data.sheets?.map(s => s.properties?.title || '') || [];
+
+    let isCreated = false;
+    let actualTitle = cleanTabName;
+    const existingMatch = existingTitles.find(t => t.toLowerCase() === cleanTabName.toLowerCase());
+
+    if (existingMatch) {
+      actualTitle = existingMatch;
+    } else {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            addSheet: { properties: { title: cleanTabName } }
+          }]
+        }
+      });
+      isCreated = true;
+    }
+
+    // If headers or initialRows provided, write them
+    const rowsToWrite: any[][] = [];
+    if (Array.isArray(headers) && headers.length > 0) {
+      rowsToWrite.push(headers);
+    }
+    if (Array.isArray(initialRows) && initialRows.length > 0) {
+      rowsToWrite.push(...initialRows);
+    }
+
+    if (rowsToWrite.length > 0 && isCreated) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${actualTitle}!A1`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: rowsToWrite }
+      });
+    }
+
+    res.json({
+      success: true,
+      created: isCreated,
+      sheetTitle: actualTitle,
+      spreadsheetId,
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+      message: isCreated ? `Đã tạo thành công sheet tab "${actualTitle}"!` : `Sheet tab "${actualTitle}" đã tồn tại.`
+    });
+  } catch (error: any) {
+    console.error('Error creating sheet tab:', error);
+    res.status(500).json({ error: error.message || 'Lỗi khi tạo sheet tab' });
   }
 });
 
@@ -1821,8 +2020,8 @@ app.post('/api/field-service/neta-sf6-switch-analyze', async (req, res) => {
 app.post('/api/field-service/neta-thermography-analyze', async (req, res) => {
   try {
     const payload = req.body as NetaThermographyInputPayload;
-    if (!payload || !payload.survey_conditions || !payload.thermal_measurements) {
-      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu khảo sát nhiệt độ hồng ngoại theo NETA ATS-2025 Mục 9 & Table 100.18.' });
+    if (!payload || (!payload.survey_conditions && !payload.site_info) || (!payload.thermal_measurements && !payload.thermographic_findings)) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu khảo sát nhiệt độ hồng ngoại theo ANSI/NETA MTS Mục 9 & Table 100.18.' });
     }
 
     const evaluation = await generateNetaThermographyAiAnalysis(payload);
@@ -1851,6 +2050,177 @@ app.post('/api/field-service/neta-pd-analyze', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error analyzing NETA ATS-2025 PD data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13b. Deep Analysis - Partial Discharge (PD) Module (EA Technology, NETA Table 100.23 & DNO CNAIM)
+app.post('/api/deep-analysis/partial-discharge-analyze', async (req, res) => {
+  try {
+    const payload = req.body as EaPdInputPayload;
+    if (!payload || !payload.pd_measurements) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu đo phóng điện cục bộ (PD) theo chuẩn EA Technology.' });
+    }
+
+    const evaluation = await generateEaPdAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error in EA Technology PD Deep Analysis:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13c. Deep Analysis - PD PRPD AI Vision Analysis (Gemini 2.5 Flash)
+app.post('/api/deep-analysis/pd-vision-analyze', async (req, res) => {
+  try {
+    const { imageBase64, mimeType, contextMetadata } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu ảnh PRPD (imageBase64).' });
+    }
+
+    const visionResult = await analyzePrpdImageWithGemini(imageBase64, mimeType, contextMetadata);
+    res.json({
+      success: true,
+      data: visionResult,
+    });
+  } catch (error: any) {
+    console.error('Error in PD Vision Analysis:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13d. Deep Analysis - Thermal IR OCR (Gemini 2.5 Flash)
+app.post('/api/deep-analysis/pd-thermal-ocr', async (req, res) => {
+  try {
+    const { imageBase64, mimeType } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu ảnh nhiệt hồng ngoại (imageBase64).' });
+    }
+
+    const ocrResult = await extractThermalTemperaturesFromImage(imageBase64, mimeType);
+    res.json({
+      success: true,
+      data: ocrResult,
+    });
+  } catch (error: any) {
+    console.error('Error in Thermal IR OCR:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13e. Deep Analysis - Cross-Modality Severity Engine (PD + Thermal + Environment)
+app.post('/api/deep-analysis/pd-cross-modality', (req, res) => {
+  try {
+    const payload = req.body as MultiModalPdPayload;
+    if (!payload || !payload.pd_measurements) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu đa phương thức PD + Nhiệt + Môi trường.' });
+    }
+
+    const evaluation = evaluateCrossModalityEngine(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error in Cross-Modality Engine:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13f. NETA ECS-2024 General Inspection & Test Procedures - Low-Voltage Systems (< 1 kV) (Section 7.1 & Tables 100.1, 100.12)
+app.post('/api/field-service/neta-ecs-lv-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaEcsLvInputPayload;
+    if (!payload || !payload.pre_energization_7_1_a || !payload.energization_7_1_b) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu nghiệm thu chạy thử hệ thống hạ thế theo ANSI/NETA ECS-2024 Mục 7.1.' });
+    }
+
+    const evaluation = await generateEcsLvAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing NETA ECS-2024 LV data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13g. NETA ECS-2024 General Inspection & Test Procedures - Medium-Voltage Systems (> 1 kV & < 100 kV) (Section 7.2 & Tables 100.1, 100.2, 100.12, 100.18, 100.23)
+app.post('/api/field-service/neta-ecs-mv-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaEcsMvInputPayload;
+    if (!payload || !payload.pre_energization_7_2_a || !payload.energization_7_2_b) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu nghiệm thu chạy thử hệ thống trung thế theo ANSI/NETA ECS-2024 Mục 7.2.' });
+    }
+
+    const evaluation = await generateEcsMvAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing NETA ECS-2024 MV data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13h. NETA ECS-2024 Source Specific Systems Commissioning - Solar Photovoltaic (PV) Procedures (Section 8.1, NETA ATS 7.29, IEC 62446-1, IEEE 1547, NERC MOD-025-2)
+app.post('/api/field-service/neta-ecs-solar-pv-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaEcsSolarPvInputPayload;
+    if (!payload || !payload.pre_energization_8_1_a || !payload.energization_8_1_b) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu nghiệm thu chạy thử hệ thống điện mặt trời Solar PV theo ANSI/NETA ECS-2024 Mục 8.1.' });
+    }
+
+    const evaluation = await generateEcsSolarPvAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing NETA ECS-2024 Solar PV data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13i. NETA ECS-2024 Source Specific Systems Commissioning - Automatic Transfer Switch (ATS) Procedures (Section 8.3, NETA ATS 7.22.3, NFPA 110, IEEE 446)
+app.post('/api/field-service/neta-ecs-ats-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaEcsAtsInputPayload;
+    if (!payload || !payload.pre_energization_8_3_a || !payload.energization_8_3_b) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu nghiệm thu chạy thử tủ chuyển nguồn tự động ATS theo ANSI/NETA ECS-2024 Mục 8.3.' });
+    }
+
+    const evaluation = await generateEcsAtsAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing NETA ECS-2024 ATS data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13j. NETA ECS-2024 Source Specific Systems Commissioning - Uninterruptible Power Supply (UPS) Procedures (Section 8.2, NETA ATS 7.22.2 & 7.18, NFPA 111, IEEE 450/1188)
+app.post('/api/field-service/neta-ecs-ups-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaEcsUpsInputPayload;
+    if (!payload || !payload.pre_energization_8_2_a || !payload.energization_8_2_b) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu nghiệm thu chạy thử hệ thống UPS theo ANSI/NETA ECS-2024 Mục 8.2.' });
+    }
+
+    const evaluation = await generateEcsUpsAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing NETA ECS-2024 UPS data:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -1914,6 +2284,28 @@ app.post('/api/field-service/neta-liquid-transformer-analyze', async (req, res) 
     });
   } catch (error: any) {
     console.error('Error analyzing NETA ATS-2025 Liquid Transformer data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13b. ANSI/NETA MTS-2023 Liquid-Filled Transformers (Maintenance Testing - Section 7.2.2 / 7.22.2)
+app.post('/api/field-service/neta-mts-transformer-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaMtsTransformerInputPayload;
+    if (!payload || !payload.electrical_tests || !payload.visual_inspection) {
+      return res.status(400).json({
+        success: false,
+        error: 'Thiếu dữ liệu kiểm tra bảo trì máy biến áp ngâm dầu theo ANSI/NETA MTS-2023 Mục 7.2.2.',
+      });
+    }
+
+    const evaluation = await generateNetaMtsTransformerAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing ANSI/NETA MTS-2023 Liquid Transformer data:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2118,14 +2510,28 @@ app.post('/api/field-service/scan-nameplate', async (req, res) => {
   }
 });
 
+// Wind Blade EPRI 3002019669 / DNVGL-ST-0376 / IEC 61400-5 AI & Deterministic Analyzer
+app.post('/api/wind-blade-analyze', async (req, res) => {
+  try {
+    const payload: WindBladeInputPayload = req.body;
+    const result = await generateWindBladeAiAnalysis(payload);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error during Wind Blade AI analysis:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Vite middleware setup
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { 
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR !== 'true' ? undefined : false,
+        hmr: false,
       },
       appType: "spa",
     });
@@ -2138,7 +2544,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }

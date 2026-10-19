@@ -27,7 +27,10 @@ import {
 } from 'lucide-react';
 import { NetaPvInputPayload, NetaPvEvaluationResult } from '../../server/netaPvAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
-import { PvCellDeepThermalAnalyzer } from './PvCellDeepThermalAnalyzer';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -76,8 +79,7 @@ const SAMPLE_PV_DATA: NetaPvInputPayload = {
 };
 
 export const NetaPvChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [activePvMode, setActivePvMode] = useState<'deep-pv-cell' | 'neta-string'>('deep-pv-cell');
-  const [data, setData] = useState<NetaPvInputPayload>(SAMPLE_PV_DATA);
+  const [data, setData] = useAtsFormSync<NetaPvInputPayload>('neta-pv', SAMPLE_PV_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaPvEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -201,72 +203,40 @@ export const NetaPvChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToRep
 
   return (
     <div className="space-y-6">
-      {/* Mode Selector Tab Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-2 sm:p-2.5 rounded-2xl shadow-md">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setActivePvMode('deep-pv-cell')}
-            className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all ${
-              activePvMode === 'deep-pv-cell'
-                ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 shadow-md shadow-orange-950/40 ring-1 ring-amber-400/50'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Flame size={16} className={activePvMode === 'deep-pv-cell' ? 'text-slate-950' : 'text-amber-400'} />
-            <span>Phân Tích Chuyên Sâu Tấm Pin & Cell (IR & RGB AI)</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-black/20 font-extrabold uppercase hidden md:inline-block">
-              IEC 62446-3 & Sitemark
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActivePvMode('neta-string')}
-            className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all ${
-              activePvMode === 'neta-string'
-                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-indigo-950/40 ring-1 ring-indigo-400/50'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Sun size={16} className={activePvMode === 'neta-string' ? 'text-white' : 'text-yellow-400'} />
-            <span>Nghiệm Thu Toàn Diện Chuỗi Pin (Array & Strings)</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/20 font-extrabold uppercase hidden md:inline-block">
-              NETA ATS-2025 Mục 7.29
-            </span>
-          </button>
-        </div>
-
-        <div className="text-xs text-slate-400 hidden lg:flex items-center gap-2 pr-2">
-          <Sparkles size={14} className="text-amber-400" />
-          <span>Tích hợp Thư viện Mẫu lỗi Sitemark / Volateq</span>
-        </div>
-      </div>
-
-      {activePvMode === 'deep-pv-cell' ? (
-        <PvCellDeepThermalAnalyzer
-          onSaveReport={onSaveReport}
-          onNavigateToReports={onNavigateToReports}
-        />
-      ) : (
-        <div className="space-y-6">
-          {/* Top Banner & Actions Header */}
-          <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white p-5 sm:p-6 rounded-2xl shadow-lg border border-amber-500/30">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-white/20 text-white backdrop-blur-xs border border-white/30 flex items-center gap-1.5">
-                <Sun size={13} className="text-yellow-200" />
-                ANSI/NETA ATS-2025 Mục 7.29
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-950/40 text-amber-200 border border-amber-400/40 flex items-center gap-1">
-                <ShieldCheck size={12} />
-                Solar PV Systems • Combiner Box • Inverter DC
-              </span>
+      {/* Top Banner & Actions Header */}
+      <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-amber-950 text-white p-6 rounded-2xl shadow-lg border border-amber-500/30 space-y-4">
+          {/* Row 1: Brand & Standard Badges */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shadow-md shrink-0">
+                TEV
+              </div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-400">
+                  TEV FLATFORM AI • FIELD SERVICE EVALUATION FORM
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded border border-amber-400/40">
+                  ANSI/NETA ATS-2025 Mục 7.25 / 7.29
+                </span>
+                <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700">
+                  IEC 62446-1 & IEEE 1547
+                </span>
+              </div>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-              Kiểm Định Hệ Thống Điện Mặt Trời (Solar PV Systems)
+
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-400/30 rounded-full text-xs text-amber-300 font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Nghiệm Thu Chuỗi Pin Solar PV</span>
+            </div>
+          </div>
+
+          {/* Row 2: Full-Width Horizontal Equipment Title */}
+          <div className="pt-2 border-t border-slate-800">
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-snug">
+              Kiểm Định Hệ Thống Điện Mặt Trời (Solar Photovoltaic Systems)
             </h1>
-            <p className="text-xs sm:text-sm text-amber-100 max-w-2xl">
-              Đánh giá Cực tính, Diode chặn, Cách điện Khô/Ẩm, Điện áp Hở Mạch Voc (ngưỡng lệch ≤ 5%), Dòng Isc, Đo đường cong I-V và Tiếp địa theo NETA Section 7.29.
+            <p className="text-xs sm:text-sm text-slate-300 mt-0.5 leading-relaxed font-medium">
+              Đánh giá Cực tính, Diode chặn, Cách điện Khô/Ẩm DC, Điện áp Hở Mạch Voc (ngưỡng lệch song song ≤ 5%), Dòng ngắn mạch Isc, Đo đường cong I-V và Tiếp địa theo NETA Section 7.25 / 7.29.
             </p>
           </div>
 
@@ -317,7 +287,6 @@ export const NetaPvChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToRep
               <span>{isAnalyzing ? 'Đang Phân Tích NETA...' : 'Phân Tích AI Chuyên Gia'}</span>
             </button>
           </div>
-        </div>
 
         {/* Live NETA Diagnostic Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-5 pt-4 border-t border-amber-400/30 text-xs">
@@ -419,46 +388,44 @@ export const NetaPvChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToRep
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="text-slate-600 font-medium block mb-1">Tên Dự Án Điện Mặt Trời:</label>
-                <input
-                  type="text"
+                <CustomerSelectDropdown
+                  label="Mã & Tên Khách Hàng (Dự Án Điện Mặt Trời)"
                   value={data.site_info.project_name}
-                  onChange={(e) => setData({
+                  onChange={(val, cust) => setData({
                     ...data,
-                    site_info: { ...data.site_info, project_name: e.target.value }
+                    site_info: { ...data.site_info, project_name: cust?.name || val }
                   })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium text-slate-800"
+                  placeholder="Chọn hoặc bổ sung mã khách hàng..."
                 />
               </div>
 
               <div>
-                <label className="text-slate-600 font-medium block mb-1">Mã Định Danh Mảng Pin (Array Tag):</label>
-                <input
-                  type="text"
+                <EquipmentSelectDropdown
+                  label="Tên & Mã Định Danh Mảng Pin (Array Tag)"
                   value={data.site_info.pv_array_tag}
-                  onChange={(e) => setData({
+                  filterType="Inverter"
+                  selectedCustomer={data.site_info.project_name}
+                  onChange={(val, eq) => setData({
                     ...data,
-                    site_info: { ...data.site_info, pv_array_tag: e.target.value }
+                    site_info: { ...data.site_info, pv_array_tag: eq?.id || val }
                   })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-bold text-amber-700 font-mono"
+                  placeholder="Chọn hoặc bổ sung mảng pin / Inverter..."
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="text-slate-600 font-medium block mb-1">Kỹ Sư FSE Đo:</label>
-                  <input
-                    type="text"
+                  <FseEngineerDropdown
+                    label="Kỹ Sư FSE Thí Nghiệm"
                     value={data.site_info.fse_name}
-                    onChange={(e) => setData({
+                    onChange={(val) => setData({
                       ...data,
-                      site_info: { ...data.site_info, fse_name: e.target.value }
+                      site_info: { ...data.site_info, fse_name: val }
                     })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium text-slate-800"
                   />
                 </div>
                 <div>
-                  <label className="text-slate-600 font-medium block mb-1">Ngày Thí Nghiệm:</label>
+                  <label className="text-slate-600 font-semibold block mb-1">Ngày Thí Nghiệm:</label>
                   <input
                     type="date"
                     value={data.site_info.test_date}
@@ -1215,13 +1182,12 @@ export const NetaPvChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToRep
           ].filter(Boolean)}
           recommendations={[
             'Tách cô lập ngay Chuỗi 03 (String 03) tại Combiner Box để ngăn chặn dòng điện vòng nguy hại.',
-            'Dùng camera nhiệt kiểm tra từng module trong Chuỗi 03 để phát hiện điểm nóng (hotspot) và đo lại Voc từng tấm.',
-            'Kiểm tra tuyến cáp DC Chuỗi 03 từ mái nhà xuống tủ Combiner Box để tìm điểm chạm đất gây suy giảm cách điện xuống 12 MΩ.'
+            'Kiểm tra tuyến cáp DC Chuỗi 03 từ mái nhà xuống tủ Combiner Box để tìm điểm chạm đất gây suy giảm cách điện xuống 12 MΩ.',
+            'Đo kiểm tra chi tiết Voc từng tấm trong Chuỗi 03 và chuyển sang module Phân Tích Chuyên Sâu PV Cell nếu cần đánh giá ảnh nhiệt.'
           ]}
         />
-      )}
-        </div>
       )}
     </div>
   );
 };
+

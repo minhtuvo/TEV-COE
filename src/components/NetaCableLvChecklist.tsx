@@ -29,6 +29,10 @@ import {
 } from 'lucide-react';
 import { NetaCableLvInputPayload, NetaCableLvEvaluationResult } from '../../server/netaCableLvAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -130,7 +134,7 @@ const SAMPLE_LV_CABLE_PASS_DATA: NetaCableLvInputPayload = {
 };
 
 export const NetaCableLvChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaCableLvInputPayload>(SAMPLE_LV_CABLE_DEFECT_DATA);
+  const [data, setData] = useAtsFormSync<NetaCableLvInputPayload>('neta-cable-lv', SAMPLE_LV_CABLE_DEFECT_DATA);
   const [activeTab, setActiveTab] = useState<'visual' | 'electrical' | 'ai-report' | 'ai-prompt'>('electrical');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaCableLvEvaluationResult | null>(null);
@@ -1134,76 +1138,67 @@ Khi nhận dữ liệu JSON từ FSE, hãy phân tích và trả về phản h�
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
               <div>
-                <label className="font-semibold text-slate-600 block mb-1">Mã Tuyến Cáp (Cable Tag)</label>
-                <input
-                  type="text"
+                <EquipmentSelectDropdown
+                  label="Mã & Tên Tuyến Cáp (Tag)"
                   value={data.site_info.cable_tag}
-                  onChange={(e) =>
+                  filterType="Cáp điện"
+                  onChange={(val, eq) =>
                     setData({
                       ...data,
-                      site_info: { ...data.site_info, cable_tag: e.target.value }
+                      site_info: {
+                        ...data.site_info,
+                        cable_tag: eq?.id || val,
+                        cable_rating: eq?.notes || data.site_info.cable_rating
+                      }
                     })
                   }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md font-bold text-slate-900"
+                  placeholder="Chọn hoặc bổ sung tuyến cáp..."
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-600 block mb-1">Chủng Loại / Tiết Diện (Rating)</label>
+                <CustomerSelectDropdown
+                  label="Mã & Tên Khách Hàng (Dự án)"
+                  value={data.site_info.project_name}
+                  onChange={(val, cust) =>
+                    setData({
+                      ...data,
+                      site_info: {
+                        ...data.site_info,
+                        project_name: cust?.name || val
+                      }
+                    })
+                  }
+                  placeholder="Chọn hoặc bổ sung khách hàng..."
+                />
+              </div>
+
+              <div>
+                <FseEngineerDropdown
+                  label="Kỹ Sư FSE Đo Đạc"
+                  value={data.site_info.fse_name}
+                  onChange={(val) =>
+                    setData({
+                      ...data,
+                      site_info: { ...data.site_info, fse_name: val }
+                    })
+                  }
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-600 block mb-1">Ngày Kiểm Định</label>
                 <input
-                  type="text"
-                  value={data.site_info.cable_rating}
+                  type="date"
+                  value={data.site_info.test_date}
                   onChange={(e) =>
                     setData({
                       ...data,
-                      site_info: { ...data.site_info, cable_rating: e.target.value }
+                      site_info: { ...data.site_info, test_date: e.target.value }
                     })
                   }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md font-medium text-slate-900"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-medium text-slate-900"
                 />
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-600 block mb-1">Chiều Dài Tuyến (Mét)</label>
-                <input
-                  type="number"
-                  value={data.site_info.cable_length_meters}
-                  onChange={(e) =>
-                    setData({
-                      ...data,
-                      site_info: { ...data.site_info, cable_length_meters: parseFloat(e.target.value) || 0 }
-                    })
-                  }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md font-medium text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-600 block mb-1">Kỹ Sư FSE & Ngày Test</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={data.site_info.fse_name}
-                    onChange={(e) =>
-                      setData({
-                        ...data,
-                        site_info: { ...data.site_info, fse_name: e.target.value }
-                      })
-                    }
-                    className="w-1/2 px-2 py-2 bg-slate-50 border border-slate-300 rounded-md font-medium text-slate-900"
-                  />
-                  <input
-                    type="date"
-                    value={data.site_info.test_date}
-                    onChange={(e) =>
-                      setData({
-                        ...data,
-                        site_info: { ...data.site_info, test_date: e.target.value }
-                      })
-                    }
-                    className="w-1/2 px-2 py-2 bg-slate-50 border border-slate-300 rounded-md font-medium text-slate-900"
-                  />
-                </div>
               </div>
             </div>
           </div>

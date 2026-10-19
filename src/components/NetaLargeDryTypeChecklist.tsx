@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { NetaLargeInputPayload, NetaLargeEvaluationResult } from '../../server/netaLargeAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
@@ -74,7 +75,7 @@ const SAMPLE_LARGE_FSE_DATA: NetaLargeInputPayload = {
 };
 
 export const NetaLargeDryTypeChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaLargeInputPayload>(SAMPLE_LARGE_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaLargeInputPayload>('neta-dry-large', SAMPLE_LARGE_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaLargeEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);

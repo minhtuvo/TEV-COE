@@ -29,6 +29,7 @@ import {
 } from '../../server/netaDcMotorAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -99,7 +100,7 @@ const SAMPLE_DC_MOTOR_DATA: NetaDcMotorInputPayload = {
 };
 
 export const NetaDcMotorChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaDcMotorInputPayload>(SAMPLE_DC_MOTOR_DATA);
+  const [data, setData] = useAtsFormSync<NetaDcMotorInputPayload>('neta-dc-motor', SAMPLE_DC_MOTOR_DATA);
   const [activeTab, setActiveTab] = useState<'site' | 'visual' | 'electrical' | 'ai'>('electrical');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaDcMotorEvaluationResult | null>(null);

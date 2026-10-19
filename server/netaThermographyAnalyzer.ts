@@ -1,31 +1,57 @@
 import { GoogleGenAI } from '@google/genai';
 
-export interface ThermalMeasurementItem {
-  component_name: string;
-  measured_temp_c: number;
-  reference_component_temp_c: number;
+export interface ThermographicFinding {
+  location: string;
+  component_type: string;
+  measured_temperature_celsius: number;
+  reference_component_temp_celsius: number;
+  similar_component_delta_t_celsius?: number;
+  ambient_air_delta_t_celsius?: number;
+  suspected_cause?: string;
+  // legacy compatibility
+  component_name?: string;
+  measured_temp_c?: number;
 }
 
 export interface NetaThermographyInputPayload {
   site_info: {
     project_name: string;
     survey_tag: string;
+    ambient_temperature_celsius?: number;
+    circuit_loading_percent?: number;
+    ir_camera_model?: string;
     fse_name: string;
     test_date: string;
   };
-  survey_conditions: {
+  survey_parameters_section_9?: {
+    equipment_access_condition: string;
+    circuit_load_status: string;
+    report_elements_complete: boolean;
+  };
+  thermographic_findings?: ThermographicFinding[];
+  previous_test_data?: {
+    last_survey_date: string;
+    last_max_delta_t_celsius: number;
+  };
+  // legacy compatibility
+  survey_conditions?: {
     camera_model: string;
     ambient_temperature_c: number;
-    system_voltage_v: number;
-    operating_current_amp: number;
+    system_voltage_v?: number;
+    operating_current_amp?: number;
     load_percentage: number;
     inaccessible_areas?: string;
   };
-  thermal_measurements: ThermalMeasurementItem[];
+  thermal_measurements?: Array<{
+    component_name: string;
+    measured_temp_c: number;
+    reference_component_temp_c: number;
+  }>;
 }
 
 export interface ThermalItemEvaluation {
-  component_name: string;
+  location: string;
+  component_type: string;
   measured_temp_c: number;
   reference_component_temp_c: number;
   ambient_temperature_c: number;
@@ -33,12 +59,20 @@ export interface ThermalItemEvaluation {
   delta_t_amb: number;
   level: 0 | 1 | 2 | 3 | 4;
   level_name: string;
-  action_recommendation: string;
+  level_en: string;
+  action_recommendation_vi: string;
+  action_recommendation_en: string;
+  suspected_cause: string;
   status: 'NORMAL' | 'INVESTIGATE' | 'REPAIR_SCHEDULED' | 'MONITOR' | 'REPAIR_IMMEDIATELY';
+  // legacy compatibility
+  component_name?: string;
+  action_recommendation?: string;
 }
 
 export interface NetaThermographyEvaluationResult {
-  overall_status: 'PASS' | 'INVESTIGATE' | 'REPAIR_SCHEDULED' | 'MONITOR' | 'REPAIR_IMMEDIATELY';
+  overall_status: 'PASS' | 'INVESTIGATE' | 'REPAIR_SCHEDULED' | 'MONITOR' | 'REPAIR_IMMEDIATELY' | 'LEVEL 4 - CRITICAL REPAIR IMMEDIATELY';
+  overall_status_en: string;
+  overall_status_vi: string;
   status_reason: string;
   markdown_report: string;
   evaluations: {
@@ -53,64 +87,116 @@ export interface NetaThermographyEvaluationResult {
 }
 
 export function evaluateThermalItem(
-  item: ThermalMeasurementItem,
+  finding: ThermographicFinding | { component_name: string; measured_temp_c: number; reference_component_temp_c: number },
   ambientTemp: number
 ): ThermalItemEvaluation {
-  const delta_t_comp = parseFloat((item.measured_temp_c - item.reference_component_temp_c).toFixed(1));
-  const delta_t_amb = parseFloat((item.measured_temp_c - ambientTemp).toFixed(1));
+  const measured = 'measured_temperature_celsius' in finding 
+    ? finding.measured_temperature_celsius 
+    : finding.measured_temp_c;
+  const ref = 'reference_component_temp_celsius' in finding 
+    ? finding.reference_component_temp_celsius 
+    : finding.reference_component_temp_c;
+  const location = 'location' in finding ? finding.location : ('component_name' in finding ? finding.component_name : 'Điểm phát nhiệt');
+  const compType = 'component_type' in finding ? finding.component_type : ('component_name' in finding ? finding.component_name : 'Tiếp điểm');
+  const suspectedCause = 'suspected_cause' in finding ? (finding.suspected_cause || '') : 'Điện trở tiếp xúc hoặc bất cân bằng pha';
 
-  let level: 0 | 1 | 2 | 3 | 4 = 0;
-  let level_name = 'Normal (Bình thường)';
-  let action_recommendation = 'No action required';
+  const delta_t_comp = parseFloat((measured - ref).toFixed(1));
+  const delta_t_amb = parseFloat((measured - ambientTemp).toFixed(1));
+
+  // Determine Level per Method 1 (Similar component)
+  let level1 = 0;
+  if (delta_t_comp > 15) {
+    level1 = 4;
+  } else if (delta_t_comp >= 4) {
+    level1 = 2;
+  } else if (delta_t_comp >= 1) {
+    level1 = 1;
+  }
+
+  // Determine Level per Method 2 (Ambient air)
+  let level2 = 0;
+  if (delta_t_amb > 40) {
+    level2 = 4;
+  } else if (delta_t_amb >= 21) {
+    level2 = 3;
+  } else if (delta_t_amb >= 11) {
+    level2 = 2;
+  } else if (delta_t_amb >= 1) {
+    level2 = 1;
+  }
+
+  // Final level is the maximum of the two evaluation methods
+  const finalLevel = Math.max(level1, level2) as 0 | 1 | 2 | 3 | 4;
+
+  let level_name = 'Bình thường (Normal)';
+  let level_en = 'Normal';
+  let action_vi = 'Vận hành bình thường / Continue operation';
+  let action_en = 'Continue operation; no repair required';
   let status: 'NORMAL' | 'INVESTIGATE' | 'REPAIR_SCHEDULED' | 'MONITOR' | 'REPAIR_IMMEDIATELY' = 'NORMAL';
 
-  // NETA ATS-2025 Table 100.18:
-  // Level 4 (Major discrepancy): Delta T_comp > 15°C OR Delta T_amb > 40°C -> Repair immediately
-  // Level 3 (Monitor): 21°C <= Delta T_amb <= 40°C -> Monitor until corrective measures can be accomplished
-  // Level 2 (Probable deficiency): 4°C <= Delta T_comp <= 15°C OR 11°C <= Delta T_amb <= 20°C -> Repair as time permits
-  // Level 1 (Possible deficiency): 1°C <= Delta T_comp <= 3°C OR 1°C <= Delta T_amb <= 10°C -> Warrants investigation
-
-  if (delta_t_comp > 15 || delta_t_amb > 40) {
-    level = 4;
-    level_name = 'Mức 4 (Major discrepancy - CẤP BÁCH)';
-    action_recommendation = 'Repair immediately (Dừng máy hoặc ngắt cô lập để xử lý CẤP TỐC ngay lập tức)';
+  if (finalLevel === 4) {
+    level_name = 'LEVEL 4 (Sai lệch nghiêm trọng)';
+    level_en = 'LEVEL 4 (Major Discrepancy)';
+    action_vi = 'SỬA CHỮA NGAY LẬP TỨC / REPAIR IMMEDIATELY';
+    action_en = 'Isolate and repair immediately';
     status = 'REPAIR_IMMEDIATELY';
-  } else if (delta_t_amb >= 21 && delta_t_amb <= 40) {
-    level = 3;
-    level_name = 'Mức 3 (Monitor - Theo dõi)';
-    action_recommendation = 'Monitor until corrective measures can be accomplished (Theo dõi liên tục cho đến khi xử lý xong)';
+  } else if (finalLevel === 3) {
+    level_name = 'LEVEL 3 (Theo dõi chặt chẽ)';
+    level_en = 'LEVEL 3 (Monitor Continuously)';
+    action_vi = 'Giám sát chặt chẽ cho đến khi xử lý / Monitor until repair';
+    action_en = 'Monitor continuously until corrective measures are accomplished';
     status = 'MONITOR';
-  } else if ((delta_t_comp >= 4 && delta_t_comp <= 15) || (delta_t_amb >= 11 && delta_t_amb <= 20)) {
-    level = 2;
-    level_name = 'Mức 2 (Probable deficiency - Sai lệch tiềm tàng)';
-    action_recommendation = 'Repair as time permits (Sửa chữa/siết lại lực bu-lông khi có lịch dừng máy phù hợp)';
+  } else if (finalLevel === 2) {
+    level_name = 'LEVEL 2 (Khuyết tật tiềm ẩn)';
+    level_en = 'LEVEL 2 (Probable Deficiency)';
+    action_vi = 'Sửa chữa khi điều kiện cho phép / Repair as time permits';
+    action_en = 'Schedule repair as time permits';
     status = 'REPAIR_SCHEDULED';
-  } else if ((delta_t_comp >= 1 && delta_t_comp <= 3) || (delta_t_amb >= 1 && delta_t_amb <= 10)) {
-    level = 1;
-    level_name = 'Mức 1 (Possible deficiency - Nghi vấn)';
-    action_recommendation = 'Warrants investigation (Ghi nhận, kiểm tra theo dõi nguyên nhân)';
+  } else if (finalLevel === 1) {
+    level_name = 'LEVEL 1 (Cần kiểm tra)';
+    level_en = 'LEVEL 1 (Possible Deficiency)';
+    action_vi = 'Cần kiểm tra trong kỳ bảo dưỡng / Warrants investigation';
+    action_en = 'Warrants investigation; monitor during routine maintenance';
     status = 'INVESTIGATE';
   }
 
   return {
-    component_name: item.component_name,
-    measured_temp_c: item.measured_temp_c,
-    reference_component_temp_c: item.reference_component_temp_c,
+    location,
+    component_type: compType,
+    measured_temp_c: measured,
+    reference_component_temp_c: ref,
     ambient_temperature_c: ambientTemp,
     delta_t_comp,
     delta_t_amb,
-    level,
+    level: finalLevel,
     level_name,
-    action_recommendation,
-    status
+    level_en,
+    action_recommendation_vi: action_vi,
+    action_recommendation_en: action_en,
+    suspected_cause: suspectedCause,
+    status,
+    component_name: location,
+    action_recommendation: action_vi
   };
 }
 
 export function performDeterministicThermographyAnalysis(data: NetaThermographyInputPayload): NetaThermographyEvaluationResult {
-  const ambientTemp = data.survey_conditions.ambient_temperature_c ?? 32.0;
-  const loadPct = data.survey_conditions.load_percentage ?? 78;
+  const ambientTemp = data.site_info?.ambient_temperature_celsius ?? data.survey_conditions?.ambient_temperature_c ?? 32.5;
+  const loadPct = data.site_info?.circuit_loading_percent ?? data.survey_conditions?.load_percentage ?? 68.0;
+  const cameraModel = data.site_info?.ir_camera_model ?? data.survey_conditions?.camera_model ?? 'FLIR T865 (Sensitivity < 0.03 deg C)';
 
-  const itemEvals: ThermalItemEvaluation[] = (data.thermal_measurements || []).map(item =>
+  // Consolidate findings from either thermographic_findings or legacy thermal_measurements
+  const rawFindings = (data.thermographic_findings && data.thermographic_findings.length > 0)
+    ? data.thermographic_findings
+    : (data.thermal_measurements || []).map(m => ({
+        location: m.component_name,
+        component_type: 'Mối nối điện / Electrical Joint',
+        measured_temperature_celsius: m.measured_temp_c,
+        reference_component_temp_celsius: m.reference_component_temp_c,
+        suspected_cause: 'Điện trở tiếp xúc / Contact resistance'
+      }));
+
+  const itemEvals: ThermalItemEvaluation[] = rawFindings.map(item =>
     evaluateThermalItem(item, ambientTemp)
   );
 
@@ -118,80 +204,104 @@ export function performDeterministicThermographyAnalysis(data: NetaThermographyI
     ? Math.max(...itemEvals.map(e => e.level))
     : 0;
 
-  let overall_status: 'PASS' | 'INVESTIGATE' | 'REPAIR_SCHEDULED' | 'MONITOR' | 'REPAIR_IMMEDIATELY' = 'PASS';
-  let status_reason = 'Tất cả các điểm đo nhiệt độ mối nối và tiếp điểm đều trong ngưỡng bình thường theo NETA ATS-2025 Table 100.18.';
+  let overall_status: 'PASS' | 'INVESTIGATE' | 'REPAIR_SCHEDULED' | 'MONITOR' | 'REPAIR_IMMEDIATELY' | 'LEVEL 4 - CRITICAL REPAIR IMMEDIATELY' = 'PASS';
+  let overall_status_en = 'PASS / ALL THERMAL MEASUREMENTS WITHIN NORMAL LIMITS';
+  let overall_status_vi = 'PASS / TẤT CẢ ĐIỂM ĐO NHIỆT ĐỘ NẰM TRONG NGƯỠNG BÌNH THƯỜNG';
+  let status_reason = 'Tất cả các điểm đo nhiệt độ mối nối và tiếp điểm đều trong ngưỡng bình thường theo ANSI/NETA MTS Section 9 & Table 100.18.';
 
   if (maxLevel === 4) {
-    overall_status = 'REPAIR_IMMEDIATELY';
+    overall_status = 'LEVEL 4 - CRITICAL REPAIR IMMEDIATELY';
+    overall_status_en = 'LEVEL 4 - CRITICAL REPAIR IMMEDIATELY';
+    overall_status_vi = 'SAI LỆCH NGHIÊM TRỌNG - BẮT BUỘC SỬA CHỮA NGAY LẬP TỨC (LEVEL 4)';
     const majorItem = itemEvals.find(i => i.level === 4);
-    status_reason = `Phát hiện điểm phát nhiệt cực kỳ nguy hiểm (Mức 4 - Major Discrepancy) tại [${majorItem?.component_name}]: ΔT_comp = ${majorItem?.delta_t_comp}°C (> 15°C) và ΔT_amb = ${majorItem?.delta_t_amb}°C (> 40°C). Cần ngắt cô lập sửa chữa ngay lập tức để ngăn cháy nổ!`;
+    status_reason = `Phát hiện điểm phát nhiệt cực kỳ nguy hiểm (Level 4 - Major Discrepancy) tại [${majorItem?.location}]: ΔT_comp = ${majorItem?.delta_t_comp}°C (> 15°C) và ΔT_amb = ${majorItem?.delta_t_amb}°C (> 40°C). Nguy cơ hỏa hoạn và phóng hồ quang! Bắt buộc cách ly và sửa chữa ngay lập tức.`;
   } else if (maxLevel === 3) {
     overall_status = 'MONITOR';
-    status_reason = 'Phát hiện điểm phát nhiệt Mức 3 (21°C ≤ ΔT_amb ≤ 40°C). Cần giám sát liên tục cho tới khi xử lý bảo dưỡng xong.';
+    overall_status_en = 'LEVEL 3 - MONITOR CONTINUOUSLY';
+    overall_status_vi = 'LEVEL 3 - GIÁM SÁT CHẶT CHẼ LIÊN TỤC';
+    status_reason = 'Phát hiện điểm phát nhiệt Mức 3 (21°C ≤ ΔT_amb ≤ 40°C). Cần giám sát liên tục tải điện và nhiệt độ cho đến khi thực hiện xong biện pháp khắc phục.';
   } else if (maxLevel === 2) {
     overall_status = 'REPAIR_SCHEDULED';
-    status_reason = 'Phát hiện sai lệch nhiệt độ Mức 2 (Probable deficiency). Cần lên lịch siết lực mối nối hoặc bảo dưỡng khi có lịch cắt điện phù hợp.';
+    overall_status_en = 'LEVEL 2 - REPAIR AS TIME PERMITS';
+    overall_status_vi = 'LEVEL 2 - KHUYẾT TẬT TIỀM ẨN; SỬA CHỮA KHI ĐIỀU KIỆN CHO PHÉP';
+    status_reason = 'Phát hiện sai lệch nhiệt độ Mức 2 (Probable deficiency: 4°C ≤ ΔT_comp ≤ 15°C hoặc 11°C ≤ ΔT_amb ≤ 20°C). Cần lên lịch siết lực hoặc bảo dưỡng khi có lịch cắt điện phù hợp.';
   } else if (maxLevel === 1) {
     overall_status = 'INVESTIGATE';
-    status_reason = 'Phát hiện sai lệch nhiệt độ Mức 1 (Possible deficiency). Ghi nhận và theo dõi trong các kỳ bảo trì tiếp theo.';
+    overall_status_en = 'LEVEL 1 - WARRANTS INVESTIGATION';
+    overall_status_vi = 'LEVEL 1 - CẦN KIỂM TRA TRONG KỲ BẢO DƯỠNG';
+    status_reason = 'Phát hiện sai lệch nhiệt độ Mức 1 (Possible deficiency: 1°C ≤ ΔT_comp ≤ 3°C hoặc 1°C ≤ ΔT_amb ≤ 10°C). Ghi nhận và theo dõi trong kỳ bảo trì định kỳ tiếp theo.';
   }
 
+  // Generate detailed table rows
   const tableRows = itemEvals.map(ev => {
-    return `| **${ev.component_name}** | **${ev.measured_temp_c}°C** | ${ev.reference_component_temp_c}°C | **${ev.delta_t_comp > 0 ? '+' : ''}${ev.delta_t_comp}°C** | **${ev.delta_t_amb > 0 ? '+' : ''}${ev.delta_t_amb}°C** | **${ev.level_name}** | **${ev.status}** |`;
+    return `| **${ev.location}** | ${ev.component_type} | **${ev.measured_temp_c}°C** | **${ev.delta_t_comp > 0 ? '+' : ''}${ev.delta_t_comp}°C** (${ev.delta_t_comp > 15 ? '> 15°C' : ev.delta_t_comp >= 4 ? '4°C - 15°C' : '1°C - 3°C'}) | **${ev.delta_t_amb > 0 ? '+' : ''}${ev.delta_t_amb}°C** (${ev.delta_t_amb > 40 ? '> 40°C' : ev.delta_t_amb >= 21 ? '21°C - 40°C' : ev.delta_t_amb >= 11 ? '11°C - 20°C' : '1°C - 10°C'}) | **${ev.level_en}** | **${ev.action_recommendation_vi}** |`;
   }).join('\n');
 
-  const markdown_report = `### 1. TRẠNG THÁI TỔNG QUAN (Overall Status)
-**${overall_status === 'REPAIR_IMMEDIATELY' ? '🔴 REPAIR_IMMEDIATELY (Major Discrepancy - Cấp Bách Xử Lý Ngay Lập Tức)' : overall_status === 'MONITOR' ? '🟠 MONITOR (Cần Giám Sát Liên Tục)' : overall_status === 'REPAIR_SCHEDULED' ? '🟡 REPAIR_SCHEDULED (Lên Lịch Sửa Chữa)' : overall_status === 'INVESTIGATE' ? '🔵 INVESTIGATE (Ghi Nhận Theo Dõi)' : '🟢 PASS'}**
+  // Diagnostic narrative
+  const narrativeSections = itemEvals.map(ev => {
+    if (ev.level === 4) {
+      return `* **${ev.location} (${ev.component_type}) - LEVEL 4 (Major Discrepancy)**:
+  * **EN**: The electrical connection at ${ev.location} exhibits a critical hot spot reaching **${ev.measured_temp_c}°C**. The temperature rise compared to adjacent similar components is **ΔT = ${ev.delta_t_comp}°C** (exceeding the Level 4 threshold of > 15°C), and the rise above ambient air (${ev.ambient_temperature_c}°C) is **ΔT = ${ev.delta_t_amb}°C** (exceeding the Level 4 threshold of > 40°C). Probable cause: ${ev.suspected_cause}. This indicates an extreme contact resistance under normal circuit load (${loadPct}%), posing an immediate threat of thermal runaway, catastrophic bus insulation flashover, and arc flash danger.
+  * **VN**: Điểm đấu nối tại ${ev.location} xuất hiện điểm quá nhiệt nghiêm trọng lên tới **${ev.measured_temp_c}°C**. Mức chênh lệch nhiệt độ so với pha tương tự đạt **ΔT = ${ev.delta_t_comp}°C** (vượt ngưỡng Level 4 > 15°C), và mức tăng so với nhiệt độ môi trường (${ev.ambient_temperature_c}°C) đạt **ΔT = ${ev.delta_t_amb}°C** (vượt ngưỡng Level 4 > 40°C). Nguyên nhân nghi ngờ: ${ev.suspected_cause}. Điều này chứng tỏ điện trở tiếp xúc tăng vọt dưới phụ tải ${loadPct}%, nguy cơ gây hỏa hoạn, nóng chảy đầu cực và phóng hồ quang pha-pha thảm khốc.`;
+    } else if (ev.level === 3 || (ev.delta_t_amb >= 21 && ev.delta_t_amb <= 40)) {
+      return `* **${ev.location} (${ev.component_type}) - LEVEL 3 (High Thermal Rise)**:
+  * **EN**: Connection exhibits a significant temperature rise of **ΔT_amb = ${ev.delta_t_amb}°C** (Level 3: 21°C - 40°C above ambient) and measured temp of **${ev.measured_temp_c}°C**. Probable cause: ${ev.suspected_cause}. Requires continuous monitoring and expedited repair within 24-48 hours.
+  * **VN**: Điểm tiếp xúc có mức tăng nhiệt độ so với môi trường lên tới **ΔT_amb = ${ev.delta_t_amb}°C** (Level 3: 21°C - 40°C) và nhiệt độ đo đạt **${ev.measured_temp_c}°C**. Nguyên nhân nghi ngờ: ${ev.suspected_cause}. Cần giám sát liên tục tải điện và lên phương án siết lực/thay thế trong vòng 24-48 giờ.`;
+    } else if (ev.level === 2) {
+      return `* **${ev.location} (${ev.component_type}) - LEVEL 2 (Probable Deficiency)**:
+  * **EN**: Measured temperature **${ev.measured_temp_c}°C** with **ΔT_comp = ${ev.delta_t_comp}°C** (4°C - 15°C) and **ΔT_amb = ${ev.delta_t_amb}°C** (11°C - 20°C). Probable cause: ${ev.suspected_cause}. Indicates early-stage contact degradation. Schedule corrective maintenance during the next scheduled shutdown window.
+  * **VN**: Nhiệt độ đo đạt **${ev.measured_temp_c}°C** với **ΔT_comp = ${ev.delta_t_comp}°C** (4°C - 15°C) và **ΔT_amb = ${ev.delta_t_amb}°C** (11°C - 20°C). Nguyên nhân nghi ngờ: ${ev.suspected_cause}. Cho thấy có sự gia tăng điện trở tiếp xúc ở giai đoạn đầu. Lập kế hoạch vệ sinh bề mặt và siết lực trong kỳ ngừng máy định kỳ tới.`;
+    } else {
+      return `* **${ev.location} (${ev.component_type}) - LEVEL 1 (Possible Deficiency / Normal)**:
+  * **EN**: Measured temperature **${ev.measured_temp_c}°C** (ΔT_comp = ${ev.delta_t_comp}°C). Minor temperature variance; monitor during routine inspections.
+  * **VN**: Nhiệt độ đo đạt **${ev.measured_temp_c}°C** (ΔT_comp = ${ev.delta_t_comp}°C). Sai lệch nhiệt độ nhẹ; tiếp tục theo dõi trong các kỳ bảo dưỡng định kỳ tiếp theo.`;
+    }
+  }).join('\n\n');
 
-> **Nhận định kỹ thuật:** ${status_reason}
-> **Điều kiện khảo sát:** Tải vận hành đạt **${loadPct}%** định mức (${data.survey_conditions.operating_current_amp}A / ${data.survey_conditions.system_voltage_v}V), nhiệt độ môi trường **${ambientTemp}°C**, sử dụng thiết bị ${data.survey_conditions.camera_model} theo chuẩn NETA Mục 9.
+  const markdown_report = `* **TRẠNG THÁI TỔNG QUAN / OVERALL STATUS**: **${overall_status_en}** (${overall_status_vi})
 
 ---
 
-### 2. BẢNG PHÂN TÍCH NHIỆT ĐỘ CHI TIẾT (Thermographic Evaluation Table)
-*Đối chiếu trực tiếp với ANSI/NETA ATS-2025 Table 100.18 (Thermographic Survey Actions)*
+#### 1. BẢNG PHÂN TÍCH CHI TIẾT KHẢO SÁT HỒNG NGOẠI / DETAILED THERMOGRAPHIC EVALUATION TABLE
+*Tiêu chuẩn đối chiếu: ANSI/NETA MTS (Mục 9) & NETA Table 100.18 (Suggested Actions Based on Temperature Rise)*
 
-| Hạng mục / Điểm đo | Nhiệt độ đo ($T$) | Nhiệt độ đối chứng ($T_{ref}$) | Chênh lệch $\\Delta T_{comp}$ | Chênh lệch $\\Delta T_{amb}$ | Phân cấp Table 100.18 | Khuyến nghị hành động |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Vị trí Thiết bị / Equipment Location | Cấu thành & Điểm Phát nhiệt / Component & Anomaly Point | Nhiệt độ Đo / Measured Temp | $\\Delta T$ So với Pha Tương tự / Similar Delta T | $\\Delta T$ So với Môi trường / Ambient Delta T | Đánh giá NETA Table 100.18 / NETA Table 100.18 Classification | Hành động Khuyến nghị / Recommended Action |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
 ${tableRows}
 
 ---
 
-### 3. PHÂN TÍCH NGUYÊN NHÂN & NGUY CƠ (Root Cause Analysis & Thermal Anomaly Risk)
-- 🔴 **Điểm nóng nguy cấp tại Circuit Breaker Incoming Lug Phase B ($75.8^\\circ\\text{C}$):**
-  - $\\Delta T_{comp} = 75.8 - 41.2 = \\mathbf{34.6^\\circ\\text{C}}$ (vượt quá xa ngưỡng $15^\\circ\\text{C}$ của Mức 4 theo NETA Table 100.18).
-  - $\\Delta T_{amb} = 75.8 - 32.0 = \\mathbf{43.8^\\circ\\text{C}}$ (vượt ngưỡng $40^\\circ\\text{C}$ của Mức 4 theo NETA Table 100.18).
-  - **Cơ chế sự cố:** Lực siết bu-lông đầu cốt đấu nối Aptomat Phase B bị lỏng (under-torqued) hoặc bề mặt đồng bị oxy hóa rỗ nặng, làm tăng vọt điện trở tiếp xúc ($R_{contact}$). Dưới dòng tải $650\\text{A}$, công suất tổn hao nhiệt $P_{loss} = I^2 \\cdot R$ tăng theo cấp số nhân dẫn đến quá nhiệt cục bộ $75.8^\\circ\\text{C}$. Nếu duy trì tải lâu dài, điểm phát nhiệt này sẽ làm cháy lớp cách điện pha B, nóng chảy đầu cos và nguy cơ dẫn đến sự cố phóng hồ quang ngắn mạch 3 pha (Arc Flash catastrophe).
-- 🟡 **Sai lệch tiềm tàng tại Feeder Cable Termination Phase C ($48.0^\\circ\\text{C}$):**
-  - $\\Delta T_{comp} = 3.5^\\circ\\text{C}$, $\\Delta T_{amb} = 16.0^\\circ\\text{C}$ $\\rightarrow$ Đạt phân cấp Mức 2 (Probable deficiency: $11^\\circ\\text{C} \\le \\Delta T_{amb} \\le 20^\\circ\\text{C}$).
-  - Cần bảo dưỡng siết lại lực bu-lông khi có kế hoạch dừng máy.
-- 🟢 **Mối nối thanh cái Bolted Busbar Joint Phase A ($36.5^\\circ\\text{C}$):**
-  - $\\Delta T_{comp} = 1.5^\\circ\\text{C}$, $\\Delta T_{amb} = 4.5^\\circ\\text{C}$ $\\rightarrow$ Mức 1 (Possible deficiency: $1^\\circ\\text{C} - 3^\\circ\\text{C}$), ghi nhận theo dõi định kỳ.
+#### 2. PHÂN TÍCH ĐIỂM QUÁ NHIỆT & NGUYÊN NHÂN CƠ BẢN / THERMAL ANOMALY & ROOT CAUSE ANALYSIS
+
+${narrativeSections}
 
 ---
 
-### 4. KHUYẾN NGHỊ HÀNH ĐỘNG CHI TIẾT CHO FSE (Actionable Recommendations)
-1. **CẢNH BÁO CẤP BÁCH - XỬ LÝ KHẨN CẤP ĐẦU CỐT APTOMAT PHASE B:**
-   - Xin lịch cắt điện cô lập khẩn cấp lộ tổng MSB-01-BUSBAR-INCOMING.
-   - Tháo mối nối đầu cos Circuit Breaker Incoming Lug Phase B.
-   - Dùng giấy nhám mịn vệ sinh sạch lớp oxit bề mặt đồng, bôi mỡ dẫn điện chống oxy hóa chuyên dụng (Conductive electrical grease).
-   - Dùng cờ-lê lực siết lại lực bu-lông đạt chuẩn theo **ANSI/NETA ATS-2025 Bảng Table 100.12** (Bolted Connection Bolt Torque).
-2. **Bảo dưỡng kết hợp Feeder Cable Termination Phase C:**
-   - Tiện lịch dừng máy kiểm tra và siết lại lực bu-lông đầu cốt cáp pha C để triệt tiêu chênh lệch $\\Delta T_{amb} = 16^\\circ\\text{C}$.
-3. **Khảo sát ảnh nhiệt kiểm chứng lại (Post-Repair Thermographic Verification):**
-   - Đóng điện trở lại mang tải $\\ge 50\\%$ trong tối thiểu 30 phút.
-   - Sử dụng camera nhiệt chụp lại toàn bộ tủ để xác nhận nhiệt độ Phase B đã giảm về mức bình thường ($< 40^\\circ\\text{C}$, $\\Delta T_{comp} \\le 3^\\circ\\text{C}$).
-   - Lưu biên bản và cập nhật ảnh nhiệt hoàn thành vào hệ thống TEV CMMS.`;
+#### 3. KHUYẾN NGHỊ HÀNH ĐỘNG CHI TIẾT FOR FSE / ACTIONABLE RECOMMENDATIONS FOR FSE
+
+1. **Xử lý Khẩn cấp Điểm Quá nhiệt Nguy cấp (Immediate Action for Level 4 Anomalies)**:
+   * **EN**: Schedule an immediate emergency shutdown for any equipment with Level 4 discrepancies (> 15°C similar Delta T or > 40°C ambient Delta T). De-energize, verify zero voltage, apply safety grounds, disassemble the bolted connection, clean contact surfaces with approved electrical solvent, apply high-grade anti-oxidant grease, and re-torque bolts using a calibrated torque wrench in strict compliance with ANSI/NETA MTS Table 100.12.
+   * **VN**: Lập kế hoạch ngắt điện cô lập khẩn cấp đối với các thiết bị có sai lệch Level 4 (> 15°C lệch pha hoặc > 40°C so với môi trường). Cắt nguồn, kiểm tra không còn điện, tiếp địa an toàn, tháo dỡ mối nối bu-lông, tẩy sạch oxit bề mặt bằng dung dịch chuyên dụng, quét mỡ chống oxy hóa và siết lại bằng cờ-lê lực hiệu chuẩn theo đúng Bảng ANSI/NETA MTS Table 100.12.
+
+2. **Xử lý Điểm Phát nhiệt Tiềm ẩn & Giám sát (Corrective Action for Level 2 & Level 3)**:
+   * **EN**: Continuously monitor loading and thermal progression for Level 3 points. Schedule surface reconditioning, bolt re-torquing, and lug replacement for Level 2 points during the next scheduled planned outage (within 1 - 3 months).
+   * **VN**: Giám sát liên tục phụ tải và diễn biến nhiệt độ đối với các điểm Level 3. Lập kế hoạch vệ sinh tiếp xúc, siết lực bu-lông và thay thế đầu cốt cho các điểm Level 2 trong đợt bảo dưỡng cắt điện định kỳ tới (trong vòng 1 - 3 tháng).
+
+3. **Chụp Kiểm tra Lại Sau Sửa chữa / Re-scan Verification Protocol**:
+   * **EN**: Re-perform thermographic survey under similar nominal load conditions (≥ 40% nominal load) after corrective repairs are completed. Ensure temperature differentials across all connections drop below **3°C** (Level 1) before signing off the official survey report.
+   * **VN**: Thực hiện chụp ảnh nhiệt kiểm tra lại dưới điều kiện mang tải tương đương (phụ tải tối thiểu ≥ 40% định mức) sau khi hoàn tất sửa chữa. Đảm bảo mức chênh lệch nhiệt độ trên tất cả các điểm nối hạ về dưới **3°C** (Level 1) trước khi ký biên bản nghiệm thu.`;
 
   return {
     overall_status,
+    overall_status_en,
+    overall_status_vi,
     status_reason,
     markdown_report,
     evaluations: {
       survey_conditions: {
         load_percentage: loadPct,
         is_adequate_load: loadPct >= 40,
-        detail: `Tải khảo sát đạt ${loadPct}% (đạt yêu cầu tải vận hành bình thường theo NETA ATS-2025 Mục 9.1).`
+        detail: `Phụ tải khảo sát đạt ${loadPct}% (đạt yêu cầu tải tối thiểu ≥ 40% định mức theo ANSI/NETA MTS Section 9.3.3 & NFPA 70B).`
       },
       max_severity_level: maxLevel,
       items: itemEvals
@@ -208,48 +318,41 @@ export async function generateNetaThermographyAiAnalysis(payload: NetaThermograp
     return deterministicResult;
   }
 
-  const systemInstruction = `Bạn là Trợ lý AI Chuyên gia Kiểm tra Field Service (TEV Platform AI) chuyên trách Khảo sát Nhiệt độ Hồng ngoại (Thermographic Survey). Nhiệm vụ của bạn là nhận dữ liệu đo nhiệt độ ngoài site từ Field Service Engineer (FSE) và tự động đối soát với tiêu chuẩn ANSI/NETA ATS-2025 (Mục 9 & Bảng Table 100.18).
+  const systemInstruction = `You are an AI Expert Field Service Assistant (TEV Platform AI) specializing in Electrical Thermographic Survey and Thermal Infrared Diagnostics. Your task is to receive field thermographic inspection data from Field Service Engineers (FSE) and automatically evaluate thermal anomalies STRICTLY against ANSI/NETA MTS (Section 9) and NETA Table 100.18 (Suggested Actions Based on Temperature Rise). You MUST provide all evaluation outputs in BILINGUAL format (English / Vietnamese EN/VN) and NEVER include any citation reference numbers.
 
-QUY TRẮC ĐÁNH GIÁ VÀ TIÊU CHUẨN THAM CHIẾU (NETA ATS-2025 Section 9 & Table 100.18):
+EVALUATION RULES & REFERENCE STANDARDS (ANSI/NETA MTS SECTION 9 & TABLE 100.18):
 
-1. KIỂM TRA ĐIỀU KIỆN ĐO & BÁO CÁO (SECTION 9.1 - 9.3):
-- BẮT BUỘC khảo sát dưới điều kiện tải vận hành bình thường (normal circuit loading).
-- Thiết bị đo (Camera nhiệt): Có khả năng phát hiện chênh lệch nhiệt độ tối thiểu 1°C tại 30°C.
-- Báo cáo phải có: Thông số tải (Điện áp/Dòng điện), Ảnh nhiệt (Thermogram), Nguyên nhân dự đoán, Danh mục thiết bị không thể tiếp cận/không thể đo.
+1. INSPECTION & REPORTING PARAMETERS (NETA MTS SECTION 9.1 - 9.3):
+- Equipment Access & IR Windows (Section 9.1): Verify physical/mechanical condition and safe optical access through IR ports or opened covers.
+- Report Completeness (Section 9.2): Verify 8 required elements (Equipment description, Discrepancies, Delta T values, Probable cause, Inaccessible areas, Load conditions, Thermograms/photos, Recommended actions).
+- IR Camera Sensitivity (Section 9.3.1): IR camera MUST detect minimum temperature difference of 1°C at 30°C.
+- Circuit Load Condition (Section 9.3.3 & NFPA 70B): Thermographic survey MUST be performed under normal circuit loading, not less than 40% nominal load.
 
-2. QUY TRẮC ĐÁNH GIÁ MỨC ĐỘ NGUY HIỂM THEO TABLE 100.18:
-AI phải tính toán 2 chỉ số chênh lệch nhiệt độ:
-- Delta T_comp = Nhiệt độ điểm nóng - Nhiệt độ pha tương tự (hoặc linh kiện tương tự dưới cùng tải).
-- Delta T_amb = Nhiệt độ điểm nóng - Nhiệt độ không khí môi trường (Ambient).
+2. THERMAL EVALUATION MATRIX & ACTIONS (NETA MTS TABLE 100.18):
+Evaluate temperature rise (Delta T) using two comparison methods:
+METHOD 1: Component-to-Similar-Component Delta T (Under Similar Loading):
+- Delta T = 1°C - 3°C -> LEVEL 1: Possible deficiency; warrants investigation.
+- Delta T = 4°C - 15°C -> LEVEL 2: Indicates probable deficiency; repair as time permits.
+- Delta T > 15°C -> LEVEL 4: Major discrepancy; REPAIR IMMEDIATELY.
 
-Phân cấp và đưa ra Khuyến nghị hành động theo NETA Table 100.18:
-- MỨC 1 (Possible deficiency):
-  + Khi 1°C <= Delta T_comp <= 3°C HOẶC 1°C <= Delta T_amb <= 10°C.
-  + Khuyến nghị: "Warrants investigation" (Ghi nhận, kiểm tra theo dõi nguyên nhân).
-- MỨC 2 (Probable deficiency):
-  + Khi 4°C <= Delta T_comp <= 15°C HOẶC 11°C <= Delta T_amb <= 20°C.
-  + Khuyến nghị: "Repair as time permits" (Sửa chữa/siết lại lực bu-lông khi có lịch dừng máy phù hợp).
-- MỨC 3 (Monitor):
-  + Khi 21°C <= Delta T_amb <= 40°C.
-  + Khuyến nghị: "Monitor until corrective measures can be accomplished" (Theo dõi liên tục cho đến khi xử lý xong).
-- MỨC 4 (Major discrepancy - CẤP BÁCH):
-  + Khi Delta T_comp > 15°C HOẶC Delta T_amb > 40°C.
-  + Khuyến nghị: "Repair immediately" (Dừng máy hoặc ngắt cô lập để xử lý CẤP TỐC ngay lập tức).
+METHOD 2: Component-to-Ambient Air Delta T:
+- Delta T = 1°C - 10°C -> LEVEL 1: Possible deficiency; warrants investigation.
+- Delta T = 11°C - 20°C -> LEVEL 2: Indicates probable deficiency; repair as time permits.
+- Delta T = 21°C - 40°C -> LEVEL 3: Monitor until corrective measures can be accomplished.
+- Delta T > 40°C -> LEVEL 4: Major discrepancy; REPAIR IMMEDIATELY.
 
-NHIỆM VỤ CỦA AI:
-Khi nhận dữ liệu JSON từ FSE, hãy phân tích và trả về phản hồi định dạng Markdown gồm ĐÚNG 4 PHẦN:
-1. TRẠNG THÁI TỔNG QUAN (Overall Status): REPAIR_IMMEDIATELY, MONITOR, REPAIR_SCHEDULED, INVESTIGATE, hoặc PASS.
-2. BẢNG PHÂN TÍCH NHIỆT ĐỘ CHI TIẾT (Thermographic Evaluation Table): So sánh Delta T_comp và Delta T_amb thực tế với NETA ATS-2025 Table 100.18.
-3. PHÂN TÍCH NGUYÊN NHÂN & NGUY CƠ (Root Cause Analysis & Thermal Anomaly Risk).
-4. KHUYẾN NGHỊ HÀNH ĐỘNG CHI TIẾT CHO FSE (Actionable Recommendations).
-
-Không thêm lời chào hỏi ngoài 4 phần nêu trên.`;
+AI RESPONSE STRUCTURE (ALL IN BILINGUAL EN/VN):
+When receiving JSON input from FSE, output a Markdown response containing 4 sections:
+1. OVERALL STATUS / TRẠNG THÁI TỔNG QUAN: PASS, INVESTIGATE, MONITOR, or LEVEL 4 - CRITICAL REPAIR IMMEDIATELY.
+2. DETAILED THERMOGRAPHIC SURVEY EVALUATION TABLE / BẢNG PHÂN TÍCH CHI TIẾT KHẢO SÁT HỒNG NGOẠI: Compare findings against NETA MTS Section 9 & Table 100.18 in bilingual EN/VN format.
+3. THERMAL ANOMALY & ROOT CAUSE ANALYSIS / PHÂN TÍCH ĐIỂM QUÁ NHIỆT & NGUYÊN NHÂN CƠ BẢN: Diagnostic narrative explaining thermal stress, contact resistance, or phase imbalance.
+4. ACTIONABLE RECOMMENDATIONS FOR FSE / KHUYẾN NGHỊ HÀNH ĐỘNG CHI TIẾT FOR FSE: Step-by-step guidance in EN/VN based on Table 100.18 action levels.`;
 
   try {
     const ai = new GoogleGenAI({ apiKey });
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('AI generation timed out')), 4000)
+      setTimeout(() => reject(new Error('AI generation timed out')), 4500)
     );
 
     const callPromise = ai.models.generateContent({
@@ -259,12 +362,12 @@ Không thêm lời chào hỏi ngoài 4 phần nêu trên.`;
           role: 'user',
           parts: [
             {
-              text: `Dưới đây là dữ liệu đo khảo sát ảnh nhiệt hồng ngoại hiện trường từ kỹ sư FSE:
+              text: `Dưới đây là dữ liệu kiểm tra khảo sát nhiệt độ hồng ngoại ngoài site từ kỹ sư FSE:
 \`\`\`json
 ${JSON.stringify(payload, null, 2)}
 \`\`\`
 
-Hãy phân tích và xuất báo cáo 4 phần chuẩn chuyên nghiệp cho kỹ sư FSE theo đúng tiêu chuẩn ANSI/NETA ATS-2025 Section 9 & Table 100.18.`
+Hãy phân tích và xuất báo cáo đối soát song ngữ (EN/VN) chuẩn ANSI/NETA MTS Section 9 & Table 100.18 cho kỹ sư hiện trường FSE.`
             }
           ]
         }
@@ -280,13 +383,13 @@ Hãy phân tích và xuất báo cáo 4 phần chuẩn chuyên nghiệp cho kỹ
 
     if (markdown && markdown.length > 100) {
       let overallStatus = deterministicResult.overall_status;
-      if (markdown.includes('REPAIR_IMMEDIATELY')) {
-        overallStatus = 'REPAIR_IMMEDIATELY';
-      } else if (markdown.includes('MONITOR')) {
+      if (markdown.includes('LEVEL 4') || markdown.includes('REPAIR IMMEDIATELY') || markdown.includes('REPAIR_IMMEDIATELY')) {
+        overallStatus = 'LEVEL 4 - CRITICAL REPAIR IMMEDIATELY';
+      } else if (markdown.includes('LEVEL 3') || markdown.includes('MONITOR')) {
         overallStatus = 'MONITOR';
-      } else if (markdown.includes('REPAIR_SCHEDULED')) {
+      } else if (markdown.includes('LEVEL 2') || markdown.includes('REPAIR_SCHEDULED') || markdown.includes('repair as time permits')) {
         overallStatus = 'REPAIR_SCHEDULED';
-      } else if (markdown.includes('INVESTIGATE')) {
+      } else if (markdown.includes('LEVEL 1') || markdown.includes('INVESTIGATE')) {
         overallStatus = 'INVESTIGATE';
       }
 

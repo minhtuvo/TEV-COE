@@ -42,6 +42,7 @@ import {
 
 export interface PMWorkOrder {
   id: string;
+  workPermitId?: string;
   title: string;
   description?: string;
   equipmentId: string | string[];
@@ -49,6 +50,7 @@ export interface PMWorkOrder {
   equipmentType?: string;
   customerId?: string;
   customerName?: string;
+  customer?: string;
   factory?: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
   type: 'preventive' | 'corrective' | 'emergency';
@@ -60,6 +62,7 @@ export interface PMWorkOrder {
   estimatedHours?: number;
   actualHours?: number;
   healthScore?: number;
+  usedMaterials?: any;
 }
 
 interface Props {
@@ -75,16 +78,19 @@ interface Props {
 const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   {
     id: 'WO-PM-2026-001',
+    workPermitId: 'WP-PM-2026-001',
     title: 'Bảo trì định kỳ Quý 3 - Máy biến áp dầu T1 2000kVA',
     description: 'Lấy mẫu dầu DGA, đo điện trở cách điện 10kV, kiểm tra rơ-le Buchholz & van an toàn áp suất.',
-    equipmentId: 'MBA-T1-2000KVA',
-    equipmentName: 'Máy biến áp chính T1 (2000kVA 22/0.4kV)',
+    equipmentId: 'TRF-110-01',
+    equipmentName: 'Máy biến áp chính T1 110/22kV 63MVA (Điện Gió Mũi Né)',
     equipmentType: 'Máy biến áp dầu',
+    customerId: 'KH-SUPER-05',
+    customerName: 'Super Energy',
     factory: 'Nhà máy Điện Gió Mũi Né',
     priority: 'high',
     type: 'preventive',
     status: 'completed',
-    assignedTo: 'Nguyễn Văn S',
+    assignedTo: 'KS. Nguyễn Văn S',
     dueDate: '2026-09-08',
     completedDate: '2026-09-07',
     pmFrequency: '3-months',
@@ -94,16 +100,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-002',
+    workPermitId: 'WP-PM-2026-002',
     title: 'Bảo trì định kỳ Tháng 9 - Bộ chuyển nguồn tự động ATS 800A',
     description: 'Vệ sinh tiếp điểm cực Pole C, kiểm tra khóa liên động cơ khí, đo điện trở mạch điều khiển.',
-    equipmentId: 'ATS-LV-800A-01',
+    equipmentId: 'SWG-LV-01',
     equipmentName: 'Tủ chuyển nguồn ATS Khẩn cấp (800A 4P)',
     equipmentType: 'Bộ chuyển nguồn ATS',
+    customerId: 'KH-TEV-01',
+    customerName: 'Công ty Cổ phần Năng lượng TEV',
     factory: 'Tòa nhà TEV Office Tower',
     priority: 'urgent',
     type: 'preventive',
     status: 'completed',
-    assignedTo: 'Trần Văn H',
+    assignedTo: 'KS. Trần Văn H',
     dueDate: '2026-09-12',
     completedDate: '2026-09-11',
     pmFrequency: 'monthly',
@@ -113,16 +122,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-003',
+    workPermitId: 'WP-PM-2026-003',
     title: 'Bảo trì định kỳ Tháng 9 - Tổ máy phát Diesel khẩn cấp 500kW',
     description: 'Kiểm tra bảo vệ ngắt quá tốc độ (115%), sấy cuộn stator nâng PI, thử tải nấc 100% Load Bank.',
-    equipmentId: 'GEN-EMERGENCY-500KW-01',
+    equipmentId: 'GEN-STANDBY-2000KVA',
     equipmentName: 'Tổ máy phát điện Diesel 500kW (Cummins)',
     equipmentType: 'Máy phát điện',
+    customerId: 'KH-TEV-01',
+    customerName: 'Công ty Cổ phần Năng lượng TEV',
     factory: 'Bệnh Viện TEV General Hospital',
     priority: 'urgent',
     type: 'preventive',
     status: 'in_progress',
-    assignedTo: 'Nguyễn Văn S',
+    assignedTo: 'KS. Nguyễn Văn S',
     dueDate: '2026-09-21',
     pmFrequency: 'monthly',
     estimatedHours: 8,
@@ -131,16 +143,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-004',
+    workPermitId: 'WP-PM-2026-004',
     title: 'Bảo dưỡng kiểm tra Giàn ắc quy VRLA AGM 120kVA Data Center',
     description: 'Đo nội trở nội suy mΩ, kiểm tra cân bằng điện áp cực đất và nhiệt độ cực âm.',
-    equipmentId: 'BATT-VRLA-120KVA-DC',
+    equipmentId: 'BAT-BESS-01',
     equipmentName: 'Giàn ắc quy VRLA 120kVA (12V x 40 bình)',
     equipmentType: 'Ắc quy & UPS',
+    customerId: 'KH-TEV-01',
+    customerName: 'Công ty Cổ phần Năng lượng TEV',
     factory: 'Trung Tâm Dữ Liệu TEV Tier-III',
     priority: 'high',
     type: 'preventive',
     status: 'initiated',
-    assignedTo: 'Lê Hoàng D',
+    assignedTo: 'KS. Lê Hoàng D',
     dueDate: '2026-09-18', // Overdue relative to 2026-09-24
     pmFrequency: 'monthly',
     estimatedHours: 5,
@@ -148,16 +163,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-005',
+    workPermitId: 'WP-PM-2026-005',
     title: 'Bảo trì & Kiểm tra rơ-le số bảo vệ xuất tuyến 22kV SEL-751',
     description: 'Bơm dòng thứ cấp thử đặc tính thời gian quá dòng 50/51, kiểm tra cổng SCADA Modbus.',
-    equipmentId: 'RELAY-SEL-751-F01',
+    equipmentId: 'REL-SEL-751-01',
     equipmentName: 'Rơ-le bảo vệ kỹ thuật số SEL-751 Ngăn Lộ 471',
     equipmentType: 'Rơ-le bảo vệ',
+    customerId: 'KH-TEV-01',
+    customerName: 'Công ty Cổ phần Năng lượng TEV',
     factory: 'Khu Công Nghiệp VSIP 1',
     priority: 'medium',
     type: 'preventive',
     status: 'completed',
-    assignedTo: 'Phạm Minh T',
+    assignedTo: 'KS. Phạm Minh T',
     dueDate: '2026-09-15',
     completedDate: '2026-09-14',
     pmFrequency: '6-months',
@@ -167,16 +185,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-006',
+    workPermitId: 'WP-PM-2026-006',
     title: 'Đo phóng điện cục bộ Partial Discharge (PD) Tủ trung thế RMU',
     description: 'Đo cảm biến TEV & Siêu âm màng ngăn tủ cáp đầu vào trạm 22kV.',
-    equipmentId: 'SWG-RMU-22KV-02',
+    equipmentId: 'SWG-MV-24KV-01',
     equipmentName: 'Tủ máy cắt trung thế RMU Schneider 24kV',
     equipmentType: 'Tủ đóng cắt RMU',
+    customerId: 'KH-TEV-01',
+    customerName: 'Công ty Cổ phần Năng lượng TEV',
     factory: 'Nhà máy Sản xuất TEV Tân Uyên',
     priority: 'high',
     type: 'preventive',
     status: 'initiated',
-    assignedTo: 'Trần Văn H',
+    assignedTo: 'KS. Trần Văn H',
     dueDate: '2026-09-26', // Due in 2 days (Due soon)
     pmFrequency: 'monthly',
     estimatedHours: 3,
@@ -184,16 +205,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-007',
+    workPermitId: 'WP-PM-2026-007',
     title: 'Khảo sát ảnh nhiệt hồng ngoại (IR) toàn bộ thanh cái hạ thế',
     description: 'Quét camera Flir E76 các đầu cosse cáp tổng tủ MSB khi mang tải trên 75%.',
-    equipmentId: 'PANEL-MSB-2500A',
+    equipmentId: 'MC-ACB-3200A',
     equipmentName: 'Tủ phân phối chính MSB 2500A Khối Sản Xuất',
     equipmentType: 'Tủ phân phối',
+    customerId: 'KH-SEVT-02',
+    customerName: 'Samsung Electronics Vietnam (SEVT)',
     factory: 'Nhà máy Sản xuất TEV Tân Uyên',
     priority: 'medium',
     type: 'preventive',
     status: 'initiated',
-    assignedTo: 'Lê Hoàng D',
+    assignedTo: 'KS. Lê Hoàng D',
     dueDate: '2026-09-27', // Due in 3 days (Due soon)
     pmFrequency: '3-months',
     estimatedHours: 4,
@@ -201,16 +225,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-008',
+    workPermitId: 'WP-PM-2026-008',
     title: 'Bảo trì thí nghiệm VLF cáp ngầm trung thế 24kV Cu/XLPE 3x240mm2',
     description: 'Thử nghiệm điện áp cao tần số thấp 0.1Hz và đo góc tổn hao điện môi Tan Delta.',
-    equipmentId: 'CABLE-24KV-LINE-B',
+    equipmentId: 'CAB-24KV-01',
     equipmentName: 'Tuyến cáp ngầm trung thế 24kV cấp trạm biến áp',
     equipmentType: 'Cáp ngầm',
+    customerId: 'KH-TEV-01',
+    customerName: 'Công ty Cổ phần Năng lượng TEV',
     factory: 'Khu Công Nghiệp VSIP 1',
     priority: 'high',
     type: 'preventive',
     status: 'initiated',
-    assignedTo: 'Phạm Minh T',
+    assignedTo: 'KS. Phạm Minh T',
     dueDate: '2026-09-20', // Overdue relative to 2026-09-24
     pmFrequency: '1-year',
     estimatedHours: 6,
@@ -218,16 +245,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-009',
+    workPermitId: 'WP-PM-2026-009',
     title: 'Bảo trì trạm sạc xe điện nhanh DC Fast EVSE 120kW',
     description: 'Kiểm tra điện trở tiếp địa súng sạc, kiểm tra quạt làm mát công suất và cách điện DC.',
-    equipmentId: 'EVSE-DC-120KW-01',
+    equipmentId: 'EVSE-DC-120KW',
     equipmentName: 'Trạm sạc xe điện cao tốc 120kW Dual Gun',
     equipmentType: 'Trạm sạc EVSE',
+    customerId: 'KH-VINFAST-03',
+    customerName: 'Tổ hợp Sản xuất Ô tô VinFast',
     factory: 'Trạm Sạc Cao Tốc Long Thành',
     priority: 'low',
     type: 'preventive',
     status: 'completed',
-    assignedTo: 'Nguyễn Văn S',
+    assignedTo: 'KS. Nguyễn Văn S',
     dueDate: '2026-09-05',
     completedDate: '2026-09-04',
     pmFrequency: 'monthly',
@@ -237,16 +267,19 @@ const SEED_PM_WORK_ORDERS: PMWorkOrder[] = [
   },
   {
     id: 'WO-PM-2026-010',
+    workPermitId: 'WP-PM-2026-010',
     title: 'Kiểm tra định kỳ Quý - Dàn Inverter Năng lượng mặt trời áp mái 500kW',
     description: 'Kiểm tra đường đặc tính I-V string, đo điện trở cách điện DC mảng pin và vệ sinh tản nhiệt.',
-    equipmentId: 'PV-INV-100K-03',
+    equipmentId: 'INV-SOLAR-01',
     equipmentName: 'Chuỗi biến tần Solar Inverter Sungrow 110kW',
     equipmentType: 'Năng lượng mặt trời',
+    customerId: 'KH-SUPER-05',
+    customerName: 'Super Energy',
     factory: 'Nhà máy Điện Gió Mũi Né',
     priority: 'medium',
     type: 'preventive',
     status: 'in_progress',
-    assignedTo: 'Lê Hoàng D',
+    assignedTo: 'KS. Lê Hoàng D',
     dueDate: '2026-09-29', // Due in 5 days
     pmFrequency: '3-months',
     estimatedHours: 5,

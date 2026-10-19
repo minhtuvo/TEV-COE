@@ -27,6 +27,7 @@ import {
   performDeterministicUpsAnalysis
 } from '../../server/netaUpsAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
@@ -81,7 +82,7 @@ export const SAMPLE_UPS_FSE_DATA: NetaUpsInputPayload = {
 };
 
 export const NetaUpsChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaUpsInputPayload>(SAMPLE_UPS_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaUpsInputPayload>('neta-ups', SAMPLE_UPS_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaUpsEvaluationResult | null>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);

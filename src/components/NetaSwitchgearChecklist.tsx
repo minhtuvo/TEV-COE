@@ -41,6 +41,7 @@ import { TevReportPrintModal } from './TevReportPrintModal';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -103,7 +104,7 @@ export const SAMPLE_SWITCHGEAR_FSE_DATA: NetaSwitchgearInputPayload = {
 };
 
 export const NetaSwitchgearChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaSwitchgearInputPayload>(SAMPLE_SWITCHGEAR_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaSwitchgearInputPayload>('neta-switchgear', SAMPLE_SWITCHGEAR_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaSwitchgearEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);

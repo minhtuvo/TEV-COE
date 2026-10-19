@@ -25,10 +25,15 @@ import {
 } from 'lucide-react';
 import { NetaGroundingInputPayload, NetaGroundingEvaluationResult } from '../../server/netaGroundingAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
   onNavigateToReports?: () => void;
+  onSwitchToUniversalReport?: () => void;
 }
 
 const SAMPLE_GROUNDING_DEFECT_DATA: NetaGroundingInputPayload = {
@@ -107,8 +112,15 @@ const SAMPLE_GROUNDING_PASS_DATA: NetaGroundingInputPayload = {
   }
 };
 
-export const NetaGroundingChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaGroundingInputPayload>(SAMPLE_GROUNDING_DEFECT_DATA);
+export const NetaGroundingChecklist: React.FC<Props> = ({
+  onSaveReport,
+  onNavigateToReports,
+  onSwitchToUniversalReport
+}) => {
+  const [data, setData] = useAtsFormSync<NetaGroundingInputPayload>(
+    'neta-grounding',
+    SAMPLE_GROUNDING_DEFECT_DATA
+  );
   const [activeTab, setActiveTab] = useState<'electrical' | 'visual' | 'ai-report' | 'ai-prompt'>('electrical');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaGroundingEvaluationResult | null>(null);
@@ -867,47 +879,51 @@ Khi nhận dữ liệu JSON từ FSE, hãy phân tích và trả về phản h�
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
               <div>
-                <label className="font-semibold text-slate-600 block mb-1">Mã Lưới Tiếp Địa (Tag)</label>
-                <input
-                  type="text"
+                <EquipmentSelectDropdown
+                  label="Mã & Tên Lưới Tiếp Địa (Tag)"
                   value={data.site_info.grounding_system_tag}
-                  onChange={(e) =>
+                  filterType="Tủ điện"
+                  onChange={(val, eq) =>
                     setData({
                       ...data,
-                      site_info: { ...data.site_info, grounding_system_tag: e.target.value }
+                      site_info: {
+                        ...data.site_info,
+                        grounding_system_tag: eq?.id || val,
+                        system_type: eq?.notes || data.site_info.system_type
+                      }
                     })
                   }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md font-bold text-slate-900"
+                  placeholder="Chọn hoặc bổ sung mã tiếp địa..."
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-600 block mb-1">Cấu Trúc Tiếp Địa (System Type)</label>
-                <input
-                  type="text"
-                  value={data.site_info.system_type}
-                  onChange={(e) =>
+                <CustomerSelectDropdown
+                  label="Mã & Tên Khách Hàng (Dự án)"
+                  value={data.site_info.project_name}
+                  onChange={(val, cust) =>
                     setData({
                       ...data,
-                      site_info: { ...data.site_info, system_type: e.target.value }
+                      site_info: {
+                        ...data.site_info,
+                        project_name: cust?.name || val
+                      }
                     })
                   }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md font-medium text-slate-900"
+                  placeholder="Chọn hoặc bổ sung khách hàng..."
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-600 block mb-1">Kỹ Sư FSE Đo Đạc</label>
-                <input
-                  type="text"
+                <FseEngineerDropdown
+                  label="Kỹ Sư FSE Đo Đạc"
                   value={data.site_info.fse_name}
-                  onChange={(e) =>
+                  onChange={(val) =>
                     setData({
                       ...data,
-                      site_info: { ...data.site_info, fse_name: e.target.value }
+                      site_info: { ...data.site_info, fse_name: val }
                     })
                   }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md font-medium text-slate-900"
                 />
               </div>
 
@@ -922,7 +938,7 @@ Khi nhận dữ liệu JSON từ FSE, hãy phân tích và trả về phản h�
                       site_info: { ...data.site_info, test_date: e.target.value }
                     })
                   }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md font-medium text-slate-900"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-medium text-slate-900"
                 />
               </div>
             </div>

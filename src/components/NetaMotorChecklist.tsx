@@ -27,6 +27,7 @@ import {
   performDeterministicMotorAnalysis
 } from '../../server/netaMotorAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
 
 interface Props {
@@ -82,7 +83,7 @@ const SAMPLE_MOTOR_DATA: NetaMotorInputPayload = {
 };
 
 export const NetaMotorChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaMotorInputPayload>(SAMPLE_MOTOR_DATA);
+  const [data, setData] = useAtsFormSync<NetaMotorInputPayload>('neta-motor', SAMPLE_MOTOR_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaMotorEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);

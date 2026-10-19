@@ -73,17 +73,22 @@ export const DEFAULT_TEV_FSE_LIST: FseEngineer[] = [
 ];
 
 const STORAGE_KEY = 'tev_registered_fse_engineers_v2';
+export const EVT_FSE_UPDATED = 'tev_fse_updated';
 
 interface Props {
   value: string;
   onChange: (fseName: string, engineer?: FseEngineer) => void;
   className?: string;
+  label?: string;
+  required?: boolean;
 }
 
 export const FseEngineerDropdown: React.FC<Props> = ({
   value,
   onChange,
-  className = ''
+  className = '',
+  label,
+  required = false
 }) => {
   const [engineers, setEngineers] = useState<FseEngineer[]>(() => {
     try {
@@ -115,10 +120,22 @@ export const FseEngineerDropdown: React.FC<Props> = ({
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Sync to localStorage
+  // Sync from external events
+  useEffect(() => {
+    const handleFseUpdate = (e: any) => {
+      if (Array.isArray(e.detail) && e.detail.length > 0) {
+        setEngineers(e.detail);
+      }
+    };
+    window.addEventListener(EVT_FSE_UPDATED, handleFseUpdate);
+    return () => window.removeEventListener(EVT_FSE_UPDATED, handleFseUpdate);
+  }, []);
+
+  // Sync to localStorage and broadcast
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(engineers));
+      window.dispatchEvent(new CustomEvent(EVT_FSE_UPDATED, { detail: engineers }));
     } catch {
       // ignore
     }
@@ -184,6 +201,18 @@ export const FseEngineerDropdown: React.FC<Props> = ({
 
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
+      {label && (
+        <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <UserCheck size={13} className="text-amber-600" />
+            {label} {required && <span className="text-red-500">*</span>}
+          </span>
+          <span className="text-[10px] font-mono text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+            Sheet FSE
+          </span>
+        </label>
+      )}
+
       {/* Trigger Button */}
       <button
         type="button"

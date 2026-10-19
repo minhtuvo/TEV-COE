@@ -312,21 +312,21 @@ export const CHECKLIST_CATALOG: EquipmentChecklistItem[] = [
   {
     id: 'neta-thermography',
     category: 'thermography',
-    title: 'Khảo Sát Nhiệt Độ Hồng Ngoại (Thermographic Survey)',
-    subtitle: 'Ảnh Nhiệt Camera • Phân Cấp 4 Mức Mối Nguy • Thanh Cái, Đầu Cos Cáp, Cực Aptomat (Table 100.18)',
-    scope: 'Tủ phân phối tổng MSB, thanh cái busbar, mối nối bu-lông, đầu cốt cáp động lực, thiết bị đóng cắt mang tải',
-    standardCode: 'ANSI/NETA ATS-2025 Mục 9 & Bảng 100.18',
-    standardName: 'NETA ATS-2025 Sec 9 & Table 100.18',
-    aiEngine: 'Thermographic Survey Specialist AI (Table 100.18)',
+    title: 'Khảo Sát & Kiểm Tra Hồng Ngoại Thiết Bị Điện (Thermographic Survey)',
+    subtitle: 'ANSI/NETA MTS Section 9 • Bảng NETA Table 100.18 • NFPA 70B • Phân Cấp 4 Mức Sai Lệch (Level 1 - 4)',
+    scope: 'Tủ phân phối tổng MSB, thanh cái busbar, mối nối bu-lông, đầu cốt cáp động lực, thiết bị đóng cắt mang tải, máy biến áp',
+    standardCode: 'ANSI/NETA MTS Section 9 & Table 100.18',
+    standardName: 'NETA MTS Section 9 & Table 100.18 (NFPA 70B)',
+    aiEngine: 'NETA MTS Thermographic Survey AI Specialist (Table 100.18)',
     icon: Thermometer,
     colorGradient: 'from-red-900 via-orange-800 to-slate-900',
     borderColor: 'hover:border-red-400 focus:border-red-500',
     tagColor: 'bg-red-500/20 text-red-800 border-red-300',
     features: [
-      'Chênh Lệch Nhiệt Độ Cùng Tải ΔT_comp (Ngưỡng Mức 4: > 15°C)',
-      'Chênh Lệch Nhiệt Độ Môi Trường ΔT_amb (Ngưỡng Mức 4: > 40°C)',
-      'Phân Cấp Khuyến Nghị 4 Mức (Table 100.18: Repair Immediately)',
-      'Kiểm Tra Điều Kiện Tải Vận Hành Bình Thường (Mục 9.1 - 9.3)'
+      'Chênh Lệch Nhiệt Pha Tương Tự ΔT_comp (Level 1: 1-3°C; Level 2: 4-15°C; Level 4: > 15°C)',
+      'Chênh Lệch Nhiệt Môi Trường ΔT_amb (Level 1: 1-10°C; Level 2: 11-20°C; Level 3: 21-40°C; Level 4: > 40°C)',
+      'Phụ Tải Mạch Tối Thiểu ≥ 40% Định Mức (NETA MTS Section 9.3.3 & NFPA 70B)',
+      'Khuyến Nghị Cấp Bách NETA Table 100.18 (Immediate Isolation & Repair)'
     ]
   },
   {
@@ -412,21 +412,21 @@ export const CHECKLIST_CATALOG: EquipmentChecklistItem[] = [
   {
     id: 'neta-pv',
     category: 'pv',
-    title: 'Hệ Thống Điện Mặt Trời & PV Cell (Solar PV & Cell Thermal IR)',
-    subtitle: 'Chuyên Sâu PV Cell (IR & RGB AI) • IEC 62446-3 & Sitemark • Chuỗi Pin NETA ATS-2025 Mục 7.29',
-    scope: 'Trạm điện mặt trời mặt đất, áp mái công nghiệp (C&I Rooftop), Solar Farm, Giám sát Nhiệt Drone/IR',
-    standardCode: 'IEC 62446-3 & NETA ATS-2025 Mục 7.29',
-    standardName: 'IEC 62446-3 & NETA ATS Sec 7.29 (Volateq / Sitemark)',
-    aiEngine: 'PV Cell Thermal & Solar Specialist AI (IEC 62446-3)',
+    title: 'Hệ Thống Điện Mặt Trời Quang Điện (Solar PV Systems)',
+    subtitle: 'Nghiệm Thu Chuỗi Pin (Array & Strings) • Voc, Isc • Điện Trở Cách Điện DC • NETA ATS-2025 Mục 7.25 / 7.29',
+    scope: 'Trạm điện mặt trời mặt đất, áp mái công nghiệp (C&I Rooftop), Solar Farm 1500V/1000V DC',
+    standardCode: 'ANSI/NETA ATS-2025 Mục 7.25 / 7.29',
+    standardName: 'NETA ATS-2025 Sec 7.25 & IEC 62446-1 (Electrical Testing)',
+    aiEngine: 'Solar PV Systems Specialist AI (NETA ATS-2025 Sec 7.25)',
     icon: Sun,
     colorGradient: 'from-amber-500 via-orange-500 to-amber-700',
     borderColor: 'hover:border-amber-400 focus:border-amber-500',
     tagColor: 'bg-amber-500/20 text-amber-800 border-amber-300',
     features: [
-      'Phân Tích Ảnh Nhiệt IR & Thực Tế RGB (IEC 62446-3)',
-      'Thư Viện Mẫu Lỗi Sitemark / Volateq (Hotspot, Bypass, PID, JB)',
-      'Ma Trận 3 Chiều: Severity (Level 1-4), Cause & Action',
-      'Đo Lệch Voc Song Song (≤ 5%), I-V Curve & Tiếp Địa (≤ 5Ω)'
+      'Đo Lệch Điện Áp Hở Mạch Voc Song Song (Bắt Buộc ≤ 5%)',
+      'Đo Điện Trở Cách Điện Khô DC Chuỗi Pin (Hệ 1500V Bắt Buộc ≥ 1.0 MΩ)',
+      'Đặc Tính Đường Cong I-V & Dòng Ngắn Mạch Isc Đồng Đều',
+      'Điện Trở Tiếp Địa Khung Giàn Lưới Đất Mục 7.13 (Bắt Buộc ≤ 5.0 Ω)'
     ]
   },
   {
@@ -536,13 +536,17 @@ interface Props {
   onSelectMode: (mode: FieldEntryMode) => void;
   reportsCount?: number;
   onNavigateToReports?: () => void;
+  onSwitchToMts?: () => void;
+  onOpenUniversalReport?: (mode: FieldEntryMode) => void;
 }
 
 export const EquipmentChecklistSelector: React.FC<Props> = ({
   currentMode,
   onSelectMode,
   reportsCount = 0,
-  onNavigateToReports
+  onNavigateToReports,
+  onSwitchToMts,
+  onOpenUniversalReport
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'grounding' | 'batteries' | 'ups' | 'relays' | 'motors' | 'pd' | 'thermography' | 'switches' | 'cables' | 'evse' | 'pv' | 'transformers' | 'bess' | 'standard'>('all');
@@ -668,7 +672,31 @@ export const EquipmentChecklistSelector: React.FC<Props> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-end md:self-center">
+        <div className="flex items-center gap-2 self-end md:self-center flex-wrap">
+          {onOpenUniversalReport && (
+            <button
+              type="button"
+              onClick={() => onOpenUniversalReport(currentMode)}
+              className="px-3 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white flex items-center gap-1.5 transition-all shadow-md shadow-blue-500/20 active:scale-95 border border-blue-400"
+              title="Xem Báo Cáo Thẩm Định AI Chuẩn TEV 4 Phần"
+            >
+              <Sparkles size={14} className="text-amber-400" />
+              <span>Báo Cáo Chuẩn TEV AI ⚡</span>
+            </button>
+          )}
+
+          {onSwitchToMts && (
+            <button
+              type="button"
+              onClick={onSwitchToMts}
+              className="px-3 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 text-slate-950 flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/20 active:scale-95 border border-amber-300"
+              title="Chuyển sang Module Thí Nghiệm Bảo Trì ANSI/NETA MTS-2023"
+            >
+              <Droplets size={14} className="text-slate-950" />
+              <span>Module MTS-2023 Bảo Trì →</span>
+            </button>
+          )}
+
           {onNavigateToReports && (
             <button
               onClick={onNavigateToReports}

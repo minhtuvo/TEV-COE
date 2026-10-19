@@ -25,6 +25,10 @@ import {
 } from 'lucide-react';
 import { NetaSf6SwitchInputPayload, NetaSf6SwitchEvaluationResult } from '../../server/netaSf6SwitchAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -80,7 +84,7 @@ const SAMPLE_SF6_SWITCH_DATA: NetaSf6SwitchInputPayload = {
 };
 
 export const NetaSf6SwitchChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaSf6SwitchInputPayload>(SAMPLE_SF6_SWITCH_DATA);
+  const [data, setData] = useAtsFormSync<NetaSf6SwitchInputPayload>('neta-sf6-switch', SAMPLE_SF6_SWITCH_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaSf6SwitchEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -399,33 +403,33 @@ export const NetaSf6SwitchChecklist: React.FC<Props> = ({ onSaveReport, onNaviga
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="text-slate-600 font-medium block mb-1">Tên Dự Án / Trạm Phân Phối:</label>
-                <input
-                  type="text"
+                <CustomerSelectDropdown
+                  label="Mã & Tên Khách Hàng (Dự Án / Trạm)"
                   value={data.site_info.project_name}
-                  onChange={(e) => setData({
+                  onChange={(val, cust) => setData({
                     ...data,
-                    site_info: { ...data.site_info, project_name: e.target.value }
+                    site_info: { ...data.site_info, project_name: cust?.name || val }
                   })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+                  placeholder="Chọn hoặc bổ sung mã khách hàng..."
                 />
               </div>
 
               <div>
-                <label className="text-slate-600 font-medium block mb-1">Mã Định Danh Cầu Dao (Switch Tag):</label>
-                <input
-                  type="text"
+                <EquipmentSelectDropdown
+                  label="Tên & Mã Định Danh Cầu Dao (Switch Tag)"
                   value={data.site_info.switch_tag}
-                  onChange={(e) => setData({
+                  filterType="Máy cắt"
+                  selectedCustomer={data.site_info.project_name}
+                  onChange={(val, eq) => setData({
                     ...data,
-                    site_info: { ...data.site_info, switch_tag: e.target.value }
+                    site_info: { ...data.site_info, switch_tag: eq?.id || val }
                   })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-teal-500 font-bold text-teal-700 font-mono"
+                  placeholder="Chọn hoặc bổ sung máy cắt/cầu dao..."
                 />
               </div>
 
               <div>
-                <label className="text-slate-600 font-medium block mb-1">Thông Số Định Mức (Rating):</label>
+                <label className="text-slate-600 font-semibold block mb-1">Thông Số Định Mức (Rating):</label>
                 <input
                   type="text"
                   value={data.site_info.switch_rating}
@@ -437,21 +441,19 @@ export const NetaSf6SwitchChecklist: React.FC<Props> = ({ onSaveReport, onNaviga
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="text-slate-600 font-medium block mb-1">Kỹ Sư FSE Phụ Trách:</label>
-                  <input
-                    type="text"
+                  <FseEngineerDropdown
+                    label="Kỹ Sư FSE Phụ Trách"
                     value={data.site_info.fse_name}
-                    onChange={(e) => setData({
+                    onChange={(val) => setData({
                       ...data,
-                      site_info: { ...data.site_info, fse_name: e.target.value }
+                      site_info: { ...data.site_info, fse_name: val }
                     })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
                   />
                 </div>
                 <div>
-                  <label className="text-slate-600 font-medium block mb-1">Ngày Thí Nghiệm:</label>
+                  <label className="text-slate-600 font-semibold block mb-1">Ngày Thí Nghiệm:</label>
                   <input
                     type="date"
                     value={data.site_info.test_date}

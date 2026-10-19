@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { NetaEvseInputPayload, NetaEvseEvaluationResult } from '../../server/netaEvseAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -69,7 +70,7 @@ const SAMPLE_EVSE_DATA: NetaEvseInputPayload = {
 };
 
 export const NetaEvseChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaEvseInputPayload>(SAMPLE_EVSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaEvseInputPayload>('neta-evse', SAMPLE_EVSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaEvseEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);

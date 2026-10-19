@@ -32,10 +32,15 @@ import {
 } from 'lucide-react';
 import { NetaLvBreakerInputPayload, NetaLvBreakerEvaluationResult } from '../../server/netaLvBreakerAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
   onNavigateToReports?: () => void;
+  onSwitchToUniversalReport?: () => void;
 }
 
 const SAMPLE_LV_BREAKER_DEFECT_DATA: NetaLvBreakerInputPayload = {
@@ -145,8 +150,15 @@ const SAMPLE_LV_BREAKER_PASS_DATA: NetaLvBreakerInputPayload = {
   }
 };
 
-export const NetaLvBreakerChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaLvBreakerInputPayload>(SAMPLE_LV_BREAKER_DEFECT_DATA);
+export const NetaLvBreakerChecklist: React.FC<Props> = ({
+  onSaveReport,
+  onNavigateToReports,
+  onSwitchToUniversalReport
+}) => {
+  const [data, setData] = useAtsFormSync<NetaLvBreakerInputPayload>(
+    'neta-lv-breaker',
+    SAMPLE_LV_BREAKER_DEFECT_DATA
+  );
   const [activeTab, setActiveTab] = useState<'electrical' | 'visual' | 'ai-report' | 'ai-prompt'>('electrical');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaLvBreakerEvaluationResult | null>(null);
@@ -568,6 +580,46 @@ Khi nhận dữ liệu JSON từ FSE, hãy phân tích và trả về phản h�
             <Save size={14} />
             Lưu CMMS
           </button>
+        </div>
+      </div>
+
+      {/* THÔNG TIN HIỆN TRƯỜNG & MÃ THIẾT BỊ / KHÁCH HÀNG / FSE */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+        <EquipmentSelectDropdown
+          label="Tên & Mã Máy Cắt (Tag)"
+          value={data.site_info.breaker_tag}
+          filterType="Máy cắt"
+          selectedCustomer={data.site_info.project_name}
+          onChange={(val, eq) =>
+            setData({ ...data, site_info: { ...data.site_info, breaker_tag: eq?.id || val } })
+          }
+          placeholder="Chọn hoặc bổ sung máy cắt..."
+        />
+        <CustomerSelectDropdown
+          label="Mã & Tên Khách Hàng (Dự án)"
+          value={data.site_info.project_name}
+          onChange={(val, cust) =>
+            setData({ ...data, site_info: { ...data.site_info, project_name: cust?.name || val } })
+          }
+          placeholder="Chọn hoặc bổ sung khách hàng..."
+        />
+        <FseEngineerDropdown
+          label="Kỹ Sư FSE Kiểm Tra"
+          value={data.site_info.fse_name}
+          onChange={(val) =>
+            setData({ ...data, site_info: { ...data.site_info, fse_name: val } })
+          }
+        />
+        <div>
+          <label className="text-xs font-semibold text-slate-700 mb-1 block">Ngày Kiểm Tra</label>
+          <input
+            type="date"
+            value={data.site_info.test_date}
+            onChange={(e) =>
+              setData({ ...data, site_info: { ...data.site_info, test_date: e.target.value } })
+            }
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
         </div>
       </div>
 

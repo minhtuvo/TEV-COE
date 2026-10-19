@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { NetaCableInputPayload, NetaCableEvaluationResult } from '../../server/netaCableAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -75,7 +76,7 @@ const SAMPLE_CABLE_DATA: NetaCableInputPayload = {
 };
 
 export const NetaCableChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaCableInputPayload>(SAMPLE_CABLE_DATA);
+  const [data, setData] = useAtsFormSync<NetaCableInputPayload>('neta-cable', SAMPLE_CABLE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaCableEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);

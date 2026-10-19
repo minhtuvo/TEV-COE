@@ -24,6 +24,7 @@ interface MobileBottomNavProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   onOpenInstallModal: () => void;
+  onOpenMasterDirectory?: () => void;
   onOpenSidebar: () => void;
   onLogout: () => void;
   userRole?: string | null;
@@ -33,6 +34,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   activeTab,
   onTabChange,
   onOpenInstallModal,
+  onOpenMasterDirectory,
   onOpenSidebar,
   onLogout,
   userRole
@@ -84,6 +86,23 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 
             {/* Quick Actions Grid */}
             <div className="grid grid-cols-2 gap-2 text-xs">
+              <button
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  if (onOpenMasterDirectory) onOpenMasterDirectory();
+                }}
+                className="p-3 rounded-xl border border-amber-300 bg-amber-50/80 text-amber-950 font-bold flex items-center gap-2.5 transition-colors shadow-2xs"
+              >
+                <FileSpreadsheet size={18} className="text-amber-600 flex-shrink-0" />
+                <div className="text-left">
+                  <div className="font-bold flex items-center gap-1">
+                    <span>Quản lý dự án</span>
+                    <span className="text-[9px] bg-amber-200 text-amber-900 px-1 rounded font-mono">PMP</span>
+                  </div>
+                  <div className="text-[10px] text-amber-800">Soạn dự án & Thiết bị</div>
+                </div>
+              </button>
+
               <button
                 onClick={() => handleSelectTab('deep-analysis')}
                 className={`p-3 rounded-xl border flex items-center gap-2.5 transition-colors ${

@@ -35,11 +35,40 @@ import {
   UserCheck,
   Lock,
   ArrowRight,
-  FileCheck
+  FileCheck,
+  Briefcase,
+  ListChecks,
+  FolderPlus,
+  Cable,
+  FileCheck2,
+  Sparkles,
+  Scale,
+  Gauge,
+  ShieldAlert
 } from 'lucide-react';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { parseVersionTimestamp } from '../utils/syncReconciliationService';
+import {
+  getRegisteredProjects,
+  ProjectMasterRecord,
+  ProjectEquipmentItem,
+  EVT_PROJECTS_UPDATED,
+  EVT_NAVIGATE_TO_NETA_FORM,
+  getNextCustomerId
+} from '../services/masterDirectoryService';
+import { MasterDirectorySheetManagerModal } from './MasterDirectorySheetManagerModal';
+import { NetaAtsUniversalReportView } from './NetaAtsUniversalReportView';
+import {
+  NETA_ATS_23_MASTER_SPECS,
+  NetaAtsSpecificationDef,
+  NetaAtsTestItem
+} from '../data/netaAtsMasterSpecifications';
+import {
+  buildDynamicAtsSpec,
+  saveAtsPayload,
+  getAtsPayload
+} from '../services/netaAtsDataService';
 
 export interface CustomerItem {
   id: string;
@@ -107,6 +136,7 @@ interface Props {
   onSaveCustomer: (customer: CustomerItem) => Promise<void>;
   onSaveEquipment: (equipment: EquipmentItem) => Promise<void>;
   onSaveWorkOrder: (wo: WorkOrderItem, syncToSheetsImmediately?: boolean) => Promise<void>;
+  onSaveReport?: (reportData: any) => Promise<void> | void;
   onSyncAllToSheets: () => Promise<void>;
   onFetchFromSheets: () => Promise<void>;
   isSyncing: boolean;
@@ -213,7 +243,7 @@ export const generateNextWoAndWpIds = (orders: { id?: string; workPermitId?: str
     }
   });
 
-  const nextSeq = Math.max(maxWoSeq, maxWpSeq, (orders || []).length) + 1;
+  const nextSeq = Math.max(maxWoSeq, maxWpSeq) + 1;
   const sttStr = String(nextSeq).padStart(3, '0');
 
   return {
@@ -232,6 +262,7 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
   onSaveCustomer,
   onSaveEquipment,
   onSaveWorkOrder,
+  onSaveReport,
   onSyncAllToSheets,
   onFetchFromSheets,
   isSyncing,
@@ -305,8 +336,15 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
     address: ''
   });
 
-  // Step 2: Equipment Selection State
-  const [equipmentSelectMode, setEquipmentSelectMode] = useState<'existing' | 'scan' | 'manual'>('existing');
+  // Project Pre-allocation State (Sheet 'duan')
+  const [projectsList, setProjectsList] = useState<ProjectMasterRecord[]>(() => getRegisteredProjects());
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [projectSearch, setProjectSearch] = useState<string>('');
+  const [showProjectDropdown, setShowProjectDropdown] = useState<boolean>(false);
+  const [showMasterDirectoryModal, setShowMasterDirectoryModal] = useState<boolean>(false);
+
+  // Step 2: Equipment Selection State (Now supports 'project' with KKS codes)
+  const [equipmentSelectMode, setEquipmentSelectMode] = useState<'project' | 'existing' | 'scan' | 'manual'>('project');
   const [selectedEquipmentId, setSelectedEquipmentId] = useState<string>('');
   const [equipmentSearch, setEquipmentSearch] = useState('');
   const [showEquipmentDropdown, setShowEquipmentDropdown] = useState(false);
@@ -326,7 +364,46 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
   // Selected Equipment Type (for dynamic specs)
   const [currentEqType, setCurrentEqType] = useState<string>('Máy cắt');
 
-  // Step 3: Dynamic Technical Specs State
+  // Modal to open full NETA ATS 23-spec Universal Report / Checklist
+  const [showNetaUniversalModal, setShowNetaUniversalModal] = useState<boolean>(false);
+
+  // Helper to normalize equipment type to the standard categories
+  const resolveEquipmentType = (type?: string): string => {
+    if (!type) return 'Máy cắt';
+    const t = type.toLowerCase();
+    if (t.includes('cáp') || t.includes('cable') || t.includes('feeder') || t.includes('đoạn cáp')) return 'Cáp điện';
+    if (t.includes('tiếp địa') || t.includes('ground') || t.includes('earth') || t.includes('nối đất')) return 'Tiếp địa';
+    if (t.includes('rơ le') || t.includes('relay') || t.includes('bảo vệ')) return 'Rơ le bảo vệ';
+    if (t.includes('pin') || t.includes('ups') || t.includes('battery') || t.includes('ắc quy') || t.includes('bess')) return 'Pin & UPS';
+    if (t.includes('biến áp') || t.includes('transformer') || t.includes('mba')) return 'Máy biến áp';
+    if (t.includes('cắt') || t.includes('breaker') || t.includes('vcb') || t.includes('acb') || t.includes('mcb')) return 'Máy cắt';
+    if (t.includes('động cơ') || t.includes('motor')) return 'Động cơ';
+    if (t.includes('phát') || t.includes('generator') || t.includes('genset')) return 'Máy phát';
+    if (t.includes('tủ') || t.includes('switchgear') || t.includes('rmu') || t.includes('ngăn lộ')) return 'Tủ điện';
+    return type;
+  };
+
+  // Helper to map equipment category to official NETA ATS specification ID
+  const getSpecIdForType = (type: string): string => {
+    const t = (type || '').toLowerCase();
+    if (t.includes('cáp hạ') || t.includes('cable-lv') || t.includes('0.4kv') || t.includes('hạ thế') || t.includes('hạ áp')) return 'neta-cable-lv';
+    if (t.includes('cáp') || t.includes('cable') || t.includes('feeder')) return 'neta-cable';
+    if (t.includes('tiếp địa') || t.includes('ground') || t.includes('earth') || t.includes('nối đất')) return 'neta-grounding';
+    if (t.includes('flooded') || t.includes('ngập') || t.includes('axit')) return 'neta-battery-flooded';
+    if (t.includes('pin') || t.includes('ups') || t.includes('battery') || t.includes('ắc quy')) return 'neta-battery-vrla';
+    if (t.includes('rơ le') || t.includes('relay')) return 'neta-relay';
+    if (t.includes('inverter') || t.includes('pv') || t.includes('solar') || t.includes('biến tần')) return 'neta-pv';
+    if (t.includes('cắt') || t.includes('breaker') || t.includes('vcb') || t.includes('acb') || t.includes('mcb')) return 'neta-lv-breaker';
+    if (t.includes('biến áp khô') || t.includes('dry')) return 'neta-dry-type';
+    if (t.includes('biến áp') || t.includes('transformer') || t.includes('mba')) return 'neta-liquid-transformer';
+    if (t.includes('tủ') || t.includes('switchgear') || t.includes('rmu')) return 'neta-switchgear';
+    if (t.includes('động cơ') || t.includes('motor')) return 'neta-motor';
+    if (t.includes('phát') || t.includes('generator') || t.includes('genset')) return 'neta-generator';
+    if (t.includes('ats') || t.includes('chuyển nguồn')) return 'neta-ats';
+    return 'neta-cable';
+  };
+
+  // Step 3: Dynamic Technical Specs State (Full NETA ATS categories)
   const [techSpecs, setTechSpecs] = useState<Record<string, any>>({
     // Breaker specs
     ratedVoltageKv: '24',
@@ -402,8 +479,77 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
     trfDgaCo: '210',
     trfDgaCo2: '1800',
     trfBreakdownKv: '68',
-    trfMoisturePpm: '12'
+    trfMoisturePpm: '12',
+
+    // Cable (Cáp điện) specs - ANSI/NETA ATS 7.3 (LV / MV & DC Solar Inverter)
+    cableVoltageRating: '1000V DC / 0.6-1kV',
+    cableSizeMm2: '1x6mm2 DC Solar Feeder',
+    cableLengthM: '150',
+    cableTestVoltageKv: '1.0kV DC',
+    cableIrPhasePhaseMo: '5000',
+    cableIrPhaseEarthMo: '4500',
+    cableHipotVoltageKv: '2.5kV DC',
+    cableLeakageCurrentUa: '0.8',
+    cableShieldContinuity: 'Đạt (Pass)',
+    cableConductorResistanceMo: '3.08',
+    cableAtsStatus: 'Đạt tiêu chuẩn ANSI/NETA ATS Mục 7.3.2',
+
+    // Grounding (Tiếp địa) specs - ANSI/NETA ATS 7.13 & IEEE 81
+    gndSystemType: 'Lưới tiếp địa trạm TBA & Inverter',
+    gndTestMethod: 'Fall-of-Potential 3 cực',
+    gndResistanceOhm: '0.65',
+    gndRequiredMaxOhm: '1.0',
+    gndEquipotentialBondingMo: '15',
+    gndVisualCondition: 'Tốt (Mối hàn hóa nhiệt chuẩn, không ăn mòn)',
+    gndAtsStatus: 'Đạt tiêu chuẩn ANSI/NETA ATS Mục 7.13',
+
+    // Battery & UPS (Pin & UPS) specs - ANSI/NETA ATS 7.18 & 7.22
+    batSystemType: '110V DC Giàn Ắc quy VRLA AGM',
+    batCapacityAh: '200Ah',
+    batTotalVoltageV: '124.5',
+    batFloatCurrentA: '0.45',
+    batCellInternalResMo: '0.85',
+    batMinCellVoltageV: '2.24',
+    batMaxCellVoltageV: '2.26',
+    batLoadTestDurationMin: '60',
+    batAtsStatus: 'Đạt tiêu chuẩn ANSI/NETA ATS Mục 7.18',
+
+    // Protective Relay (Rơ le bảo vệ) specs - ANSI/NETA ATS 7.9
+    relayModel: 'SEL-751 / Schneider Micom P122',
+    relayFunctionCodes: '50/51, 50N/51N, 87, 27/59',
+    relayPickupCurrentA: '5.02',
+    relayTripTimeMs: '120',
+    relayErrorPct: '0.4%',
+    relayTripContactTest: 'Đóng cắt tốt / Trip Test OK',
+    relayAtsStatus: 'Đạt tiêu chuẩn ANSI/NETA ATS Mục 7.9',
+
+    // Inverter specs (Solar & BESS)
+    invRatedPowerKw: '250kW',
+    invDcInputVoltageV: '850V DC',
+    invAcOutputVoltageV: '400V AC',
+    invThdCurrentPct: '1.8%',
+    invAntiIslanding: 'Tác động ngắt < 100ms đạt'
   });
+
+  // Active NETA specification ID based on selected equipment type
+  const activeNetaSpecId = useMemo(() => {
+    return getSpecIdForType(currentEqType);
+  }, [currentEqType]);
+
+  // Dynamic NETA ATS specification definition
+  const activeNetaSpec = useMemo(() => {
+    return buildDynamicAtsSpec(activeNetaSpecId);
+  }, [activeNetaSpecId, techSpecs]);
+
+  // Real-time editable evaluation items for the active NETA form
+  const [netaFormItems, setNetaFormItems] = useState<NetaAtsTestItem[]>([]);
+
+  // Update NETA form items whenever the spec or equipment changes
+  useEffect(() => {
+    if (activeNetaSpec && activeNetaSpec.evaluationItems) {
+      setNetaFormItems(activeNetaSpec.evaluationItems);
+    }
+  }, [activeNetaSpecId]);
 
   // Step 4: Work Order (WO) Form State - Exactly 23 Fields
   const [woData, setWoData] = useState<Partial<WorkOrderItem>>(() => {
@@ -506,7 +652,8 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
   useEffect(() => {
     if (currentEquipment) {
       setSelectedEquipmentId(currentEquipment.id);
-      setCurrentEqType(currentEquipment.type || 'Máy cắt');
+      const resolved = resolveEquipmentType(currentEquipment.type);
+      setCurrentEqType(resolved);
       setWoData(prev => ({
         ...prev,
         equipmentId: currentEquipment.id,
@@ -519,10 +666,134 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
     }
   }, [currentEquipment]);
 
-  // Generate next IDs
+  // Sync projects list across app
+  useEffect(() => {
+    const handlePrjUpdate = () => setProjectsList(getRegisteredProjects());
+    window.addEventListener(EVT_PROJECTS_UPDATED, handlePrjUpdate);
+    return () => window.removeEventListener(EVT_PROJECTS_UPDATED, handlePrjUpdate);
+  }, []);
+
+  // Handle direct navigation to NETA Field Form from Project Sheet / Master Directory
+  const handleNavigateToNetaFromProject = (
+    project: ProjectMasterRecord,
+    equipment: ProjectEquipmentItem,
+    standard: 'ats' | 'mts' = 'ats'
+  ) => {
+    // 1. Select the project
+    setSelectedProjectId(project.id);
+    setProjectSearch('');
+    setShowProjectDropdown(false);
+
+    // Auto-select Customer from project
+    if (project.customerId) {
+      setSelectedCustomerId(project.customerId);
+    }
+
+    // 2. Resolve equipment and category
+    const resolved = resolveEquipmentType(equipment.type);
+    setCurrentEqType(resolved);
+    setSelectedEquipmentId(equipment.kksCode || equipment.id);
+    setEquipmentSelectMode('project');
+
+    // 3. Populate Work Order
+    const stdLabel = standard === 'mts' ? 'ANSI/NETA MTS-2023 (MST)' : 'ANSI/NETA ATS-2025 (ATS)';
+    setWoData(prev => ({
+      ...prev,
+      projectId: project.id,
+      customer: project.customerName,
+      customerId: project.customerId,
+      factory: project.factory || prev.factory || project.customerName,
+      equipmentId: equipment.kksCode || equipment.id,
+      equipmentName: equipment.kksCode ? `${equipment.kksCode} - ${equipment.name}` : equipment.name,
+      equipmentType: resolved,
+      substation: equipment.location || prev.substation,
+      assignedFse: project.leadFse || prev.assignedFse,
+      title: `Kiểm định & thử nghiệm ${standard === 'mts' ? 'NETA MST' : 'NETA ATS'} - ${equipment.name} (${equipment.kksCode})`,
+      description: `Dự án: [${project.id}] ${project.name}. Thiết bị: [${equipment.kksCode}] ${equipment.name} (${equipment.type}). Tiêu chuẩn kiểm định: ${stdLabel} tại ${project.factory || project.customerName}.`
+    }));
+
+    // 4. Update technical specification defaults
+    if (equipment.specs) {
+      setTechSpecs(prev => ({
+        ...prev,
+        rawSpecs: equipment.specs,
+        cableVoltageRating: resolved === 'Cáp điện' ? (equipment.specs || prev.cableVoltageRating || '22kV 3x240mm2 Cu/XLPE/PVC') : prev.cableVoltageRating
+      }));
+    }
+
+    // 5. Close master directory modal
+    setShowMasterDirectoryModal(false);
+    setProjectsList(getRegisteredProjects());
+
+    // 6. Navigate directly to top-level NETA ATS/MTS Form via App.tsx
+    window.dispatchEvent(
+      new CustomEvent(EVT_NAVIGATE_TO_NETA_FORM, {
+        detail: { project, equipment, standard }
+      })
+    );
+  };
+
+  // Listen to cross-modal navigation events
+  useEffect(() => {
+    const handleSelectWo = (e: any) => {
+      if (e.detail) {
+        handleSelectProject(e.detail);
+        setShowMasterDirectoryModal(false);
+      }
+    };
+    window.addEventListener('tev_select_project_for_wo', handleSelectWo);
+    return () => {
+      window.removeEventListener('tev_select_project_for_wo', handleSelectWo);
+    };
+  }, [projectsList]);
+
+  const currentProject = projectsList.find(p => p.id === selectedProjectId);
+
+  // Handle project selection from site
+  const handleSelectProject = (prj: ProjectMasterRecord) => {
+    setSelectedProjectId(prj.id);
+    setProjectSearch('');
+    setShowProjectDropdown(false);
+
+    // Auto-select Customer from project
+    if (prj.customerId) {
+      setSelectedCustomerId(prj.customerId);
+    }
+
+    // Auto-populate Work Order fields
+    setWoData(prev => ({
+      ...prev,
+      customer: prj.customerName,
+      customerId: prj.customerId,
+      factory: prj.factory || prev.factory || '',
+      title: `Kiểm định & thử nghiệm NETA ATS - ${prj.name}`,
+      description: `Dự án: [${prj.id}] ${prj.name}. Thực hiện thử nghiệm thiết bị điện theo tiêu chuẩn ANSI/NETA ATS-2025 tại ${prj.factory}.`
+    }));
+
+    // Switch equipment tab to 'project'
+    setEquipmentSelectMode('project');
+  };
+
+  // Handle single equipment pick from project (with KKS code)
+  const handleSelectProjectEquipment = (item: ProjectEquipmentItem) => {
+    setSelectedEquipmentId(item.kksCode);
+    const resolved = resolveEquipmentType(item.type);
+    setCurrentEqType(resolved);
+    setWoData(prev => ({
+      ...prev,
+      equipmentId: item.kksCode,
+      equipmentName: item.name,
+      factory: currentProject?.factory || prev.factory || ''
+    }));
+
+    if (item.specs) {
+      setTechSpecs(prev => ({ ...prev, rawSpecs: item.specs }));
+    }
+  };
+
+  // Generate next customer IDs strictly adhering to KHXXX
   const handleGenerateNewCustomer = () => {
-    const nextNum = customers.length + 1;
-    const genId = `KH-${String(nextNum).padStart(3, '0')}`;
+    const genId = getNextCustomerId(customers as any);
     setNewCustomer({
       id: genId,
       name: '',
@@ -539,8 +810,19 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
       alert('Vui lòng nhập tên khách hàng');
       return;
     }
+    let cleanId = newCustomer.id.trim();
+    if (!cleanId) {
+      cleanId = getNextCustomerId(customers as any);
+    } else {
+      cleanId = cleanId.toUpperCase();
+      if (!cleanId.startsWith('KH')) {
+        const digits = cleanId.replace(/\D/g, '');
+        cleanId = `KH${(digits || '1').padStart(3, '0')}`;
+      }
+    }
+
     const customerItem: CustomerItem = {
-      id: newCustomer.id || `KH-${Date.now().toString().slice(-4)}`,
+      id: cleanId,
       name: newCustomer.name,
       factories: newCustomer.factory ? [newCustomer.factory] : [],
       phone: newCustomer.phone,
@@ -554,7 +836,7 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
       await onSaveCustomer(customerItem);
       setSelectedCustomerId(customerItem.id);
       setShowNewCustomerModal(false);
-      setSyncStatusMsg(`Đã tạo khách hàng "${customerItem.name}" và đồng bộ 2 chiều!`);
+      setSyncStatusMsg(`Đã tạo khách hàng "${customerItem.name}" (${customerItem.id}) chuẩn KHXXX và đồng bộ 2 chiều!`);
       setTimeout(() => setSyncStatusMsg(null), 4000);
     } catch (e: any) {
       alert('Lỗi tạo khách hàng: ' + e.message);
@@ -691,16 +973,28 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
     setSavingLoading(true);
     try {
       const now = new Date().toISOString();
+      const { nextWoId, nextWpId } = generateNextWoAndWpIds(localWorkOrders);
+
+      // Resolve customerId and format strictly KHXXX
+      let resolvedCustomerId = woData.customerId || '';
+      if (!resolvedCustomerId && woData.customer) {
+        const found = customers.find(c => 
+          c.name.toLowerCase() === woData.customer.toLowerCase() || 
+          c.id.toLowerCase() === woData.customer.toLowerCase()
+        );
+        if (found) resolvedCustomerId = found.id;
+      }
+
       const finalWO: WorkOrderItem = {
-        id: woData.id || `WO-${Date.now().toString().slice(-6)}`,
-        workPermitId: woData.workPermitId || `WP-${Date.now().toString().slice(-6)}`,
+        id: (woData.id && /^WO-\d{4}-\d+$/i.test(woData.id)) ? woData.id : nextWoId,
+        workPermitId: (woData.workPermitId && /^WP-\d{4}-\d+$/i.test(woData.workPermitId)) ? woData.workPermitId : nextWpId,
         title: woData.title,
         description: woData.description || '',
         equipmentId: woData.equipmentId,
         equipmentName: woData.equipmentName || (currentEquipment?.name || ''),
         failureCode: woData.failureCode || 'PM-ROUTINE',
         customer: woData.customer,
-        customerId: woData.customerId || '',
+        customerId: resolvedCustomerId,
         factory: woData.factory || '',
         type: woData.type || 'Kiểm định thử nghiệm (Testing)',
         isUnplanned: !!woData.isUnplanned,
@@ -763,11 +1057,11 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
       setTimeout(() => setSaveSuccessNotice(null), 6000);
 
       // Auto generate next WO (WO-YYYY-STT) and WP (WP-YYYY-STT) code for subsequent work
-      const { nextWoId, nextWpId } = generateNextWoAndWpIds(updatedList);
+      const subsequent = generateNextWoAndWpIds(updatedList);
       setWoData(prev => ({
         ...prev,
-        id: nextWoId,
-        workPermitId: nextWpId,
+        id: subsequent.nextWoId,
+        workPermitId: subsequent.nextWpId,
         downtimeStart: '',
         repairStart: '',
         repairEnd: '',
@@ -1014,8 +1308,140 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
       {/* 4-STEP FIELD ENTRY FORM */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* LEFT COLUMN: STEPS 1 & 2 (CUSTOMER & EQUIPMENT UNIFIED SELECTION) */}
+        {/* LEFT COLUMN: STEPS 0, 1 & 2 (PROJECT, CUSTOMER & EQUIPMENT UNIFIED SELECTION) */}
         <div className="lg:col-span-5 space-y-6">
+
+          {/* STEP 0: DỰ ÁN CÔNG TÁC HIỆN TRƯỜNG (AUTO-LOAD KHÁCH HÀNG & THIẾT BỊ KKS) */}
+          <div className="bg-gradient-to-r from-indigo-900 via-indigo-950 to-slate-900 rounded-2xl p-4 sm:p-5 border border-indigo-700/60 shadow-md text-white space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-xs">
+                  <Briefcase size={16} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                      Field Project Prep
+                    </span>
+                    <span className="text-xs text-slate-300 font-medium">Sheet Dự án</span>
+                  </div>
+                  <h3 className="text-sm font-bold text-white mt-0.5">
+                    Chọn Mã Dự Án Hiện Trường
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowMasterDirectoryModal(true)}
+                className="px-3 py-1.5 bg-indigo-700/80 hover:bg-indigo-600 text-white border border-indigo-500/50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs"
+                title="Mở bảng quản lý & soạn thiết bị cho dự án mới"
+              >
+                <FolderPlus size={14} className="text-amber-300" />
+                <span>+ Soạn Dự Án</span>
+              </button>
+            </div>
+
+            {/* Dropdown Project Selector */}
+            <div className="relative">
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Nhập hoặc chọn Mã Dự Án (VD: DA-2026-001, DA-2026-002...)..."
+                  value={projectSearch || (currentProject ? `${currentProject.id} - ${currentProject.name}` : '')}
+                  onChange={(e) => {
+                    setProjectSearch(e.target.value);
+                    setShowProjectDropdown(true);
+                  }}
+                  onFocus={() => setShowProjectDropdown(true)}
+                  className="w-full pl-9 pr-8 py-2.5 bg-slate-800/90 border border-indigo-500/40 focus:bg-slate-900 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 rounded-xl text-xs font-bold text-white outline-none transition-all placeholder:text-slate-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowProjectDropdown(!showProjectDropdown)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-white"
+                >
+                  <ChevronDown size={16} />
+                </button>
+              </div>
+
+              {/* Project Dropdown Results */}
+              {showProjectDropdown && (
+                <div className="absolute z-40 w-full mt-1.5 bg-slate-900 border border-indigo-700/60 rounded-xl shadow-2xl max-h-64 overflow-y-auto divide-y divide-slate-800 animate-in fade-in-50 duration-150">
+                  {projectsList
+                    .filter(p =>
+                      !projectSearch ||
+                      p.id.toLowerCase().includes(projectSearch.toLowerCase()) ||
+                      p.name.toLowerCase().includes(projectSearch.toLowerCase()) ||
+                      p.customerName.toLowerCase().includes(projectSearch.toLowerCase())
+                    )
+                    .map(prj => (
+                      <div
+                        key={prj.id}
+                        onClick={() => handleSelectProject(prj)}
+                        className={`p-3 hover:bg-indigo-900/60 cursor-pointer transition-colors flex items-center justify-between text-xs ${
+                          selectedProjectId === prj.id ? 'bg-indigo-900/90 font-bold text-amber-300' : 'text-slate-200'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold flex items-center gap-2">
+                            <span className="font-mono text-amber-400">{prj.id}</span>
+                            <span className="text-white">{prj.name}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            Khách hàng: <span className="text-blue-300 font-semibold">{prj.customerId} - {prj.customerName}</span> • Trạm: {prj.factory} • <span className="text-amber-300 font-mono font-semibold">{prj.equipmentList?.length || 0} thiết bị KKS</span>
+                          </div>
+                        </div>
+                        {selectedProjectId === prj.id && (
+                          <Check size={16} className="text-amber-400 shrink-0" />
+                        )}
+                      </div>
+                    ))}
+
+                  <div
+                    onClick={() => {
+                      setShowProjectDropdown(false);
+                      setShowMasterDirectoryModal(true);
+                    }}
+                    className="p-2.5 bg-indigo-950/80 hover:bg-indigo-900 text-amber-300 text-xs font-bold cursor-pointer flex items-center gap-1.5 border-t border-indigo-800"
+                  >
+                    <Plus size={14} />
+                    <span>Tạo dự án mới hoặc soạn danh sách thiết bị KKS...</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Active Project Card Preview */}
+            {currentProject ? (
+              <div className="p-3 rounded-xl bg-indigo-950/70 border border-indigo-600/40 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="text-emerald-400 font-bold flex items-center gap-1.5">
+                    <CheckCircle2 size={13} />
+                    <span>Đã nạp dự án: <strong>{currentProject.id}</strong> - {currentProject.name}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    Khách hàng: <strong>{currentProject.customerName}</strong> ({currentProject.factory}) • KKS sẵn sàng: <strong className="text-amber-300 font-mono">{currentProject.equipmentList?.length || 0} thiết bị</strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProjectId('');
+                    setEquipmentSelectMode('existing');
+                  }}
+                  className="text-[10px] text-slate-400 hover:text-white underline self-end sm:self-center"
+                >
+                  Bỏ chọn dự án
+                </button>
+              </div>
+            ) : (
+              <div className="p-2.5 rounded-xl bg-indigo-950/40 border border-dashed border-indigo-700/40 text-slate-400 text-[11px] flex items-center justify-between">
+                <span>Chưa chọn mã dự án. Bạn có thể chọn để tự động load toàn bộ thiết bị KKS.</span>
+              </div>
+            )}
+          </div>
 
           {/* STEP 1: KHÁCH HÀNG (ĐỒNG NHẤT TỪ FILE SHEET KHACHHANG) */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
@@ -1154,41 +1580,161 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* 3 Entry Modes Tabs */}
-            <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-bold text-slate-600">
+            {/* 4 Entry Modes Tabs */}
+            <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl text-xs font-bold text-slate-600">
+              <button
+                type="button"
+                onClick={() => setEquipmentSelectMode('project')}
+                className={`py-1.5 px-1.5 rounded-lg transition-all text-center flex items-center justify-center gap-1 ${
+                  equipmentSelectMode === 'project'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'hover:text-slate-900 text-indigo-700'
+                }`}
+                title="Chọn thiết bị & mã KKS từ dự án đã chuẩn bị"
+              >
+                <Briefcase size={12} />
+                <span className="truncate">Dự Án ({currentProject?.equipmentList?.length || 0})</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setEquipmentSelectMode('existing')}
-                className={`py-1.5 px-2 rounded-lg transition-all text-center ${
+                className={`py-1.5 px-1.5 rounded-lg transition-all text-center ${
                   equipmentSelectMode === 'existing'
                     ? 'bg-white text-blue-700 shadow-xs'
                     : 'hover:text-slate-900'
                 }`}
               >
-                Sẵn có ({filteredEquipment.length})
+                Master ({filteredEquipment.length})
               </button>
               <button
                 type="button"
                 onClick={() => setShowScannerModal(true)}
-                className="py-1.5 px-2 rounded-lg transition-all text-center flex items-center justify-center gap-1 text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
+                className="py-1.5 px-1.5 rounded-lg transition-all text-center flex items-center justify-center gap-1 text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
               >
-                <Camera size={13} />
-                <span>Scan Nameplate</span>
+                <Camera size={12} />
+                <span>Scan</span>
               </button>
               <button
                 type="button"
                 onClick={() => setEquipmentSelectMode('manual')}
-                className={`py-1.5 px-2 rounded-lg transition-all text-center ${
+                className={`py-1.5 px-1.5 rounded-lg transition-all text-center ${
                   equipmentSelectMode === 'manual'
                     ? 'bg-white text-blue-700 shadow-xs'
                     : 'hover:text-slate-900'
                 }`}
               >
-                + Nhập thủ công
+                + Gõ tay
               </button>
             </div>
 
-            {/* MODE A: SELECT FROM EXISTING PRE-PREPARED SHEET THIETBI */}
+            {/* MODE 1: SELECT EQUIPMENT FROM ACTIVE PROJECT (KKS CODE PRE-ALLOCATED) */}
+            {equipmentSelectMode === 'project' && (
+              <div className="space-y-3">
+                {currentProject ? (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                        <ListChecks size={14} className="text-indigo-600" />
+                        Thiết bị trong dự án {currentProject.id}:
+                      </span>
+                      <span className="text-[11px] font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                        {currentProject.equipmentList?.length || 0} thiết bị KKS
+                      </span>
+                    </div>
+
+                    {currentProject.equipmentList && currentProject.equipmentList.length > 0 ? (
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        {currentProject.equipmentList.map((item, idx) => {
+                          const isSelected = (selectedEquipmentId || '').toLowerCase() === item.kksCode.toLowerCase();
+                          return (
+                            <div
+                              key={item.kksCode || idx}
+                              onClick={() => handleSelectProjectEquipment(item)}
+                              className={`p-3 rounded-xl border cursor-pointer transition-all flex items-start justify-between gap-2 ${
+                                isSelected
+                                  ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-400 text-indigo-950 shadow-xs'
+                                  : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-black text-xs text-indigo-700">
+                                    {item.kksCode}
+                                  </span>
+                                  <span className="text-[10px] bg-indigo-100 text-indigo-900 font-semibold px-1.5 py-0.2 rounded">
+                                    {item.type}
+                                  </span>
+                                </div>
+                                <div className="font-bold text-slate-900 text-xs mt-1">
+                                  {item.name}
+                                </div>
+                                {item.location && (
+                                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
+                                    <MapPin size={11} className="text-slate-400 shrink-0" />
+                                    <span className="truncate">{item.location}</span>
+                                    {item.specs && <span>• {item.specs}</span>}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex flex-col items-end gap-1 shrink-0">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  item.status === 'đã_test'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-900'
+                                }`}>
+                                  {item.status === 'đã_test' ? 'Đã test' : 'Chờ test'}
+                                </span>
+                                {isSelected && (
+                                  <div className="flex flex-col items-end gap-1 mt-1">
+                                    <span className="text-[10px] font-bold text-indigo-700 flex items-center gap-0.5">
+                                      <Check size={12} /> Đang chọn
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowNetaUniversalModal(true);
+                                      }}
+                                      className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 flex items-center gap-1 shadow-2xs"
+                                      title="Mở Biểu Mẫu Thử Nghiệm NETA ATS"
+                                    >
+                                      <ShieldCheck size={10} />
+                                      <span>Form NETA</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200 text-xs text-amber-900 space-y-2">
+                        <p className="font-medium">Dự án này chưa có thiết bị nào trong danh sách chuẩn bị.</p>
+                        <button
+                          type="button"
+                          onClick={() => setShowMasterDirectoryModal(true)}
+                          className="px-3 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-2xs"
+                        >
+                          <Plus size={13} />
+                          <span>Soạn thiết bị & mã KKS cho dự án này</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-xs text-center text-slate-500 space-y-1.5">
+                    <p className="font-bold text-slate-700">Chưa chọn Mã Dự Án Hiện Trường</p>
+                    <p className="text-[11px] text-slate-500">
+                      Vui lòng chọn Mã Dự Án ở khung bước 0 phía trên, hoặc chuyển qua tab <strong>Master</strong> để chọn thiết bị.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* MODE 2: SELECT FROM EXISTING PRE-PREPARED SHEET THIETBI */}
             {equipmentSelectMode === 'existing' && (
               <div className="space-y-3">
                 <div className="relative">
@@ -1231,7 +1777,14 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
                             key={eq.id}
                             onClick={() => {
                               setSelectedEquipmentId(eq.id);
-                              setCurrentEqType(eq.type || 'Máy cắt');
+                              const resolved = resolveEquipmentType(eq.type);
+                              setCurrentEqType(resolved);
+                              setWoData(prev => ({
+                                ...prev,
+                                equipmentId: eq.id,
+                                equipmentName: eq.name,
+                                factory: eq.factory || prev.factory || ''
+                              }));
                               setEquipmentSearch('');
                               setShowEquipmentDropdown(false);
                             }}
@@ -1287,6 +1840,24 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
                         Hãng: {currentEquipment.nameplate.manufacturer} {currentEquipment.nameplate.model ? `(${currentEquipment.nameplate.model})` : ''}
                       </div>
                     )}
+                    {/* NETA Form Badge & Shortcut */}
+                    <div className="mt-2 pt-2 border-t border-blue-200/60 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs text-blue-900 font-bold">
+                        <FileCheck2 size={13} className="text-emerald-600" />
+                        <span>Form NETA:</span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono text-[10px]">
+                          {activeNetaSpec.sectionCode}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowNetaUniversalModal(true)}
+                        className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline flex items-center gap-1"
+                      >
+                        <ExternalLink size={11} />
+                        <span>Xem Biểu Mẫu NETA</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1414,11 +1985,15 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
                   onChange={(e) => setCurrentEqType(e.target.value)}
                   className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 font-bold text-slate-700 outline-none"
                 >
-                  <option value="Máy cắt">Máy cắt (Circuit Breaker)</option>
-                  <option value="Động cơ">Động cơ (Motor)</option>
-                  <option value="Máy phát">Máy phát (Generator)</option>
-                  <option value="Tủ điện">Tủ điện (Switchgear)</option>
-                  <option value="Máy biến áp">Máy biến áp (Transformer)</option>
+                  <option value="Cáp điện">Cáp điện (Power Cables - NETA 7.3)</option>
+                  <option value="Máy cắt">Máy cắt (Circuit Breaker - NETA 7.6)</option>
+                  <option value="Máy biến áp">Máy biến áp (Transformer - NETA 7.2)</option>
+                  <option value="Động cơ">Động cơ (Motor - NETA 7.15)</option>
+                  <option value="Máy phát">Máy phát (Generator - NETA 7.15/7.22)</option>
+                  <option value="Tủ điện">Tủ điện (Switchgear - NETA 7.1)</option>
+                  <option value="Tiếp địa">Hệ thống tiếp địa (Grounding - NETA 7.13)</option>
+                  <option value="Rơ le bảo vệ">Rơ le bảo vệ (Protective Relays - NETA 7.9)</option>
+                  <option value="Pin & UPS">Pin & UPS / Hệ thống DC (NETA 7.18)</option>
                 </select>
               </div>
             </div>
@@ -1801,6 +2376,488 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
                 </div>
               </div>
             )}
+
+            {/* TYPE 6: CÁP ĐIỆN LỰC (POWER CABLES - ANSI/NETA ATS 7.3) */}
+            {currentEqType === 'Cáp điện' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Cấp điện áp & Cấu tạo cáp</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableVoltageRating || '22kV 3x240mm2 Cu/XLPE/PVC'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableVoltageRating: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-semibold"
+                    placeholder="VD: 22kV 3x240mm2 hoặc 0.6/1kV"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Tiết diện & Cấu tạo ruột dẫn</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableSizeMm2 || '3x240mm2'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableSizeMm2: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                    placeholder="VD: 3x240 + 1x120 mm2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Chiều dài tuyến cáp (m)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableLengthM || '350m'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableLengthM: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Cách điện Pha A - Đất/Shield (MΩ)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableIrPhaseEarthMo || '4500'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableIrPhaseEarthMo: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-emerald-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Cách điện Pha B - Đất/Shield (MΩ)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableIrPhaseBMo || '4200'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableIrPhaseBMo: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-emerald-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Cách điện Pha C - Đất/Shield (MΩ)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableIrPhaseCMo || '4600'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableIrPhaseCMo: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-emerald-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Cách điện Pha - Pha (MΩ)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableIrPhasePhaseMo || '5000'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableIrPhasePhaseMo: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Thử cao áp VLF Hipot (kV RMS / 30p)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableHipotVoltageKv || '28kV RMS (0.1Hz, 30 min)'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableHipotVoltageKv: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Tổn hao Tan-Delta (Mean TD x10⁻³)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableTanDelta || '1.2 (< 4.0)'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableTanDelta: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Phóng điện cục bộ PD cáp (pC)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cablePdPc || '8 pC (≤ 10 pC)'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cablePdPc: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Điện trở màn chắn Shield (Ω)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableShieldContinuity || '0.45 Ω (Pass)'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableShieldContinuity: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Thứ tự pha & Mối nối DLRO (μΩ)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.cableConductorResistanceMo || '12.5 μΩ • Đúng thứ tự pha'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, cableConductorResistanceMo: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* TYPE 7: TIẾP ĐỊA (GROUNDING SYSTEMS - ANSI/NETA ATS 7.13) */}
+            {currentEqType === 'Tiếp địa' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Hệ thống tiếp địa</label>
+                  <input
+                    type="text"
+                    value={techSpecs.gndSystemType || 'Lưới tiếp địa trạm TBA & Thiết bị'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, gndSystemType: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Phương pháp đo</label>
+                  <input
+                    type="text"
+                    value={techSpecs.gndTestMethod || 'Fall-of-Potential 3 cực 62%'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, gndTestMethod: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Điện trở tiếp địa đo được (Ω)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.gndResistanceOhm || '0.65'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, gndResistanceOhm: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-emerald-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Yêu cầu tối đa cho phép (Ω)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.gndRequiredMaxOhm || '1.0'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, gndRequiredMaxOhm: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Liên kết vỏ thiết bị (mΩ)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.gndEquipotentialBondingMo || '15'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, gndEquipotentialBondingMo: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Mối hàn hóa nhiệt Cadweld</label>
+                  <input
+                    type="text"
+                    value={techSpecs.gndVisualCondition || 'Đạt chuẩn, không ăn mòn'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, gndVisualCondition: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* TYPE 8: RƠ LE BẢO VỆ (PROTECTIVE RELAYS - ANSI/NETA ATS 7.9) */}
+            {currentEqType === 'Rơ le bảo vệ' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Hãng & Model Rơ le</label>
+                  <input
+                    type="text"
+                    value={techSpecs.relayModel || 'SEL-751 / MiCOM P122'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, relayModel: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Mã chức năng bảo vệ ANSI</label>
+                  <input
+                    type="text"
+                    value={techSpecs.relayFunctionCodes || '50/51, 50N/51N, 87, 27/59'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, relayFunctionCodes: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Dòng tác động đo được Pickup (A)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.relayPickupCurrentA || '5.02'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, relayPickupCurrentA: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-indigo-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Thời gian tác động Trip (ms)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.relayTripTimeMs || '120'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, relayTripTimeMs: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Sai số đo kiểm (%)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.relayErrorPct || '0.4% (≤ 2.0%)'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, relayErrorPct: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Thử nghiệm trip cắt máy cắt</label>
+                  <input
+                    type="text"
+                    value={techSpecs.relayTripContactTest || 'Đóng cắt tốt / Trip OK'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, relayTripContactTest: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* TYPE 9: PIN & UPS / HỆ THỐNG DC (BATTERIES & UPS - ANSI/NETA ATS 7.18) */}
+            {currentEqType === 'Pin & UPS' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Loại ắc quy / Hệ thống DC</label>
+                  <input
+                    type="text"
+                    value={techSpecs.batSystemType || '110V DC Giàn Ắc quy VRLA AGM'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, batSystemType: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Dung lượng định mức (Ah)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.batCapacityAh || '200Ah'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, batCapacityAh: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Tổng điện áp chuỗi (VDC)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.batTotalVoltageV || '124.5'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, batTotalVoltageV: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-indigo-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Nội trở cell lớn nhất (mΩ)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.batCellInternalResMo || '0.85'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, batCellInternalResMo: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Dải điện áp bình (V/cell)</label>
+                  <input
+                    type="text"
+                    value={`${techSpecs.batMinCellVoltageV || '2.24'} - ${techSpecs.batMaxCellVoltageV || '2.26'}V`}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Thử tải xả Load Test (phút)</label>
+                  <input
+                    type="text"
+                    value={techSpecs.batLoadTestDurationMin || '60 phút @ 0.1C'}
+                    onChange={(e) => setTechSpecs({ ...techSpecs, batLoadTestDurationMin: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* DEDICATED NETA ATS TEST FORM & CHECKLIST (BIỂU MẪU KIỂM ĐỊNH & THỬ NGHIỆM TIÊU CHUẨN NETA ATS-2025) */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-7 h-7 rounded-lg bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-xs">
+                  <ShieldCheck size={16} />
+                </span>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2 flex-wrap">
+                    <span>Biểu Mẫu Thử Nghiệm Chuẩn ANSI/NETA ATS:</span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200 font-mono text-xs font-black">
+                      {activeNetaSpec.sectionCode} - {currentEqType}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {activeNetaSpec.standardCode} • {activeNetaSpec.subtitleVi || activeNetaSpec.equipmentTitleVi}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allPassed = netaFormItems.map(item => ({ ...item, status: 'PASS' as const }));
+                    setNetaFormItems(allPassed);
+                    saveAtsPayload(activeNetaSpecId, {
+                      ...getAtsPayload(activeNetaSpecId),
+                      evaluationItems: allPassed
+                    });
+                  }}
+                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 shadow-2xs"
+                  title="Đánh dấu tất cả hạng mục đạt chuẩn NETA ATS"
+                >
+                  <CheckCircle2 size={13} className="text-emerald-600" />
+                  <span>Đạt Toàn Bộ (Pass All)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowNetaUniversalModal(true)}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 shadow-xs"
+                >
+                  <Sparkles size={13} className="text-amber-300" />
+                  <span>Mở Báo Cáo Nghiệm Thu NETA</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Overall Compliance Status Banner */}
+            <div className={`p-3.5 rounded-xl border flex items-start gap-3 ${
+              activeNetaSpec.overallStatus === 'PASS'
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                : 'bg-amber-50/70 border-amber-200 text-amber-950'
+            }`}>
+              <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+                activeNetaSpec.overallStatus === 'PASS' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+              }`}>
+                {activeNetaSpec.overallStatus === 'PASS' ? <ShieldCheck size={18} /> : <AlertTriangle size={18} />}
+              </div>
+              <div className="space-y-1 text-xs">
+                <div className="font-black text-sm flex items-center gap-2">
+                  <span>{activeNetaSpec.statusTitleVi}</span>
+                </div>
+                <p className="text-slate-600 leading-relaxed">
+                  {activeNetaSpec.statusReasonVi}
+                </p>
+              </div>
+            </div>
+
+            {/* Test Items Evaluation Table */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>Hạng mục kiểm tra & thí nghiệm điện ({netaFormItems.length} hạng mục):</span>
+                <span className="text-[11px] text-slate-400">Nhấp để thay đổi trạng thái Đạt / Không đạt / Theo dõi</span>
+              </div>
+
+              <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                {netaFormItems.map((item, idx) => (
+                  <div key={idx} className="p-3 bg-white hover:bg-slate-50/80 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="font-bold text-slate-900 flex items-center gap-2">
+                        <span className="font-mono text-slate-400 text-[10px]">#{idx + 1}</span>
+                        <span>{item.item}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Tiêu chuẩn: <span className="font-semibold text-slate-700">{item.standard}</span>
+                        {item.reference && <span className="text-slate-400 ml-1">({item.reference})</span>}
+                      </div>
+                      {item.detail && (
+                        <div className="text-[11px] text-slate-600 italic">
+                          • {item.detail}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right">
+                        <div className="text-[10px] text-slate-400 font-semibold">Giá trị đo kiểm:</div>
+                        <input
+                          type="text"
+                          value={item.measured || ''}
+                          onChange={(e) => {
+                            const updated = [...netaFormItems];
+                            updated[idx] = { ...updated[idx], measured: e.target.value };
+                            setNetaFormItems(updated);
+                          }}
+                          className="px-2 py-1 bg-slate-50 border border-slate-300 rounded font-mono font-bold text-slate-800 text-[11px] w-48 text-right focus:bg-white focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...netaFormItems];
+                            updated[idx] = { ...updated[idx], status: 'PASS' };
+                            setNetaFormItems(updated);
+                          }}
+                          className={`px-2 py-1 rounded font-bold text-[10px] transition-all ${
+                            item.status === 'PASS'
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                        >
+                          PASS
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...netaFormItems];
+                            updated[idx] = { ...updated[idx], status: 'REVIEW' };
+                            setNetaFormItems(updated);
+                          }}
+                          className={`px-2 py-1 rounded font-bold text-[10px] transition-all ${
+                            item.status === 'REVIEW'
+                              ? 'bg-amber-500 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                        >
+                          CẢNH BÁO
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...netaFormItems];
+                            updated[idx] = { ...updated[idx], status: 'FAIL' };
+                            setNetaFormItems(updated);
+                          }}
+                          className={`px-2 py-1 rounded font-bold text-[10px] transition-all ${
+                            item.status === 'FAIL'
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                        >
+                          FAIL
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Sync to Work Order Description button */}
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] text-slate-500">
+                Toàn bộ dữ liệu đo kiểm NETA được lưu tự động và tích hợp vào biên bản thí nghiệm.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const summaryText = `[ĐẠT CHUẨN NETA ATS ${activeNetaSpec.sectionCode}] ${activeNetaSpec.statusReasonVi}`;
+                  setWoData(prev => ({
+                    ...prev,
+                    description: prev.description ? `${prev.description}\n${summaryText}` : summaryText
+                  }));
+                  alert('Đã cập nhật kết luận NETA ATS vào nội dung phiếu Work Order!');
+                }}
+                className="text-xs font-bold text-indigo-700 hover:text-indigo-900 underline flex items-center gap-1"
+              >
+                <ClipboardList size={13} />
+                <span>Nạp kết luận NETA vào Work Order</span>
+              </button>
+            </div>
           </div>
 
           {/* STEP 4: LẬP PHIẾU CÔNG VIỆC WORK ORDER & WORK PERMIT (CHUẨN 23 TRƯỜNG TEV SERVICE FLATFORM) */}
@@ -2394,6 +3451,73 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
               >
                 Lưu & Thêm Vào Dropdown
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MASTER DIRECTORY & PROJECT PREPARATION SHEET MODAL */}
+      <MasterDirectorySheetManagerModal
+        isOpen={showMasterDirectoryModal}
+        onClose={() => {
+          setShowMasterDirectoryModal(false);
+          setProjectsList(getRegisteredProjects());
+        }}
+        isGoogleConnected={isGoogleConnected}
+        googleSheetUrl={localStorage.getItem('tev_spreadsheet_id') ? `https://docs.google.com/spreadsheets/d/${localStorage.getItem('tev_spreadsheet_id')}` : undefined}
+        onSyncAll={onSyncAllToSheets}
+        initialTab="duan"
+        onNavigateToNetaForm={handleNavigateToNetaFromProject}
+        onSelectProjectForWorkOrder={(prj) => {
+          handleSelectProject(prj);
+          setShowMasterDirectoryModal(false);
+        }}
+      />
+
+      {/* NETA ATS UNIVERSAL REPORT MODAL */}
+      {showNetaUniversalModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden border border-slate-300">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500 rounded-lg text-slate-950 font-black">
+                  <ShieldCheck size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white flex items-center gap-2 flex-wrap">
+                    <span>Biên Bản Thí Nghiệm Toàn Diện ANSI/NETA ATS-2025</span>
+                    <span className="px-2 py-0.5 rounded text-xs font-mono font-semibold bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                      {activeNetaSpec.sectionCode} - {currentEqType}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {activeNetaSpec.standardCode} • Đánh giá tự động AI • In PDF & Xuất báo cáo kỹ thuật TEV
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNetaUniversalModal(false)}
+                className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors"
+                title="Đóng"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-50">
+              <NetaAtsUniversalReportView
+                initialSpecId={activeNetaSpecId}
+                initialLang="vi"
+                onSaveReport={() => {
+                  const summaryText = `[NETA ATS ${activeNetaSpec.sectionCode}] ${activeNetaSpec.statusReasonVi || 'Đạt tiêu chuẩn thí nghiệm nghiệm thu NETA ATS'}`;
+                  setWoData(prev => ({
+                    ...prev,
+                    description: prev.description ? `${prev.description}\n${summaryText}` : summaryText
+                  }));
+                  setShowNetaUniversalModal(false);
+                }}
+              />
             </div>
           </div>
         </div>

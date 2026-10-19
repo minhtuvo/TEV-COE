@@ -25,6 +25,7 @@ import {
   performDeterministicSyncMachineryAnalysis
 } from '../../server/netaSyncMachineryAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
@@ -88,7 +89,7 @@ export const SAMPLE_SYNC_MACHINERY_FSE_DATA: NetaSyncMachineryInputPayload = {
 };
 
 export const NetaSyncMachineryChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaSyncMachineryInputPayload>(SAMPLE_SYNC_MACHINERY_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaSyncMachineryInputPayload>('neta-sync-machinery', SAMPLE_SYNC_MACHINERY_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaSyncMachineryEvaluationResult | null>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);

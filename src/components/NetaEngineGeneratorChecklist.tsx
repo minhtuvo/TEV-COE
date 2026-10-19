@@ -40,6 +40,7 @@ import { TevReportPrintModal } from './TevReportPrintModal';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -177,7 +178,7 @@ export const SAMPLE_GENERATOR_PASS_DATA: NetaGeneratorInputPayload = {
 };
 
 export const NetaEngineGeneratorChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaGeneratorInputPayload>(SAMPLE_GENERATOR_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaGeneratorInputPayload>('neta-generator', SAMPLE_GENERATOR_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaGeneratorEvaluationResult | null>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);

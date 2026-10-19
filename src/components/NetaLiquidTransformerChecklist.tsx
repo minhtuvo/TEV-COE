@@ -31,10 +31,15 @@ import { TevReportPrintModal } from './TevReportPrintModal';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
+import { saveAtsPayload } from '../services/netaAtsDataService';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
   onNavigateToReports?: () => void;
+  onSwitchToUniversalReport?: () => void;
 }
 
 const SAMPLE_LIQUID_TRANSFORMER_DATA: NetaLiquidTransformerInputPayload = {
@@ -90,8 +95,15 @@ const SAMPLE_LIQUID_TRANSFORMER_DATA: NetaLiquidTransformerInputPayload = {
   }
 };
 
-export const NetaLiquidTransformerChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaLiquidTransformerInputPayload>(SAMPLE_LIQUID_TRANSFORMER_DATA);
+export const NetaLiquidTransformerChecklist: React.FC<Props> = ({
+  onSaveReport,
+  onNavigateToReports,
+  onSwitchToUniversalReport
+}) => {
+  const [data, setData] = useAtsFormSync<NetaLiquidTransformerInputPayload>(
+    'neta-liquid-transformer',
+    SAMPLE_LIQUID_TRANSFORMER_DATA
+  );
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaLiquidTransformerEvaluationResult | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -172,25 +184,55 @@ export const NetaLiquidTransformerChecklist: React.FC<Props> = ({ onSaveReport, 
   };
 
   const handleSaveToCmms = () => {
-    const finalReport = analysisResult || performDeterministicLiquidTransformerAnalysis(data);
+    // Synchronize to ATS service store
+    saveAtsPayload('neta-liquid-transformer', data, 'form');
+    const finalReport = performDeterministicLiquidTransformerAnalysis(data);
+    const rawDate = data.site_info.test_date || new Date().toISOString().split('T')[0];
+    
+    let formattedDate = rawDate;
+    let year = '';
+    let month = '';
+    if (typeof rawDate === 'string' && rawDate.includes('-')) {
+      const parts = rawDate.split('-');
+      if (parts.length === 3) {
+        year = parts[0];
+        month = parts[1].padStart(2, '0');
+        formattedDate = `${parts[2].padStart(2, '0')}/${month}/${year}`;
+      }
+    } else if (typeof rawDate === 'string' && rawDate.includes('/')) {
+      const parts = rawDate.split('/');
+      if (parts.length === 3) {
+        year = parts[2];
+        month = parts[1].padStart(2, '0');
+        formattedDate = `${parts[0].padStart(2, '0')}/${month}/${year}`;
+      }
+    }
+    if (!year) year = new Date().getFullYear().toString();
+    if (!month) month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+
+    const cleanTag = (data.site_info.transformer_tag || 'TR01').replace(/[^a-zA-Z0-9]/g, '').slice(0, 10);
+    const reportCode = `REP-ATS-${year}-${month}-${cleanTag}`;
+
     const reportPayload = {
-      id: `NETA-OIL-TR-${Date.now()}`,
-      equipmentId: data.site_info.transformer_tag,
-      equipmentName: `Máy biến áp ngâm dầu ${data.site_info.transformer_tag}`,
+      id: reportCode,
+      equipmentId: data.site_info.transformer_tag || 'TR-01',
+      equipmentName: `Máy biến áp ngâm dầu ${data.site_info.transformer_tag || 'TR-01'}`,
       type: 'NETA ATS-2025 Liquid-Filled Transformer (Sec 7.2.2)',
-      site: data.site_info.project_name,
-      inspector: data.site_info.fse_name,
-      date: data.site_info.test_date,
+      testStandard: 'ANSI/NETA ATS-2025 Mục 7.2.2',
+      site: data.site_info.project_name || 'Nhà máy TEV',
+      inspector: data.site_info.fse_name || 'Kỹ sư FSE',
+      date: formattedDate,
       overallStatus: finalReport.overall_status,
       summary: finalReport.status_reason,
       markdownReport: finalReport.markdown_report,
+      data: data,
       rawPayload: data,
       createdAt: new Date().toISOString()
     };
 
     if (onSaveReport) {
       onSaveReport(reportPayload);
-      setSavedSuccessMessage(`Đã lưu biên bản ${reportPayload.id} vào kho dữ liệu CMMS thành công!`);
+      setSavedSuccessMessage(`Đã lưu biên bản ${reportCode} (Ngày: ${formattedDate}) vào kho dữ liệu CMMS thành công!`);
       setTimeout(() => setSavedSuccessMessage(null), 4000);
     }
   };
@@ -213,62 +255,87 @@ export const NetaLiquidTransformerChecklist: React.FC<Props> = ({ onSaveReport, 
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-amber-700 via-yellow-800 to-slate-900 text-white p-6 rounded-2xl shadow-lg border border-amber-600/30">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="p-2.5 bg-amber-500/20 rounded-xl border border-amber-400/30 text-amber-300">
-                <Droplets size={26} />
+      <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-amber-950 text-white p-6 rounded-2xl shadow-lg border border-amber-500/30 space-y-4">
+        {/* Row 1: Brand & Standard Badges */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shadow-md shrink-0">
+              TEV
+            </div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-400">
+                TEV FLATFORM AI • FIELD SERVICE EVALUATION FORM
               </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider bg-amber-500/30 text-amber-200 px-2 py-0.5 rounded border border-amber-400/40">
-                    ANSI/NETA ATS-2025 Mục 7.2.2
-                  </span>
-                  <span className="text-xs bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded">
-                    ASTM D923 & IEEE C57.104
-                  </span>
-                </div>
-                <h1 className="text-xl md:text-2xl font-black mt-1 tracking-tight">
-                  Máy biến áp Ngâm Chất lỏng / Ngâm Dầu (Liquid-Filled Transformers)
-                </h1>
-                <p className="text-xs md:text-sm text-amber-100/80 mt-0.5">
-                  Thử nghiệm điện trở cuộn dây, cách điện, điện áp đánh thủng dầu ASTM D1816, hàm lượng ẩm D1533 và phân tích khí hòa tan DGA
-                </p>
-              </div>
+              <span className="text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded border border-amber-400/40">
+                ANSI/NETA ATS-2025 Mục 7.2.2
+              </span>
+              <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700">
+                ASTM D923 & IEEE C57.104
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setShowCameraModal(true)}
-              className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-              title="Quét nhãn mác máy biến áp bằng camera và tự động điền thông số"
-            >
-              <Camera size={14} /> Quét Nhãn Nameplate (AI OCR)
-            </button>
-            <button
-              onClick={() => setData(SAMPLE_LIQUID_TRANSFORMER_DATA)}
-              className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border border-white/20"
-              title="Tải kịch bản mẫu trạm khách hàng TEV Substation"
-            >
-              <Info size={14} /> Dữ liệu mẫu FSE
-            </button>
-            <button
-              onClick={openJsonModal}
-              className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border border-white/20"
-            >
-              <Copy size={14} /> Mã JSON
-            </button>
-            <button
-              onClick={handleRunAiAnalysis}
-              disabled={isAnalyzing}
-              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
-            >
-              <Sparkles size={15} />
-              {isAnalyzing ? 'Đang phân tích...' : 'Phân tích AI Chuyên gia NETA'}
-            </button>
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-400/30 rounded-full text-xs text-amber-300 font-bold">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Biểu Mẫu Nhập Liệu Hiện Trường</span>
           </div>
+        </div>
+
+        {/* Row 2: Full-Width Horizontal Equipment Title */}
+        <div className="pt-2 border-t border-slate-800">
+          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-snug">
+            Máy biến áp Ngâm Chất lỏng / Ngâm Dầu (Liquid-Filled Transformers)
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-300 mt-0.5 leading-relaxed font-medium">
+            Thử nghiệm điện trở cuộn dây, cách điện, điện áp đánh thủng dầu ASTM D1816, hàm lượng ẩm D1533 và phân tích khí hòa tan DGA
+          </p>
+        </div>
+
+        {/* Row 3: Action Toolbar Beneath Equipment Title */}
+        <div className="pt-3 border-t border-slate-800 flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => setShowCameraModal(true)}
+            className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+            title="Quét nhãn mác máy biến áp bằng camera và tự động điền thông số"
+          >
+            <Camera size={14} /> Quét Nhãn Nameplate (AI OCR)
+          </button>
+
+          <button
+            onClick={() => setData(SAMPLE_LIQUID_TRANSFORMER_DATA)}
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border border-slate-700"
+            title="Tải kịch bản mẫu trạm khách hàng TEV Substation"
+          >
+            <Info size={14} /> Dữ liệu mẫu FSE
+          </button>
+
+          <button
+            onClick={openJsonModal}
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border border-slate-700"
+          >
+            <Copy size={14} /> Mã JSON
+          </button>
+
+          {onSwitchToUniversalReport && (
+            <button
+              type="button"
+              onClick={onSwitchToUniversalReport}
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 border border-blue-400"
+              title="Chuyển sang Báo cáo thẩm định chuẩn TEV AI 4 phần để xem hoặc in/xuất"
+            >
+              <FileCheck2 size={15} className="text-amber-300" />
+              <span>Xem Báo Cáo Chuẩn TEV AI ⚡</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleRunAiAnalysis}
+            disabled={isAnalyzing}
+            className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
+          >
+            <Sparkles size={15} />
+            {isAnalyzing ? 'Đang phân tích...' : 'Phân tích AI Chuyên gia NETA'}
+          </button>
         </div>
       </div>
 
@@ -443,21 +510,37 @@ export const NetaLiquidTransformerChecklist: React.FC<Props> = ({ onSaveReport, 
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Dự án / Trạm biến áp</label>
-                <input
-                  type="text"
+                <CustomerSelectDropdown
+                  label="Mã & Tên Khách Hàng (Dự án / Trạm)"
                   value={data.site_info.project_name}
-                  onChange={(e) => setData({ ...data, site_info: { ...data.site_info, project_name: e.target.value } })}
-                  className="w-full text-xs font-medium border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  onChange={(val, cust) => {
+                    setData({
+                      ...data,
+                      site_info: {
+                        ...data.site_info,
+                        project_name: cust?.name || val
+                      }
+                    });
+                  }}
+                  placeholder="Chọn hoặc bổ sung khách hàng..."
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Mã định danh (Tag Name)</label>
-                <input
-                  type="text"
+                <EquipmentSelectDropdown
+                  label="Tên & Mã Thiết Bị (Tag Name)"
                   value={data.site_info.transformer_tag}
-                  onChange={(e) => setData({ ...data, site_info: { ...data.site_info, transformer_tag: e.target.value } })}
-                  className="w-full text-xs font-medium border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                  filterType="Máy biến áp"
+                  selectedCustomer={data.site_info.project_name}
+                  onChange={(val, eq) => {
+                    setData({
+                      ...data,
+                      site_info: {
+                        ...data.site_info,
+                        transformer_tag: eq?.id || val
+                      }
+                    });
+                  }}
+                  placeholder="Chọn hoặc bổ sung thiết bị..."
                 />
               </div>
               <div>
@@ -672,42 +755,76 @@ export const NetaLiquidTransformerChecklist: React.FC<Props> = ({ onSaveReport, 
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Sai số Tỷ số Biến áp (%) - max ≤ 0.5%
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={data.electrical_tests.turns_ratio_all_taps.max_error_percent}
-                    onChange={(e) => setData({
-                      ...data,
-                      electrical_tests: {
-                        ...data.electrical_tests,
-                        turns_ratio_all_taps: { max_error_percent: parseFloat(e.target.value) || 0 }
-                      }
-                    })}
-                    className="w-full text-xs font-bold border border-slate-300 rounded-lg px-3 py-2 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Winding Power Factor @ 20°C (%) ≤ 0.5%
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={data.electrical_tests.winding_insulation_power_factor_percent_20c}
-                    onChange={(e) => setData({
-                      ...data,
-                      electrical_tests: {
-                        ...data.electrical_tests,
-                        winding_insulation_power_factor_percent_20c: parseFloat(e.target.value) || 0
-                      }
-                    })}
-                    className="w-full text-xs font-bold border border-slate-300 rounded-lg px-3 py-2 font-mono"
-                  />
-                </div>
+                {(() => {
+                  const ratioErr = data.electrical_tests.turns_ratio_all_taps.max_error_percent;
+                  const isFail = ratioErr > 0.5;
+                  return (
+                    <div className={`p-2.5 rounded-lg border transition-all ${isFail ? 'bg-rose-50/60 border-rose-300' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-slate-700">
+                          Tỷ số Biến áp (%)
+                        </label>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${isFail ? 'bg-rose-100 text-rose-800 border-rose-300' : 'bg-emerald-100 text-emerald-800 border-emerald-300'}`}>
+                          {isFail ? '✕ KHÔNG ĐẠT (> 0.5%)' : '✓ ĐẠT (≤ 0.5%)'}
+                        </span>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={data.electrical_tests.turns_ratio_all_taps.max_error_percent}
+                        onChange={(e) => setData({
+                          ...data,
+                          electrical_tests: {
+                            ...data.electrical_tests,
+                            turns_ratio_all_taps: { max_error_percent: parseFloat(e.target.value) || 0 }
+                          }
+                        })}
+                        className={`w-full text-xs font-bold border rounded-lg px-3 py-1.5 font-mono transition-all ${
+                          isFail
+                            ? 'border-rose-500 bg-rose-50 text-rose-950 ring-1 ring-rose-400'
+                            : 'border-emerald-400 bg-white text-emerald-950'
+                        }`}
+                      />
+                    </div>
+                  );
+                })()}
+
+                {(() => {
+                  const pf = data.electrical_tests.winding_insulation_power_factor_percent_20c;
+                  const isFail = pf > 1.0;
+                  const isWarn = pf > 0.5;
+                  return (
+                    <div className={`p-2.5 rounded-lg border transition-all ${isFail ? 'bg-rose-50/60 border-rose-300' : isWarn ? 'bg-amber-50/60 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-slate-700">
+                          Power Factor @ 20°C (%)
+                        </label>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${isFail ? 'bg-rose-100 text-rose-800 border-rose-300' : isWarn ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-emerald-100 text-emerald-800 border-emerald-300'}`}>
+                          {isFail ? '✕ FAIL (> 1.0%)' : isWarn ? '⚠️ WARNING (> 0.5%)' : '✓ ĐẠT (≤ 0.5%)'}
+                        </span>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={data.electrical_tests.winding_insulation_power_factor_percent_20c}
+                        onChange={(e) => setData({
+                          ...data,
+                          electrical_tests: {
+                            ...data.electrical_tests,
+                            winding_insulation_power_factor_percent_20c: parseFloat(e.target.value) || 0
+                          }
+                        })}
+                        className={`w-full text-xs font-bold border rounded-lg px-3 py-1.5 font-mono transition-all ${
+                          isFail
+                            ? 'border-rose-500 bg-rose-50 text-rose-950 ring-1 ring-rose-400'
+                            : isWarn
+                            ? 'border-amber-400 bg-amber-50 text-amber-950 ring-1 ring-amber-300'
+                            : 'border-emerald-400 bg-white text-emerald-950'
+                        }`}
+                      />
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -988,6 +1105,15 @@ export const NetaLiquidTransformerChecklist: React.FC<Props> = ({ onSaveReport, 
         </div>
 
         <div className="flex items-center gap-2">
+          {onSwitchToUniversalReport && (
+            <button
+              type="button"
+              onClick={onSwitchToUniversalReport}
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-black flex items-center gap-1.5 shadow-md transition-all active:scale-95"
+            >
+              <Sparkles size={15} className="text-amber-300" /> Xem Báo Cáo Chuẩn TEV AI
+            </button>
+          )}
           <button
             onClick={() => setShowPrintModal(true)}
             className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all"
@@ -1000,78 +1126,8 @@ export const NetaLiquidTransformerChecklist: React.FC<Props> = ({ onSaveReport, 
           >
             <Save size={15} /> Lưu vào Kho Báo Cáo CMMS
           </button>
-          <button
-            onClick={handleRunAiAnalysis}
-            disabled={isAnalyzing}
-            className="px-5 py-2 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-slate-950 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-md transition-all active:scale-95 disabled:opacity-50"
-          >
-            <Sparkles size={15} />
-            {isAnalyzing ? 'Đang thẩm định AI...' : 'Xuất Báo Cáo Chuyên Gia NETA'}
-          </button>
         </div>
       </div>
-
-      {/* Analysis Result Output Display */}
-      {analysisResult && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-md p-6 space-y-6 animate-fade-in">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black uppercase tracking-wider bg-slate-900 text-amber-400 px-2.5 py-0.5 rounded">
-                  BÁO CÁO THẨM ĐỊNH AI NETA ATS-2025
-                </span>
-                <span className="text-xs text-slate-500">Mục 7.2.2 & Table 100.4.1</span>
-              </div>
-              <h2 className="text-xl font-black text-slate-900 mt-1">
-                Kết Quả Thử Nghiệm Máy Biến Áp Ngâm Dầu ({data.site_info.transformer_tag})
-              </h2>
-            </div>
-            <div>
-              {analysisResult.overall_status === 'FAIL' ? (
-                <div className="px-4 py-2 bg-rose-100 text-rose-800 font-black rounded-xl border border-rose-300 text-center">
-                  <div className="text-xs">KẾT LUẬN TỔNG QUAN</div>
-                  <div className="text-base flex items-center justify-center gap-1">
-                    <AlertOctagon size={18} /> FAIL / CRITICAL FLUID & DGA DEFECT
-                  </div>
-                </div>
-              ) : analysisResult.overall_status === 'INVESTIGATE' ? (
-                <div className="px-4 py-2 bg-amber-100 text-amber-800 font-black rounded-xl border border-amber-300 text-center">
-                  <div className="text-xs">KẾT LUẬN TỔNG QUAN</div>
-                  <div className="text-base flex items-center justify-center gap-1">
-                    <AlertTriangle size={18} /> INVESTIGATE / CẦN KHẢO SÁT
-                  </div>
-                </div>
-              ) : (
-                <div className="px-4 py-2 bg-emerald-100 text-emerald-800 font-black rounded-xl border border-emerald-300 text-center">
-                  <div className="text-xs">KẾT LUẬN TỔNG QUAN</div>
-                  <div className="text-base flex items-center justify-center gap-1">
-                    <CheckCircle2 size={18} /> PASS / ĐẠT TIÊU CHUẨN
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Markdown Content */}
-          <div className="prose prose-slate max-w-none text-slate-800 text-sm leading-relaxed bg-slate-50/50 p-6 rounded-xl border border-slate-200">
-            <div
-              className="space-y-4"
-              dangerouslySetInnerHTML={{
-                __html: analysisResult.markdown_report
-                  .replace(/# (.*?)\n/g, '<h1 class="text-xl font-bold text-slate-900 border-b pb-2 mt-4">$1</h1>')
-                  .replace(/## (.*?)\n/g, '<h2 class="text-lg font-bold text-slate-800 mt-4 mb-2 flex items-center gap-2"><span class="w-1.5 h-4 bg-amber-600 rounded"></span>$1</h2>')
-                  .replace(/### (.*?)\n/g, '<h3 class="text-base font-bold text-slate-800 mt-3 mb-1">$1</h3>')
-                  .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900">$1</strong>')
-                  .replace(/`([^`]+)`/g, '<code class="bg-slate-200 px-1 py-0.5 rounded text-amber-800 font-mono text-xs">$1</code>')
-                  .replace(/\n\n/g, '<p class="my-2"></p>')
-                  .replace(/\| (.*?) \|/g, (match) => {
-                    return `<div class="overflow-x-auto my-2 text-xs font-mono">${match}</div>`;
-                  })
-              }}
-            />
-          </div>
-        </div>
-      )}
 
       {/* JSON Import/Export Modal */}
       {showJsonModal && (

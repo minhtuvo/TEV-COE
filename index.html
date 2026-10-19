@@ -21,6 +21,44 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="shortcut icon" href="/favicon.ico" />
+
+    <!-- Suppress Vite HMR WebSocket closed errors in cloud proxy iframe environment -->
+    <script>
+      (function() {
+        var originalConsoleError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          var str = args.map(function(a) { 
+            return (a && a.stack) ? (a.message + ' ' + a.stack) : String(a); 
+          }).join(' ');
+          if (str.includes('WebSocket closed without opened') || (str.includes('WebSocket') && str.includes('@vite/client'))) {
+            // Harmless Vite HMR warning in cloud proxy iframe - suppressed per environment constraints
+            return;
+          }
+          originalConsoleError.apply(console, arguments);
+        };
+
+        function isViteWsError(err) {
+          if (!err) return false;
+          var str = String((err && err.message) || (err && err.reason) || (err && err.error && err.error.message) || err || '');
+          var file = String((err && err.filename) || '');
+          return str.includes('WebSocket') || str.includes('@vite/client') || file.includes('@vite/client') || str.includes('closed without opened');
+        }
+        window.addEventListener('error', function(event) {
+          if (isViteWsError(event) || isViteWsError(event.error)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(event) {
+          if (isViteWsError(event) || isViteWsError(event.reason)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

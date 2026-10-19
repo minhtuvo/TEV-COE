@@ -33,6 +33,7 @@ import {
   performDeterministicVrlaAnalysis
 } from '../../server/netaBatteryVrlaAnalyzer';
 import { TevReportPrintModal } from './TevReportPrintModal';
+import { useAtsFormSync } from '../hooks/useAtsFormSync';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
@@ -155,7 +156,7 @@ export const SAMPLE_BATTERY_VRLA_PASS_DATA: NetaBatteryVrlaInputPayload = {
 };
 
 export const NetaBatteryVrlaChecklist: React.FC<Props> = ({ onSaveReport, onNavigateToReports }) => {
-  const [data, setData] = useState<NetaBatteryVrlaInputPayload>(SAMPLE_BATTERY_VRLA_FSE_DATA);
+  const [data, setData] = useAtsFormSync<NetaBatteryVrlaInputPayload>('neta-battery-vrla', SAMPLE_BATTERY_VRLA_FSE_DATA);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<NetaBatteryVrlaEvaluationResult | null>(null);
   const [showJsonModal, setShowJsonModal] = useState(false);
