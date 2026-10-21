@@ -103,15 +103,16 @@ export const MASTER_EQUIPMENT_104: EquipmentMasterRecord[] = [
     model: 'Trihal 2000kVA 22/0.4kV',
     serialNumber: 'SCH-TR-2022-3118',
     yearOfManufacture: '2022',
-    criticality: 'B',
-    status: 'healthy',
-    health: 92,
-    lastCheck: '12/09/2026',
+    criticality: 'A',
+    status: 'critical',
+    health: 48,
+    lastCheck: '05/02/2026',
     pmCycleMonths: 6,
+    notes: 'Máy biến áp khô Trihal bị quá nhiệt cuộn dây pha B (118°C) và nứt epoxy cách điện bề mặt. Health Index 48% (<50%). Quá hạn bảo trì định kỳ 76 ngày.',
     specs: {
       transformer: { ratedPowerKva: 2000, primaryVoltageKv: 22, secondaryVoltageV: 400, vectorGroup: 'Dyn11', coolingType: 'AN', insulationType: 'Cast Resin' }
     },
-    measurements: { windingTemp: '62.0', irHighLow: '3800', irHighEarth: '3600' }
+    measurements: { windingTemp: '118.0', irHighLow: '1200', irHighEarth: '980' }
   },
   {
     id: 'TRF-VF-110-T1',
@@ -166,15 +167,16 @@ export const MASTER_EQUIPMENT_104: EquipmentMasterRecord[] = [
     model: 'GEAFOL 2500kVA 22/0.4kV',
     serialNumber: 'SIE-GEA-2022-771',
     yearOfManufacture: '2022',
-    criticality: 'B',
-    status: 'healthy',
-    health: 93,
-    lastCheck: '14/09/2026',
+    criticality: 'A',
+    status: 'critical',
+    health: 49,
+    lastCheck: '10/01/2026',
     pmCycleMonths: 6,
+    notes: 'Máy biến áp xưởng hàn bị suy giảm điện trở cách điện cuộn dây nghiêm trọng (IR 820 MΩ). Health Index 49% (<50%). Quá hạn bảo trì định kỳ 102 ngày.',
     specs: {
       transformer: { ratedPowerKva: 2500, primaryVoltageKv: 22, secondaryVoltageV: 400, vectorGroup: 'Dyn11', coolingType: 'AN/AF', insulationType: 'Cast-Resin' }
     },
-    measurements: { windingTemp: '71.5', irHighLow: '3900', irHighEarth: '3700' }
+    measurements: { windingTemp: '96.5', irHighLow: '820', irHighEarth: '750' }
   },
   {
     id: 'TRF-HP-220-T1',
@@ -230,14 +232,15 @@ export const MASTER_EQUIPMENT_104: EquipmentMasterRecord[] = [
     serialNumber: 'EEMC-2021-399',
     yearOfManufacture: '2021',
     criticality: 'A',
-    status: 'warning',
-    health: 76,
-    lastCheck: '18/09/2026',
+    status: 'critical',
+    health: 42,
+    lastCheck: '10/05/2026',
     pmCycleMonths: 3,
+    notes: 'Sự cố nhiệt cục bộ cuộn dây pha C và phát hiện khí cháy C2H2 tăng vọt (18.5 ppm). Health Index giảm xuống 42% (<50%). Quá hạn bảo trì định kỳ 71 ngày. Khẩn cấp cô lập và bảo dưỡng.',
     specs: {
       transformer: { ratedPowerKva: 60000, primaryVoltageKv: 35, secondaryVoltageV: 1000, vectorGroup: 'Dyn11', coolingType: 'OFAF', insulationType: 'Dầu khoáng', impedanceZ: 8.5 }
     },
-    measurements: { oilTemp: '68.0', windingTemp: '82.5', irHighLow: '1850', irHighEarth: '1700', h2: '45', ch4: '35', c2h6: '22', c2h4: '38', c2h2: '1.2', co: '420', co2: '3100', dielectricStrength: '54', furan: '0.12', oilMoisture: '24' }
+    measurements: { oilTemp: '84.0', windingTemp: '102.5', irHighLow: '650', irHighEarth: '520', h2: '185', ch4: '140', c2h6: '88', c2h4: '195', c2h2: '18.5', co: '850', co2: '5800', dielectricStrength: '38', furan: '0.45', oilMoisture: '36' }
   },
   {
     id: 'TRF-HP-ROLL-02',
@@ -360,15 +363,15 @@ export const MASTER_EQUIPMENT_104: EquipmentMasterRecord[] = [
     serialNumber: 'SCH-SE-2024-001',
     yearOfManufacture: '2024',
     criticality: 'A',
-    status: 'warning',
-    health: 72,
-    lastCheck: '28/09/2026',
+    status: 'critical',
+    health: 46,
+    lastCheck: '12/03/2026',
     pmCycleMonths: 6,
-    notes: 'Phát hiện hiện tượng phóng điện bề mặt tại khoang thanh cái.',
+    notes: 'Phát hiện phóng điện cục bộ TEV đạt 38 dBmV tại sứ xuyên thanh cái 24kV, tiếp điểm hồ quang bị xói mòn. Health Index 46% (<50%). Quá hạn kiểm tra định kỳ 38 ngày.',
     specs: {
       breaker: { ratedVoltageKv: 24, ratedCurrentA: 630, breakingCapacityKa: 25, breakerType: 'VCB (Chân không)' }
     },
-    measurements: { contactResPhaseA: '34.2', contactResPhaseB: '33.8', contactResPhaseC: '34.0', closingTimeMs: '52', openingTimeMs: '35', insulationOpenPoles: '1800', insulationToGround: '1600' }
+    measurements: { contactResPhaseA: '68.5', contactResPhaseB: '64.2', contactResPhaseC: '66.0', closingTimeMs: '82', openingTimeMs: '58', insulationOpenPoles: '850', insulationToGround: '720' }
   },
   {
     id: 'MVCB-002',
@@ -1125,14 +1128,15 @@ export const MASTER_EQUIPMENT_104: EquipmentMasterRecord[] = [
     serialNumber: 'SIE-MTR-2021-401',
     yearOfManufacture: '2021',
     criticality: 'A',
-    status: 'warning',
-    health: 78,
-    lastCheck: '16/09/2026',
+    status: 'critical',
+    health: 44,
+    lastCheck: '14/06/2026',
     pmCycleMonths: 3,
+    notes: 'Rung động vòng bi phía tải DE vượt ngưỡng 8.6 mm/s. Nhiệt độ gối trục đạt 92°C. Health Index 44% (<50%). Quá hạn kiểm tra định kỳ 36 ngày.',
     specs: {
       motor: { ratedPowerKw: 250, ratedVoltageV: 6000, ratedCurrentA: 30, ratedSpeedRpm: 985, poleCount: 6, insulationClass: 'Class F' }
     },
-    measurements: { vibration: '3.85', statorTemp: '84.0', bearingTemp: '74.5', irR: '520', piR: '2.4' }
+    measurements: { vibration: '8.6', statorTemp: '108.0', bearingTemp: '92.0', irR: '180', piR: '1.2' }
   },
   {
     id: 'MTR-FAN-200KW',

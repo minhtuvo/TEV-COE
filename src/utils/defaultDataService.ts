@@ -448,10 +448,26 @@ export const DEFAULT_SIMULATION_REPORTS: any[] = [
  */
 export function getInitialEquipmentList(storedList?: any[]): any[] {
   if (Array.isArray(storedList) && storedList.length > 0) {
-    // Merge any missing default equipment so the user always has rich items
-    const existingIds = new Set(storedList.map(e => e.id?.toLowerCase()));
+    const defaultMap = new Map(DEFAULT_EQUIPMENT.map(e => [e.id.toLowerCase(), e]));
+    // Merge and ensure master benchmark critical equipment (health < 50% / overdue) are properly reflected
+    const updated = storedList.map(item => {
+      const def = defaultMap.get(item.id?.toLowerCase());
+      if (def && typeof def.health === 'number' && def.health < 50 && item.health >= 50) {
+        return {
+          ...item,
+          health: def.health,
+          status: def.status,
+          lastCheck: def.lastCheck,
+          pmCycleMonths: def.pmCycleMonths,
+          notes: def.notes || item.notes
+        };
+      }
+      return item;
+    });
+
+    const existingIds = new Set(updated.map(e => e.id?.toLowerCase()));
     const missingDefaults = DEFAULT_EQUIPMENT.filter(e => !existingIds.has(e.id.toLowerCase()));
-    return [...storedList, ...missingDefaults];
+    return [...updated, ...missingDefaults];
   }
   return DEFAULT_EQUIPMENT;
 }

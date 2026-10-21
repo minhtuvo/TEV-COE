@@ -31,6 +31,7 @@ import {
 export type EcsModuleId =
   | 'low-voltage'
   | 'medium-voltage'
+  | 'high-voltage'
   | 'solar-pv'
   | 'ats-switch'
   | 'wind-turbine'
@@ -116,6 +117,33 @@ export const ECS_MODULE_CATALOG: EcsModuleItem[] = [
       'Bơm dòng sơ cấp thử nghiệm bảo vệ so lệch 87, quá dòng 50/51 & kiểm tra áp suất khí SF6 / mức chân không VCB',
       'Trong đóng điện: Kiểm tra đồng pha hai nguồn máy cắt liên lạc Bus Tie (ΔV ≤ 15V, góc lệch pha ≤ 5°)',
       'Sau đóng điện: Khảo sát nhiệt hồng ngoại IR Table 100.18 & Đo phóng điện cục bộ trực tuyến Online TEV/Ultrasonic Table 100.23'
+    ],
+    isAvailable: true
+  },
+  {
+    id: 'high-voltage',
+    category: 'section-7',
+    sectionCode: 'Section 7.3',
+    title: 'Hệ Thống Cao Thế & Siêu Cao Thế (> 100 kV & < 1,000 kV)',
+    titleEn: 'General Inspection & Test Procedures: High-Voltage and Extra-High Voltage Systems (> 100 kV & < 1,000 kV)',
+    shortTitle: 'Cao Thế & EHV (> 100kV)',
+    shortTitleEn: 'HV/EHV Systems (> 100kV)',
+    subtitle: 'Cách Điện 10kV (≥ 10,000 MΩ) • Khí SF6 Table 100.19 • Dầu & DGA MBA C57.104 • Rơ-le NERC PRC • Tiếp Địa Trạm ≤ 1.0Ω',
+    scope: 'Trạm biến áp 110kV/220kV/500kV, Trạm GIS EHV, Máy cắt khí SF6, Máy biến áp lực EHV 250MVA - 900MVA, Cáp ngầm cao thế',
+    standardCode: 'ANSI/NETA ECS-2024 Mục 7.3',
+    standardName: 'NETA ECS-2024 Sec 7.3, NETA Tables 100.1-100.23, IEEE 81, IEEE C57.104, NERC PRC',
+    aiEngine: 'HV/EHV Commissioning AI Engine (NETA Sec 7.3 & NERC PRC)',
+    icon: Zap,
+    colorGradient: 'from-slate-950 via-purple-950 to-slate-900',
+    borderColor: 'hover:border-purple-400 focus:border-purple-500',
+    tagColor: 'bg-purple-500/20 text-purple-800 border-purple-300',
+    badge: 'Mục 7.3 (> 100kV)',
+    badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-400/40',
+    features: [
+      'Tiền đóng điện: Đo cách điện 10,000V DC (≥ 10,000 MΩ Table 100.1), kiểm tra chất lượng khí SF6 (độ ẩm ≤ 99 ppmv Table 100.19) & DGA MBA Condition 1',
+      'Thử nghiệm rơ-le so lệch 87L, bảo vệ khoảng cách 21 và tuân thủ NERC PRC-002/005/019/024; kiểm tra điện trở lưới đất trạm ≤ 1.0 Ω (IEEE 81)',
+      'Trong đóng điện: Xác nhận tháo 100% tiếp địa di động trên thanh cái EHV, kiểm tra đồng pha hai nguồn 230kV tại Bus Tie (ΔV ≤ 60V, lệch pha ≤ 5°)',
+      'Sau đóng điện: Khảo sát nhiệt hồng ngoại IR mang tải Table 100.18, đo phóng điện cục bộ trực tuyến Online PD trạm GIS (UHF/Acoustic Table 100.23) & lấy mẫu sau 24h'
     ],
     isAvailable: true
   },

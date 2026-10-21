@@ -182,12 +182,12 @@ export function classifyEquipment(type?: string, name?: string): EquipmentCatego
 interface ProjectCategorizedEquipmentTableProps {
   project: ProjectMasterRecord;
   equipmentList?: ProjectEquipmentItem[];
-  equipmentStandardMap: Record<string, 'ats' | 'mts'>;
-  onSetStandard: (key: string, std: 'ats' | 'mts') => void;
+  equipmentStandardMap: Record<string, 'ats' | 'mts' | 'ecs'>;
+  onSetStandard: (key: string, std: 'ats' | 'mts' | 'ecs') => void;
   onNavigateToNeta: (
     project: ProjectMasterRecord,
     equipment: ProjectEquipmentItem,
-    standard: 'ats' | 'mts'
+    standard: 'ats' | 'mts' | 'ecs'
   ) => void;
   onRemoveEquipment?: (kksCode: string) => void;
   onOpenAddEquipmentModal?: () => void;
@@ -430,7 +430,7 @@ export const ProjectCategorizedEquipmentTable: React.FC<ProjectCategorizedEquipm
                     {/* Standard Selector & Direct Action */}
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">
                       <div className="flex items-center justify-center gap-2">
-                        {/* ATS / MST Toggle Button */}
+                        {/* ATS / MTS / ECS Toggle Button */}
                         <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-300 text-[10px] font-bold shrink-0 shadow-2xs">
                           <button
                             type="button"
@@ -440,7 +440,7 @@ export const ProjectCategorizedEquipmentTable: React.FC<ProjectCategorizedEquipm
                                 ? 'bg-blue-600 text-white font-black shadow-xs'
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                             }`}
-                            title="ANSI/NETA ATS-2025: Thí nghiệm nghiệm thu đóng điện"
+                            title="ANSI/NETA ATS-2025: Thí nghiệm nghiệm thu đóng điện (Acceptance Testing)"
                           >
                             ATS
                           </button>
@@ -452,9 +452,21 @@ export const ProjectCategorizedEquipmentTable: React.FC<ProjectCategorizedEquipm
                                 ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                             }`}
-                            title="ANSI/NETA MTS-2023 (MST): Thí nghiệm bảo dưỡng định kỳ"
+                            title="ANSI/NETA MTS-2023: Thí nghiệm bảo dưỡng định kỳ (Maintenance Testing)"
                           >
-                            MST
+                            MTS
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSetStandard(stdKey, 'ecs')}
+                            className={`px-2 py-1 rounded transition-all ${
+                              currentStd === 'ecs'
+                                ? 'bg-teal-600 text-white font-black shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                            }`}
+                            title="ANSI/NETA ECS-2020: Thử nghiệm vận hành & Commissioning (Electrical Commissioning Specifications)"
+                          >
+                            ECS
                           </button>
                         </div>
 
@@ -463,18 +475,20 @@ export const ProjectCategorizedEquipmentTable: React.FC<ProjectCategorizedEquipm
                           type="button"
                           onClick={() => onNavigateToNeta(project, eq, currentStd)}
                           className={`px-3 py-1.5 font-black text-xs rounded-lg transition-all flex items-center gap-1.5 shadow-xs active:scale-95 whitespace-nowrap ${
-                            currentStd === 'mts'
+                            currentStd === 'ecs'
+                              ? 'bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white'
+                              : currentStd === 'mts'
                               ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 border border-amber-400/50'
                               : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white'
                           }`}
-                          title={`Mở biểu mẫu NETA ${currentStd === 'mts' ? 'MST' : 'ATS'} cho ${eq.name}`}
+                          title={`Mở biểu mẫu NETA ${currentStd.toUpperCase()} cho ${eq.name}`}
                         >
                           <Play
                             size={11}
                             className={currentStd === 'mts' ? 'fill-slate-950' : 'fill-white'}
                           />
                           <span>
-                            Nhập Form NETA ({currentStd === 'mts' ? 'MST' : 'ATS'})
+                            Nhập Form NETA ({currentStd.toUpperCase()})
                           </span>
                         </button>
                       </div>

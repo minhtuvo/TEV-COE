@@ -70,7 +70,8 @@ import {
   Cable,
   Power,
   Cpu,
-  Sparkles
+  Sparkles,
+  Award
 } from 'lucide-react';
 import {
   LineChart,
@@ -134,6 +135,10 @@ import { NetaPartialDischargeChecklist } from './components/NetaPartialDischarge
 import { NetaMotorChecklist } from './components/NetaMotorChecklist';
 import { NetaLiquidTransformerChecklist } from './components/NetaLiquidTransformerChecklist';
 import { NetaMtsTransformerChecklist } from './components/NetaMtsTransformerChecklist';
+import { NetaMtsCtChecklist } from './components/NetaMtsCtChecklist';
+import { NetaMtsVtChecklist } from './components/NetaMtsVtChecklist';
+import { NetaMtsCcvtChecklist } from './components/NetaMtsCcvtChecklist';
+import { NetaMtsBuswayChecklist } from './components/NetaMtsBuswayChecklist';
 import { NetaEcsLowVoltageChecklist } from './components/NetaEcsLowVoltageChecklist';
 import { NetaEcsMediumVoltageChecklist } from './components/NetaEcsMediumVoltageChecklist';
 import { NetaEcsSolarPvChecklist } from './components/NetaEcsSolarPvChecklist';
@@ -157,6 +162,8 @@ import { NetaEngineGeneratorChecklist } from './components/NetaEngineGeneratorCh
 import { NetaSwitchgearChecklist } from './components/NetaSwitchgearChecklist';
 import { PmScheduleDashboard } from './components/PmScheduleDashboard';
 import { PmpPmCmWorkOrderPermitManager } from './components/PmpPmCmWorkOrderPermitManager';
+import { DashboardPmCmProgressModule } from './components/DashboardPmCmProgressModule';
+import { PmCmExecutiveSummaryWidget } from './components/PmCmExecutiveSummaryWidget';
 import { EquipmentChecklistSelector, FieldEntryMode } from './components/EquipmentChecklistSelector';
 import { 
   FseFieldDataEntryStation,
@@ -210,6 +217,10 @@ import {
   EVT_CMMS_WO_UPDATED,
   EVT_CMMS_REPORT_SAVED
 } from './services/netaCmmsBridgeService';
+import { EquipmentRedAlertSection } from './components/EquipmentRedAlertSection';
+import { getFleetRedAlerts } from './utils/redAlertService';
+import { ArpReliabilityAnalysisModal } from './components/ArpReliabilityAnalysisModal';
+import { calculateFleetArpSummary, FleetArpSummary } from './utils/arpReliabilityService';
 
 enum OperationType {
   CREATE = 'create',
@@ -324,8 +335,12 @@ const adherenceData = [
 
 const MaintenanceCharts = ({ equipment, workOrders, reports }: { equipment: any, workOrders: any[], reports: any[] }) => {
   // Filter data for this specific equipment
-  const eqWorkOrders = workOrders.filter(wo => wo.equipmentId.includes(equipment.id));
-  const eqReports = reports.filter(r => r.equipmentId === equipment.id);
+  const eqWorkOrders = workOrders.filter(wo => {
+    if (!wo || !wo.equipmentId || !equipment?.id) return false;
+    if (Array.isArray(wo.equipmentId)) return wo.equipmentId.includes(equipment.id);
+    return String(wo.equipmentId).includes(equipment.id);
+  });
+  const eqReports = reports.filter(r => r.equipmentId === equipment?.id);
 
   // Helper to get month name
   const getMonthName = (dateStr: string) => {
@@ -1814,6 +1829,8 @@ export default function App() {
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showMasterDirectoryModal, setShowMasterDirectoryModal] = useState(false);
+  const [showArpModal, setShowArpModal] = useState(false);
+  const [selectedArpAssetId, setSelectedArpAssetId] = useState<string | undefined>(undefined);
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<any>(null);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<any>(null);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
@@ -3358,18 +3375,54 @@ export default function App() {
   const [fieldEntrySubTab, setFieldEntrySubTab] = useState<'station' | 'checklists'>('station');
   const [selectedReportForModal, setSelectedReportForModal] = useState<any | null>(null);
 
-  // Handle direct navigation from Project Management (Quản lý dự án) to NETA ATS or MTS Form
+  // Handle direct navigation from Project Management (Quản lý dự án) to NETA ATS, MTS or ECS Form
   const handleDirectNavigateToNetaForm = (
     project: ProjectMasterRecord,
     equipment: ProjectEquipmentItem,
-    standard: 'ats' | 'mts' = 'ats'
+    standard: 'ats' | 'mts' | 'ecs' = 'ats'
   ) => {
     setShowMasterDirectoryModal(false);
     setActiveTab('field-entry');
 
-    const isMts = standard === 'mts';
-    if (isMts) {
+    if (standard === 'ecs') {
+      // NETA ECS Mode (Electrical Commissioning Specifications)
+      setNetaStandardModule('ecs');
+      const eqText = `${equipment.type || ''} ${equipment.name || ''}`.toLowerCase();
+      if (eqText.includes('solar') || eqText.includes('pv') || eqText.includes('quang điện')) {
+        setEcsModuleMode('solar-pv');
+      } else if (eqText.includes('ups') || eqText.includes('bess') || eqText.includes('battery') || eqText.includes('pin')) {
+        setEcsModuleMode('ups-system');
+      } else if (eqText.includes('ats') || eqText.includes('chuyển nguồn')) {
+        setEcsModuleMode('ats-switch');
+      } else if (eqText.includes('trung thế') || eqText.includes('mv') || eqText.includes('22kv') || eqText.includes('24kv') || eqText.includes('vcb')) {
+        setEcsModuleMode('medium-voltage');
+      } else {
+        setEcsModuleMode('low-voltage');
+      }
+    } else if (standard === 'mts') {
+      // NETA MTS Mode (Maintenance Testing Specifications)
       setNetaStandardModule('mts');
+      const eqText = `${equipment.type || ''} ${equipment.name || ''}`.toLowerCase();
+      if (eqText.includes('busway') || eqText.includes('thanh dẫn')) {
+        setMtsChecklistMode('busway');
+      } else if (eqText.includes('ccvt') || eqText.includes('biến áp kiểu tụ')) {
+        setMtsChecklistMode('instrument_ccvt');
+      } else if (eqText.includes('vt') || eqText.includes('biến điện áp') || eqText.includes('pt')) {
+        setMtsChecklistMode('instrument_vt');
+      } else if (eqText.includes('ct') || eqText.includes('biến dòng')) {
+        setMtsChecklistMode('instrument_ct');
+      } else if (eqText.includes('cáp') || eqText.includes('cable')) {
+        setMtsChecklistMode('cables');
+      } else if (eqText.includes('máy cắt') || eqText.includes('tủ') || eqText.includes('switchgear')) {
+        setMtsChecklistMode('switchgear');
+      } else if (eqText.includes('tiếp địa') || eqText.includes('nối đất')) {
+        setMtsChecklistMode('grounding');
+      } else if (eqText.includes('động cơ') || eqText.includes('motor')) {
+        setMtsChecklistMode('motors');
+      } else {
+        setMtsChecklistMode('transformer');
+      }
+
       // Sync MTS Transformer Payload with matching Customer & Equipment details
       const currentPayload = getAtsPayload('neta-mts-transformer') || {};
       const updated = {
@@ -4532,8 +4585,21 @@ export default function App() {
     critical: filteredEquipment.filter(e => e.status === 'critical').length,
   };
 
+  const equipmentRedAlertSummary = useMemo(() => {
+    return getFleetRedAlerts(
+      filteredEquipment,
+      workOrders,
+      'all',
+      'all'
+    );
+  }, [filteredEquipment, workOrders]);
+
   const displayedEquipment = filteredEquipment.filter(eq => {
-    const matchStatus = statusFilter === 'all' || eq.status === statusFilter;
+    const matchStatus = statusFilter === 'all' 
+      ? true 
+      : statusFilter === 'red_alert' 
+        ? equipmentRedAlertSummary.alerts.some(a => a.id === eq.id)
+        : eq.status === statusFilter;
     const matchName = filterName === '' || eq.name.toLowerCase().includes(filterName.toLowerCase()) || eq.id.toLowerCase().includes(filterName.toLowerCase());
     const matchLocation = filterLocation === '' || eq.factory.toLowerCase().includes(filterLocation.toLowerCase()) || eq.location.toLowerCase().includes(filterLocation.toLowerCase());
     const matchType = filterType === 'all' || 
@@ -4643,34 +4709,19 @@ export default function App() {
       return s.includes('complete') || s.includes('hoàn thành') || s.includes('đã đóng');
     };
 
-    const completedCorrective = filteredWOs.filter(wo => isCorrective(wo) && isCompleted(wo));
+    // MOBIUS INSTITUTE ARP-E (Asset Reliability Practitioner – Engineer) ENGINE
+    const arpSummary = calculateFleetArpSummary(filteredEquipment, filteredWOs, 720);
 
-    // 1. MTTR: Total Repair Time / Total No. of Repairs
-    const totalRepairTime = completedCorrective.reduce((sum, wo) => sum + (wo.actualTimeSpent || 4), 0);
-    const mttr = completedCorrective.length > 0 
-      ? (totalRepairTime / completedCorrective.length).toFixed(1) 
-      : (filteredWOs.length > 0 ? '3.5' : '0.0');
+    const mttr = arpSummary.fleet_mttr.toFixed(1);
+    const mtbf = arpSummary.fleet_mtbf;
+    const mttf = arpSummary.fleet_mttf;
+    const mwt = arpSummary.fleet_mwt.toFixed(1);
+    const totalBreakdownTime = Math.round(arpSummary.fleet_unscheduled_downtime);
+    const totalCost = arpSummary.fleet_cour_total;
+    const availability = arpSummary.fleet_availability_percent;
+    const mwtExceeds = arpSummary.mwt_exceeds_mttr;
+    const mwtMttrRatio = arpSummary.mwt_mttr_ratio;
 
-    // 2. MTBF: Total Operational Hours / Total No. of Failures
-    const totalAssets = Math.max(1, filteredEquipment.length);
-    const totalOpHours = totalAssets * 30 * 24; 
-    const totalFailures = Math.max(1, completedCorrective.length + filteredWOs.filter(isCorrective).length);
-    const mtbf = Math.round(totalOpHours / totalFailures);
-
-    // 3. MTTF: Total Hours of Operation / Total Assets
-    const mttf = Math.round(totalOpHours / totalAssets);
-
-    // 4. MWT: Average time waiting for maintenance
-    const assignedWOs = filteredWOs.filter(wo => !((wo.status || '').toLowerCase().includes('init') || (wo.status || '').toLowerCase().includes('mới')));
-    const totalWaitTime = assignedWOs.reduce((sum, wo) => {
-      const created = new Date(wo.createdAt || Date.now()).getTime();
-      const updated = new Date(wo.updatedAt || Date.now()).getTime();
-      return sum + Math.max(0, (updated - created) / (1000 * 60 * 60)); 
-    }, 0);
-    const mwt = assignedWOs.length > 0 ? (totalWaitTime / assignedWOs.length).toFixed(1) : (filteredWOs.length > 0 ? '1.5' : '0.0');
-
-    const totalBreakdownTime = totalRepairTime || (filteredWOs.filter(isCorrective).length * 4);
-    const totalCost = filteredWOs.reduce((sum, wo) => sum + (wo.laborCost || 0) + (wo.partCost || 0), 0) || (filteredWOs.length * 150);
     const backlog = filteredWOs.filter(wo => !isCompleted(wo) && !(wo.status || '').toLowerCase().includes('cancel')).length;
     
     const preventive = filteredWOs.filter(isPreventive);
@@ -4712,6 +4763,10 @@ export default function App() {
       mwt, 
       totalBreakdownTime, 
       totalCost, 
+      availability,
+      mwtExceeds,
+      mwtMttrRatio,
+      arpSummary,
       backlog, 
       compliance, 
       typeDist,
@@ -8172,7 +8227,7 @@ export default function App() {
           >
             <Calendar size={18} className={activeTab === 'pm-schedule' || activeTab === 'cmms' ? 'text-white' : 'text-blue-400'} />
             <span className="flex-1 text-left font-semibold">Kế hoạch PM/CM</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold border border-blue-500/30">23 Cột PMP</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold border border-blue-500/30">PMP</span>
           </button>
           <button 
             onClick={() => handleTabChange('customers')}
@@ -8248,7 +8303,7 @@ export default function App() {
                activeTab === 'reports' ? 'Kho Báo cáo' : 
                activeTab === 'settings' ? 'Cài đặt hệ thống' :
                activeTab === 'field-entry' ? 'Kỹ sư Hiện trường FSE (NETA)' :
-               (activeTab === 'pm-schedule' || activeTab === 'cmms') ? 'Kế Hoạch PM/CM & Phiếu Công Việc (Chuẩn PMP)' :
+               (activeTab === 'pm-schedule' || activeTab === 'cmms') ? 'CMMS - Nền Tảng Quản Lý Công Việc Bảo Trì' :
                activeTab === 'customers' ? 'Quản lý Khách hàng' :
                activeTab === 'inventory' ? 'Quản lý Kho Vật tư' :
                'Kỹ sư Hiện trường FSE'}
@@ -8549,6 +8604,30 @@ export default function App() {
                     <NetaMtsTransformerChecklist
                       initialLanguage={netaLanguage}
                       initialDisplayMode="form"
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'instrument_ct' ? (
+                    <NetaMtsCtChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'instrument_vt' ? (
+                    <NetaMtsVtChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'instrument_ccvt' ? (
+                    <NetaMtsCcvtChecklist
+                      initialLanguage={netaLanguage}
+                      onSaveReport={handleSaveNetaReport}
+                      onNavigateToReports={() => setActiveTab('reports')}
+                    />
+                  ) : mtsChecklistMode === 'busway' ? (
+                    <NetaMtsBuswayChecklist
+                      initialLanguage={netaLanguage}
                       onSaveReport={handleSaveNetaReport}
                       onNavigateToReports={() => setActiveTab('reports')}
                     />
@@ -9275,6 +9354,52 @@ export default function App() {
                 </div>
               </div>
 
+              {/* HIGH-LEVEL PM/CM PROGRESS & MAINTENANCE OPERATIONS EXECUTIVE KPI WIDGET */}
+              <PmCmExecutiveSummaryWidget
+                workOrders={workOrders}
+                reliabilityKpis={reliabilityKpis}
+                onScrollToDetailedTable={() => {
+                  const el = document.getElementById('cmms-work-orders-table');
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }}
+                onCreateWorkOrder={() => {
+                  setNewWorkOrder({
+                    title: '',
+                    description: '',
+                    equipmentId: [],
+                    customerId: selectedCustomer !== 'all' ? selectedCustomer : '',
+                    factory: '',
+                    priority: 'Medium',
+                    type: 'corrective',
+                    status: 'initiated',
+                    assignedTo: user?.email || '',
+                    blockingRequired: false,
+                    workPermitId: '',
+                    isUnplanned: true,
+                    failureCode: '',
+                    rootCause: '',
+                    actualTimeSpent: 0,
+                    pmFrequency: '',
+                    estimatedTime: 2,
+                    laborCount: 1,
+                    laborCost: 0,
+                    partCost: 0,
+                    attachments: [],
+                    downtimeStart: '',
+                    repairStart: '',
+                    repairEnd: '',
+                    restartTime: ''
+                  });
+                  setShowWorkOrderModal(true);
+                }}
+                onNavigateToFullCmms={() => {
+                  setCmmsSubTab('table');
+                  handleTabChange('cmms');
+                }}
+              />
+
               {/* KPI CARDS */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex items-center gap-4 cursor-pointer hover:border-blue-300 transition-colors" onClick={() => { setStatusFilter('all'); handleTabChange('equipment'); }}>
@@ -9318,73 +9443,133 @@ export default function App() {
                 </div>
               </div>
 
-              {/* RELIABILITY KPIs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTBF</p>
-                    <TrendingUp size={14} className="text-emerald-400" />
+              {/* RELIABILITY & COST KPIs (MOBIUS INSTITUTE ARP-E STANDARD) */}
+              <div className="bg-slate-900 rounded-2xl p-5 shadow-xl border border-slate-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                      <Award size={22} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-white text-base">Bộ Chỉ Số Độ Tin Cậy & Chi Phí Bảo Trì</h3>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 uppercase tracking-wider">
+                          Chuẩn Mobius ARP-E
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        Asset Reliability Practitioner – Engineer · Độ sẵn sàng vận hành (Ao): <strong className="text-emerald-400 font-bold">{reliabilityKpis.availability}%</strong>
+                      </p>
+                    </div>
                   </div>
-                  <div className="mt-1">
-                    <p className="text-xl font-bold">{reliabilityKpis.mtbf.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian giữa các sự cố</p>
-                  </div>
+
+                  <button
+                    onClick={() => {
+                      setSelectedArpAssetId(undefined);
+                      setShowArpModal(true);
+                    }}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow-blue-500/20"
+                    title="Mở bảng phân tích chi tiết toàn diện & xuất JSON chuẩn Mobius ARP-E"
+                  >
+                    <BarChart3 size={15} />
+                    <span>Phân tích Chi tiết & Xuất JSON (ARP-E)</span>
+                  </button>
                 </div>
-                
-                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTTR</p>
-                    <TrendingDown size={14} className="text-emerald-400" />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+                  <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-600 transition-colors">
+                    <div className="flex justify-between items-start">
+                      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTBF</p>
+                      <TrendingUp size={14} className="text-emerald-400" />
+                    </div>
+                    <div className="mt-1.5">
+                      <p className="text-xl font-black text-white">{reliabilityKpis.mtbf.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Top / Nf (Repairable)</p>
+                    </div>
                   </div>
-                  <div className="mt-1">
-                    <p className="text-xl font-bold">{reliabilityKpis.mttr} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian sửa chữa TB</p>
+                  
+                  <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-600 transition-colors">
+                    <div className="flex justify-between items-start">
+                      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTTR</p>
+                      <TrendingDown size={14} className="text-emerald-400" />
+                    </div>
+                    <div className="mt-1.5">
+                      <p className="text-xl font-black text-white">{reliabilityKpis.mttr} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Thời gian sửa chữa TB</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-600 transition-colors">
+                    <div className="flex justify-between items-start">
+                      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTTF</p>
+                      <Activity size={14} className="text-blue-400" />
+                    </div>
+                    <div className="mt-1.5">
+                      <p className="text-xl font-black text-white">{reliabilityKpis.mttf.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Thời gian đến khi hỏng</p>
+                    </div>
+                  </div>
+
+                  <div className={`rounded-xl p-3.5 flex flex-col justify-between transition-colors border ${
+                    reliabilityKpis.mwtExceeds 
+                      ? 'bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/30' 
+                      : 'bg-slate-800/80 border-slate-700/80'
+                  }`}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-amber-400 text-[10px] font-bold uppercase tracking-wider">MWT</p>
+                        {reliabilityKpis.mwtExceeds && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        )}
+                      </div>
+                      <Clock size={14} className="text-amber-400" />
+                    </div>
+                    <div className="mt-1.5">
+                      <p className="text-xl font-black text-amber-300">{reliabilityKpis.mwt} <span className="text-[10px] font-normal text-amber-400/80">giờ</span></p>
+                      <p className="text-[9px] text-amber-300/80 mt-0.5">Thời gian chờ bảo trì TB</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-600 transition-colors">
+                    <div className="flex justify-between items-start">
+                      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Downtime</p>
+                      <AlertTriangle size={14} className="text-rose-400" />
+                    </div>
+                    <div className="mt-1.5">
+                      <p className="text-xl font-black text-rose-400">{reliabilityKpis.totalBreakdownTime.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Tổng dừng máy sự cố</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-slate-600 transition-colors">
+                    <div className="flex justify-between items-start">
+                      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">COUR / Cost</p>
+                      <Zap size={14} className="text-emerald-400" />
+                    </div>
+                    <div className="mt-1.5">
+                      <p className="text-xl font-black text-emerald-400">${reliabilityKpis.totalCost.toLocaleString()}</p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Cost of Unreliability</p>
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MTTF</p>
-                    <Activity size={14} className="text-blue-400" />
+                {/* Validation Banner if MWT > MTTR */}
+                {reliabilityKpis.mwtExceeds && (
+                  <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-center gap-2 text-amber-200">
+                      <AlertTriangle size={16} className="text-amber-400 shrink-0" />
+                      <span>
+                        <strong className="text-amber-300">Cảnh báo ARP-E:</strong> MWT ({reliabilityKpis.mwt}h) cao gấp {reliabilityKpis.mwtMttrRatio} lần MTTR ({reliabilityKpis.mttr}h) — Thời gian chờ đợi vượt thời gian sửa chữa thực tế. Khuyến nghị tối ưu khâu Quản lý Kho vật tư và Lập kế hoạch (Job Kitting).
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setShowArpModal(true)}
+                      className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition-colors shrink-0 self-start sm:self-auto"
+                    >
+                      Xem Bảng Phân Tích
+                    </button>
                   </div>
-                  <div className="mt-1">
-                    <p className="text-xl font-bold">{reliabilityKpis.mttf.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian đến khi hỏng</p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">MWT</p>
-                    <Clock size={14} className="text-amber-400" />
-                  </div>
-                  <div className="mt-1">
-                    <p className="text-xl font-bold">{reliabilityKpis.mwt} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Thời gian chờ bảo trì</p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Downtime</p>
-                    <AlertTriangle size={14} className="text-rose-400" />
-                  </div>
-                  <div className="mt-1">
-                    <p className="text-xl font-bold">{reliabilityKpis.totalBreakdownTime.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">giờ</span></p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Tổng thời gian dừng máy</p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-900 text-white rounded-xl p-4 shadow-lg flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Cost</p>
-                    <Zap size={14} className="text-emerald-400" />
-                  </div>
-                  <div className="mt-1">
-                    <p className="text-xl font-bold">${reliabilityKpis.totalCost.toLocaleString()}</p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Chi phí bảo trì tổng cộng</p>
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -9659,7 +9844,7 @@ export default function App() {
                         onClick={() => setSelectedRiskDetail(item.id)}
                         className="p-3 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer border-b border-slate-50 last:border-0"
                       >
-                        <div className="flex justify-between items-start mb-1">
+                        <div className="flex justify-between items-start mb-1 gap-2">
                           <span className="font-medium text-slate-900 text-sm">{item.name}</span>
                           <StatusBadge status={item.status} />
                         </div>
@@ -10081,391 +10266,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* CMMS WORK ORDERS MANAGEMENT & REAL-TIME STATUS */}
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex flex-col gap-4 bg-gradient-to-r from-slate-50 via-white to-blue-50/30">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
-                          <ClipboardList size={20} />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h2 className="font-bold text-slate-800 text-base">
-                              Phiếu công việc CMMS &amp; Bảo trì hiện trường
-                            </h2>
-                            <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                              {dashboardFilteredWorkOrders.length} / {workOrders.length} Phiếu
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            Theo dõi tiến độ xử lý sự cố, bảo dưỡng định kỳ và dữ liệu CMMS đồng bộ Google Sheets
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setCmmsSubTab('table');
-                          handleTabChange('cmms');
-                        }}
-                        className="text-xs sm:text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-md font-semibold transition-colors flex items-center gap-1.5 shadow-2xs"
-                        title="Chuyển đến màn hình Quản lý CMMS chuyên sâu"
-                      >
-                        <span>Mở phân hệ CMMS đầy đủ</span>
-                        <ArrowUpRight size={14} />
-                      </button>
 
-                      <button
-                        onClick={() => {
-                          setNewWorkOrder({
-                            title: '',
-                            description: '',
-                            equipmentId: [],
-                            customerId: selectedCustomer !== 'all' ? selectedCustomer : '',
-                            factory: '',
-                            priority: 'Medium',
-                            type: 'corrective',
-                            status: 'initiated',
-                            assignedTo: user?.email || '',
-                            blockingRequired: false,
-                            workPermitId: '',
-                            isUnplanned: true,
-                            failureCode: '',
-                            rootCause: '',
-                            actualTimeSpent: 0,
-                            pmFrequency: '',
-                            estimatedTime: 2,
-                            laborCount: 1,
-                            laborCost: 0,
-                            partCost: 0,
-                            attachments: [],
-                            downtimeStart: '',
-                            repairStart: '',
-                            repairEnd: '',
-                            restartTime: ''
-                          });
-                          setShowWorkOrderModal(true);
-                        }}
-                        className="text-xs sm:text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md font-semibold transition-colors flex items-center gap-1.5 shadow-xs"
-                      >
-                        <Plus size={14} />
-                        <span>Tạo phiếu WO</span>
-                      </button>
-
-                      <button
-                        onClick={handleFetchFromSheets}
-                        disabled={!isGoogleConnected || isSyncing}
-                        className="text-xs sm:text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1.5"
-                        title="Tải lại phiếu từ Google Sheet TEV Service Flatform"
-                      >
-                        <RefreshCw size={13} className={isSyncing ? 'animate-spin text-blue-600' : 'text-slate-500'} />
-                        <span className="hidden sm:inline">Làm mới Sheets</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Quick KPI stats row for CMMS */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-200/60">
-                    <button
-                      onClick={() => setDashboardWoFilter('all')}
-                      className={`p-2.5 rounded-lg border text-left transition-all ${
-                        dashboardWoFilter === 'all'
-                          ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400'
-                          : 'bg-white border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="text-[11px] font-medium text-slate-500">Tất cả phiếu</p>
-                      <p className="text-lg font-bold text-slate-900">{workOrders.length}</p>
-                    </button>
-
-                    <button
-                      onClick={() => setDashboardWoFilter('initiated')}
-                      className={`p-2.5 rounded-lg border text-left transition-all ${
-                        dashboardWoFilter === 'initiated'
-                          ? 'bg-sky-50 border-sky-300 ring-1 ring-sky-400'
-                          : 'bg-white border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="text-[11px] font-medium text-sky-600 flex items-center gap-1">
-                        <Clock size={12} /> Mới tạo / Chờ duyệt
-                      </p>
-                      <p className="text-lg font-bold text-sky-700">{reliabilityKpis.initiatedCount}</p>
-                    </button>
-
-                    <button
-                      onClick={() => setDashboardWoFilter('in-progress')}
-                      className={`p-2.5 rounded-lg border text-left transition-all ${
-                        dashboardWoFilter === 'in-progress'
-                          ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-400'
-                          : 'bg-white border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="text-[11px] font-medium text-amber-600 flex items-center gap-1">
-                        <Activity size={12} /> Đang xử lý (Active)
-                      </p>
-                      <p className="text-lg font-bold text-amber-700">{reliabilityKpis.inProgressCount}</p>
-                    </button>
-
-                    <button
-                      onClick={() => setDashboardWoFilter('corrective')}
-                      className={`p-2.5 rounded-lg border text-left transition-all ${
-                        dashboardWoFilter === 'corrective'
-                          ? 'bg-rose-50 border-rose-300 ring-1 ring-rose-400'
-                          : 'bg-white border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="text-[11px] font-medium text-rose-600 flex items-center gap-1">
-                        <AlertTriangle size={12} /> Sự cố đột xuất (CM)
-                      </p>
-                      <p className="text-lg font-bold text-rose-700">
-                        {workOrders.filter(wo => {
-                          const t = (wo.type || '').toLowerCase();
-                          return t.includes('corrective') || t.includes('đột xuất') || t.includes('cm') || wo.isUnplanned;
-                        }).length}
-                      </p>
-                    </button>
-
-                    <button
-                      onClick={() => setDashboardWoFilter('preventive')}
-                      className={`p-2.5 rounded-lg border text-left transition-all ${
-                        dashboardWoFilter === 'preventive'
-                          ? 'bg-emerald-50 border-emerald-300 ring-1 ring-emerald-400'
-                          : 'bg-white border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="text-[11px] font-medium text-emerald-600 flex items-center gap-1">
-                        <CheckCircle size={12} /> Định kỳ (PM)
-                      </p>
-                      <p className="text-lg font-bold text-emerald-700">
-                        {workOrders.filter(wo => {
-                          const t = (wo.type || '').toLowerCase();
-                          return t.includes('preventive') || t.includes('định kỳ') || t.includes('pm');
-                        }).length}
-                      </p>
-                    </button>
-                  </div>
-
-                  {/* Filter & Search Bar */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-                    <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
-                      <span className="text-xs text-slate-500 font-medium mr-1">Lọc nhanh:</span>
-                      {[
-                        { id: 'all', label: 'Tất cả' },
-                        { id: 'initiated', label: 'Mới tạo' },
-                        { id: 'in-progress', label: 'Đang làm' },
-                        { id: 'corrective', label: 'Sửa đột xuất (CM)' },
-                        { id: 'preventive', label: 'Bảo trì định kỳ (PM)' },
-                        { id: 'overdue', label: 'Quá hạn' },
-                      ].map(f => (
-                        <button
-                          key={f.id}
-                          onClick={() => setDashboardWoFilter(f.id as any)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                            dashboardWoFilter === f.id
-                              ? 'bg-slate-800 text-white shadow-2xs font-semibold'
-                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                          }`}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="relative w-full sm:w-72">
-                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Tìm WO, thiết bị, khách hàng..."
-                        value={dashboardWoSearch}
-                        onChange={(e) => setDashboardWoSearch(e.target.value)}
-                        className="w-full text-xs pl-8 pr-3 py-1.5 border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      {dashboardWoSearch && (
-                        <button
-                          onClick={() => setDashboardWoSearch('')}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Table of Work Orders */}
-                <div className="overflow-x-auto max-h-[460px]">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 bg-slate-100 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-600 font-semibold z-10">
-                      <tr>
-                        <th className="p-3">Mã WO &amp; Tiêu đề</th>
-                        <th className="p-3">Thiết bị &amp; Khách hàng</th>
-                        <th className="p-3">Loại hình</th>
-                        <th className="p-3">Ưu tiên</th>
-                        <th className="p-3">Trạng thái</th>
-                        <th className="p-3">Phụ trách</th>
-                        <th className="p-3">Hạn chót</th>
-                        <th className="p-3 text-right">Thao tác</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-xs divide-y divide-slate-100">
-                      {dashboardFilteredWorkOrders.length > 0 ? (
-                        dashboardFilteredWorkOrders.map((wo) => {
-                          const eqStr = Array.isArray(wo.equipmentId) ? wo.equipmentId.join(', ') : (wo.equipmentId || 'Chưa gán');
-                          const isHigh = wo.priority === 'Critical' || wo.priority === 'High' || wo.priority === 'Khẩn cấp';
-                          const statusLower = (wo.status || '').toLowerCase();
-                          const isDone = statusLower.includes('complete') || statusLower.includes('hoàn thành');
-                          const isInProg = statusLower.includes('progress') || statusLower.includes('đang');
-                          
-                          return (
-                            <tr key={wo.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-3">
-                                <div className="font-mono font-bold text-blue-700 flex items-center gap-1.5">
-                                  <span>{wo.id}</span>
-                                  {wo.workPermitId && (
-                                    <span className="text-[10px] font-normal text-slate-400 font-sans">
-                                      ({wo.workPermitId})
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="font-medium text-slate-900 mt-0.5 line-clamp-1" title={wo.title}>
-                                  {wo.title}
-                                </div>
-                                {wo.description && (
-                                  <div className="text-[11px] text-slate-500 line-clamp-1" title={wo.description}>
-                                    {wo.description}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="p-3">
-                                <div className="font-semibold text-slate-800 flex items-center gap-1">
-                                  <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 font-mono text-[10px]">
-                                    {eqStr}
-                                  </span>
-                                  {wo.equipmentName && (
-                                    <span className="text-[11px] text-slate-600 line-clamp-1">
-                                      {wo.equipmentName}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
-                                  <Factory size={11} className="text-slate-400" />
-                                  <span className="font-medium text-slate-700">{wo.customer || 'Chưa phân loại'}</span>
-                                </div>
-                              </td>
-                              <td className="p-3">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                  (wo.type || '').toLowerCase().includes('corrective') || (wo.type || '').toLowerCase().includes('đột xuất') || wo.isUnplanned
-                                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                    : (wo.type || '').toLowerCase().includes('preventive') || (wo.type || '').toLowerCase().includes('định kỳ')
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
-                                }`}>
-                                  {wo.type || (wo.isUnplanned ? 'Sửa đột xuất (CM)' : 'Định kỳ (PM)')}
-                                </span>
-                              </td>
-                              <td className="p-3">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  isHigh
-                                    ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                                    : wo.priority === 'Medium' || wo.priority === 'Trung bình'
-                                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
-                                }`}>
-                                  {wo.priority || 'Medium'}
-                                </span>
-                              </td>
-                              <td className="p-3">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                  isDone
-                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                    : isInProg
-                                    ? 'bg-amber-100 text-amber-800 border border-amber-200 animate-pulse'
-                                    : 'bg-sky-100 text-sky-800 border border-sky-200'
-                                }`}>
-                                  <span className={`w-1.5 h-1.5 rounded-full ${
-                                    isDone ? 'bg-emerald-600' : isInProg ? 'bg-amber-600' : 'bg-sky-600'
-                                  }`}></span>
-                                  {isDone ? 'Hoàn thành' : isInProg ? 'Đang xử lý' : (wo.status || 'Mới tạo')}
-                                </span>
-                              </td>
-                              <td className="p-3 text-slate-600">
-                                <div className="text-[11px] font-medium text-slate-800">{wo.assignedTo || 'Chưa phân công'}</div>
-                                {wo.responsibleDo && <div className="text-[10px] text-slate-400">{wo.responsibleDo}</div>}
-                              </td>
-                              <td className="p-3 font-mono text-slate-600 text-[11px]">
-                                {wo.dueDate ? (
-                                  <span className={new Date(wo.dueDate).getTime() < Date.now() && !isDone ? 'text-rose-600 font-bold' : ''}>
-                                    {wo.dueDate}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-400">-</span>
-                                )}
-                              </td>
-                              <td className="p-3 text-right">
-                                <div className="flex items-center justify-end gap-1.5">
-                                  {!isDone && (
-                                    <button
-                                      onClick={() => handleQuickUpdateWorkOrderStatus(wo.id, isInProg ? 'completed' : 'in_progress')}
-                                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium rounded transition-colors"
-                                      title={isInProg ? 'Đánh dấu hoàn thành' : 'Chuyển sang Đang xử lý'}
-                                    >
-                                      {isInProg ? '✓ Hoàn thành' : '▶ Bắt đầu'}
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => handleOpenWorkOrderDetail(wo)}
-                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                    title="Xem chi tiết phiếu trong CMMS"
-                                  >
-                                    <Eye size={16} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={8} className="p-8 text-center text-slate-500">
-                            <div className="flex flex-col items-center justify-center gap-2">
-                              <ClipboardList size={32} className="text-slate-300" />
-                              <p className="text-sm font-medium">Không tìm thấy phiếu CMMS nào phù hợp với bộ lọc</p>
-                              <p className="text-xs text-slate-400">
-                                Thử chọn lại khách hàng &quot;Tất cả&quot; hoặc xóa từ khóa tìm kiếm
-                              </p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="p-3 border-t border-slate-100 bg-slate-50 flex flex-wrap items-center justify-between text-xs text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <span>Hiển thị <strong>{dashboardFilteredWorkOrders.length}</strong> / <strong>{workOrders.length}</strong> phiếu công việc.</span>
-                    {selectedCustomer !== 'all' && (
-                      <span className="text-blue-600 font-semibold">(Đang lọc theo: {selectedCustomer})</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => {
-                        setCmmsSubTab('station');
-                        handleTabChange('cmms');
-                      }}
-                      className="text-blue-600 hover:text-blue-800 font-semibold transition-colors flex items-center gap-1"
-                    >
-                      <span>Trạm nhập liệu &amp; Thí nghiệm hiện trường</span>
-                      <ArrowUpRight size={13} />
-                    </button>
-                  </div>
-                </div>
-              </div>
 
               {/* ALL EQUIPMENT TABLE */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -10691,6 +10492,40 @@ export default function App() {
           {/* --- EQUIPMENT MANAGEMENT VIEW --- */}
           {activeTab === 'equipment' && (
             <div className="max-w-7xl mx-auto space-y-6">
+              {/* PHẦN PHÁT HIỆN THIẾT BỊ CÓ HEALTH INDEX < 50% HOẶC QUÁ HẠN BẢO TRÌ > 30 NGÀY */}
+              <EquipmentRedAlertSection
+                summary={equipmentRedAlertSummary}
+                isFilterActive={statusFilter === 'red_alert'}
+                onFilterToEquipment={(equipmentId) => {
+                  setFilterName(equipmentId);
+                  setCurrentPage(1);
+                }}
+                onFilterToAllRedAlerts={() => {
+                  setStatusFilter('red_alert');
+                  setFilterName('');
+                  setCurrentPage(1);
+                }}
+                onClearRedAlertFilter={() => {
+                  setStatusFilter('all');
+                  setFilterName('');
+                  setCurrentPage(1);
+                }}
+                onOpenWorkOrderModal={(equipment) => {
+                  setActiveTab('cmms');
+                  setCmmsSubTab('station');
+                }}
+                onNavigateToInspection={(equipment) => {
+                  setActiveTab('field-entry');
+                  setFieldEntrySubTab('station');
+                }}
+                onSelectRiskDetail={(equipmentId) => {
+                  setSelectedRiskDetail(equipmentId);
+                }}
+                onViewEquipmentProfile={(equipment) => {
+                  setSelectedRiskDetail(equipment.id);
+                }}
+              />
+
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px] lg:h-[calc(100vh-8rem)]">
                 <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex flex-col gap-1">
@@ -10792,7 +10627,11 @@ export default function App() {
                     <option value="Inverter">Inverter Solar/Wind ({allEquipment.filter(e => e.type?.includes('Inverter') || e.type?.includes('biến tần')).length})</option>
                   </select>
                   <select 
-                    className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 outline-none focus:border-blue-500"
+                    className={`bg-white border rounded-md px-3 py-1.5 text-slate-700 outline-none transition-colors ${
+                      statusFilter === 'red_alert' 
+                        ? 'border-rose-400 font-bold text-rose-700 bg-rose-50/40 ring-1 ring-rose-400' 
+                        : 'border-slate-200 focus:border-blue-500'
+                    }`}
                     value={statusFilter}
                     onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
                   >
@@ -10800,7 +10639,21 @@ export default function App() {
                     <option value="healthy">Khỏe mạnh</option>
                     <option value="warning">Cảnh báo</option>
                     <option value="critical">Nguy hiểm</option>
+                    <option value="red_alert">🚨 Cảnh báo đỏ ({equipmentRedAlertSummary.totalAlerts})</option>
                   </select>
+                  {statusFilter === 'red_alert' && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-rose-100 border border-rose-300 rounded-md text-xs font-bold text-rose-800">
+                      <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse"></span>
+                      <span>Đang lọc: Cảnh Báo Đỏ ({equipmentRedAlertSummary.totalAlerts} TB)</span>
+                      <button 
+                        onClick={() => setStatusFilter('all')} 
+                        className="ml-1 text-rose-600 hover:text-rose-900 font-extrabold text-sm"
+                        title="Bỏ lọc"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Equipment Table */}
@@ -10928,6 +10781,61 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* DETAILED PM/CM WORK ORDERS & FIELD MAINTENANCE MANAGEMENT MODULE (LOCATED AT BOTTOM OF DASHBOARD) */}
+              <DashboardPmCmProgressModule
+                workOrders={workOrders}
+                dashboardFilteredWorkOrders={dashboardFilteredWorkOrders}
+                dashboardWoFilter={dashboardWoFilter}
+                setDashboardWoFilter={setDashboardWoFilter}
+                dashboardWoSearch={dashboardWoSearch}
+                setDashboardWoSearch={setDashboardWoSearch}
+                reliabilityKpis={reliabilityKpis}
+                selectedCustomer={selectedCustomer}
+                isGoogleConnected={isGoogleConnected}
+                isSyncing={isSyncing}
+                onFetchFromSheets={handleFetchFromSheets}
+                onOpenWorkOrderDetail={handleOpenWorkOrderDetail}
+                onQuickUpdateStatus={(woId: string, newStatus: string) => handleQuickUpdateWorkOrderStatus(woId, newStatus as any)}
+                onCreateWorkOrder={() => {
+                  setNewWorkOrder({
+                    title: '',
+                    description: '',
+                    equipmentId: [],
+                    customerId: selectedCustomer !== 'all' ? selectedCustomer : '',
+                    factory: '',
+                    priority: 'Medium',
+                    type: 'corrective',
+                    status: 'initiated',
+                    assignedTo: user?.email || '',
+                    blockingRequired: false,
+                    workPermitId: '',
+                    isUnplanned: true,
+                    failureCode: '',
+                    rootCause: '',
+                    actualTimeSpent: 0,
+                    pmFrequency: '',
+                    estimatedTime: 2,
+                    laborCount: 1,
+                    laborCost: 0,
+                    partCost: 0,
+                    attachments: [],
+                    downtimeStart: '',
+                    repairStart: '',
+                    repairEnd: '',
+                    restartTime: ''
+                  });
+                  setShowWorkOrderModal(true);
+                }}
+                onNavigateToFullCmms={() => {
+                  setCmmsSubTab('table');
+                  handleTabChange('cmms');
+                }}
+                onNavigateToFieldStation={() => {
+                  setCmmsSubTab('station');
+                  handleTabChange('cmms');
+                }}
+              />
             </div>
           )}
 
@@ -11877,7 +11785,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {/* --- CONSOLIDATED PMP PM/CM & WORK ORDER - WORK PERMIT (23 CỘT CHUẨN TEV) VIEW --- */}
+          {/* --- CONSOLIDATED PMP PM/CM & WORK ORDER - WORK PERMIT VIEW --- */}
           {(activeTab === "pm-schedule" || activeTab === "cmms") && (
             <PmpPmCmWorkOrderPermitManager
               workOrders={workOrders}
@@ -13911,6 +13819,16 @@ export default function App() {
           }}
         />
       )}
+
+      {/* MOBIUS INSTITUTE ARP-E RELIABILITY & COST ANALYSIS MODAL */}
+      <ArpReliabilityAnalysisModal
+        isOpen={showArpModal}
+        onClose={() => setShowArpModal(false)}
+        fleetSummary={reliabilityKpis.arpSummary}
+        selectedAssetId={selectedArpAssetId}
+        allEquipment={filteredEquipment}
+        workOrders={workOrders}
+      />
 
       {/* MOBILE BOTTOM NAVIGATION BAR */}
       <MobileBottomNav

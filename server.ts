@@ -78,6 +78,10 @@ import {
   NetaEcsUpsInputPayload,
 } from './server/netaEcsUpsAnalyzer';
 import {
+  generateEcsHvAiAnalysis,
+  NetaEcsHvInputPayload,
+} from './server/netaEcsHighVoltageAnalyzer';
+import {
   generateNetaMotorAiAnalysis,
   NetaMotorInputPayload,
 } from './server/netaMotorAnalyzer';
@@ -89,6 +93,22 @@ import {
   generateNetaMtsTransformerAiAnalysis,
   NetaMtsTransformerInputPayload,
 } from './server/netaMtsTransformerAnalyzer';
+import {
+  generateNetaMtsCtAiAnalysis,
+  NetaMtsCtInputPayload,
+} from './server/netaMtsCtAnalyzer';
+import {
+  generateNetaMtsVtAiAnalysis,
+  NetaMtsVtInputPayload,
+} from './server/netaMtsVtAnalyzer';
+import {
+  generateNetaMtsCcvtAiAnalysis,
+  NetaMtsCcvtInputPayload,
+} from './server/netaMtsCcvtAnalyzer';
+import {
+  generateNetaMtsBuswayAiAnalysis,
+  NetaMtsBuswayInputPayload,
+} from './server/netaMtsBuswayAnalyzer';
 import {
   generateNetaRelayAiAnalysis,
   NetaRelayInputPayload,
@@ -1362,57 +1382,65 @@ app.post('/api/sheets/sync-export', async (req, res) => {
     const dataToWrite: any[] = [];
     const actualWoData = tevServiceFlatformData || cmmsData;
 
-    // 0: TEV Service Flatform
+    const getSheetTitle = (key: string) => resolvedSheets.find(s => s.key === key)?.title || key;
+
+    const projectsDataActual = req.body.projectsData || req.body.duanData;
+
+    // 0: TEV Service Flatform (Work Orders / CMMS)
     if (actualWoData && actualWoData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[0].title}!A1`, values: actualWoData });
+      dataToWrite.push({ range: `${getSheetTitle('tev')}!A1`, values: actualWoData });
     }
     // 1: khachhang
     if (customersData && customersData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[1].title}!A1`, values: customersData });
+      dataToWrite.push({ range: `${getSheetTitle('khachhang')}!A1`, values: customersData });
     }
     // 2: thietbi
     if (equipmentData && equipmentData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[2].title}!A1`, values: equipmentData });
+      dataToWrite.push({ range: `${getSheetTitle('thietbi')}!A1`, values: equipmentData });
     }
     // 3: FSE
     if (fseData && fseData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[3].title}!A1`, values: fseData });
+      dataToWrite.push({ range: `${getSheetTitle('fse')}!A1`, values: fseData });
     }
-    // Breakers
+    // 4: Dự án (Projects & Site Prep)
+    if (projectsDataActual && projectsDataActual.length > 0) {
+      dataToWrite.push({ range: `${getSheetTitle('duan')}!A1`, values: projectsDataActual });
+    }
+    // 5: Breakers (Máy cắt)
     if (breakersData && breakersData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[4].title}!A1`, values: breakersData });
+      dataToWrite.push({ range: `${getSheetTitle('maycat')}!A1`, values: breakersData });
     }
-    // Motors
+    // 6: Motors (Động cơ)
     if (motors && motors.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[5].title}!A1`, values: motors });
+      dataToWrite.push({ range: `${getSheetTitle('dongco')}!A1`, values: motors });
     }
-    // Generators
+    // 7: Generators (Máy phát)
     if (generators && generators.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[6].title}!A1`, values: generators });
+      dataToWrite.push({ range: `${getSheetTitle('mayphat')}!A1`, values: generators });
     }
-    // Switchgears
+    // 8: Switchgears (Tủ điện)
     if (switchgears && switchgears.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[7].title}!A1`, values: switchgears });
+      dataToWrite.push({ range: `${getSheetTitle('tudien')}!A1`, values: switchgears });
     }
-    // Transformers
+    // 9: Transformers (Máy biến áp)
     if (transformers && transformers.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[8].title}!A1`, values: transformers });
+      dataToWrite.push({ range: `${getSheetTitle('mba')}!A1`, values: transformers });
     }
-    // Cables
+    // 10: Cables (Cáp điện)
     if (cablesData && cablesData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[9].title}!A1`, values: cablesData });
+      dataToWrite.push({ range: `${getSheetTitle('capdien')}!A1`, values: cablesData });
     }
-    // Batteries
+    // 11: Batteries (Pin & UPS)
     if (batteriesData && batteriesData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[10].title}!A1`, values: batteriesData });
+      dataToWrite.push({ range: `${getSheetTitle('pin_ups')}!A1`, values: batteriesData });
     }
-    // Relays
+    // 12: Relays (Rơ le)
     if (relaysData && relaysData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[11].title}!A1`, values: relaysData });
+      dataToWrite.push({ range: `${getSheetTitle('role')}!A1`, values: relaysData });
     }
-    // Inventory
+    // 13: Inventory (Kho)
     if (inventoryData && inventoryData.length > 0) {
-      dataToWrite.push({ range: `${resolvedSheets[12].title}!A1`, values: inventoryData });
+      dataToWrite.push({ range: `${getSheetTitle('kho')}!A1`, values: inventoryData });
     }
 
     if (dataToWrite.length > 0) {
@@ -2225,6 +2253,25 @@ app.post('/api/field-service/neta-ecs-ups-analyze', async (req, res) => {
   }
 });
 
+// 13k. NETA ECS-2024 High-Voltage and Extra-High Voltage Systems (Section 7.3, NETA Tables, IEEE 81, IEEE C57.104, NERC PRC)
+app.post('/api/field-service/neta-ecs-hv-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaEcsHvInputPayload;
+    if (!payload || !payload.pre_energization_7_3_a || !payload.energization_7_3_b) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu nghiệm thu chạy thử hệ thống Cao thế & Siêu cao thế theo ANSI/NETA ECS-2024 Mục 7.3.' });
+    }
+
+    const evaluation = await generateEcsHvAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing NETA ECS-2024 HV/EHV data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 14. NETA ATS-2025 Rotating Machinery AC Induction Motors & Generators (Section 7.15.1 & Tables 100.10, 100.11, 100.12)
 app.post('/api/field-service/neta-motor-analyze', async (req, res) => {
   try {
@@ -2306,6 +2353,94 @@ app.post('/api/field-service/neta-mts-transformer-analyze', async (req, res) => 
     });
   } catch (error: any) {
     console.error('Error analyzing ANSI/NETA MTS-2023 Liquid Transformer data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13c. ANSI/NETA MTS-2023 Instrument Transformers - Current Transformers (CT) (Section 7.10.1 & Tables 100.5, 100.9, 100.12, 100.18)
+app.post('/api/field-service/neta-mts-ct-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaMtsCtInputPayload;
+    if (!payload || !payload.electrical_tests_7_10_1_b || !payload.visual_and_mechanical_inspection) {
+      return res.status(400).json({
+        success: false,
+        error: 'Thiếu dữ liệu kiểm tra bảo trì biến dòng điện CT theo ANSI/NETA MTS-2023 Mục 7.10.1.',
+      });
+    }
+
+    const evaluation = await generateNetaMtsCtAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing ANSI/NETA MTS-2023 Instrument CT data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13d. ANSI/NETA MTS-2023 Instrument Transformers - Voltage Transformers (VT/PT) (Section 7.10.2 & Tables 100.5, 100.9, 100.12, 100.18)
+app.post('/api/field-service/neta-mts-vt-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaMtsVtInputPayload;
+    if (!payload || !payload.electrical_tests_7_10_2_b || !payload.visual_and_mechanical_inspection) {
+      return res.status(400).json({
+        success: false,
+        error: 'Thiếu dữ liệu kiểm tra bảo trì biến điện áp VT/PT theo ANSI/NETA MTS-2023 Mục 7.10.2.',
+      });
+    }
+
+    const evaluation = await generateNetaMtsVtAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing ANSI/NETA MTS-2023 Instrument VT/PT data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13e. ANSI/NETA MTS-2023 Instrument Transformers - Coupling-Capacitor Voltage Transformers (CCVT) (Section 7.10.3 & Tables 100.5, 100.9, 100.12, 100.18, IEEE C93.1)
+app.post('/api/field-service/neta-mts-ccvt-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaMtsCcvtInputPayload;
+    if (!payload || !payload.electrical_tests_7_10_3_b || !payload.visual_and_mechanical_inspection) {
+      return res.status(400).json({
+        success: false,
+        error: 'Thiếu dữ liệu kiểm tra bảo trì biến điện áp kiểu tụ CCVT theo ANSI/NETA MTS-2023 Mục 7.10.3.',
+      });
+    }
+
+    const evaluation = await generateNetaMtsCcvtAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing ANSI/NETA MTS-2023 CCVT data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13f. ANSI/NETA MTS-2023 Metal-Enclosed Busways, Low- and Medium-Voltage (Section 7.4 & Tables 100.1, 100.12, 100.17, 100.18, 100.23)
+app.post('/api/field-service/neta-mts-busway-analyze', async (req, res) => {
+  try {
+    const payload = req.body as NetaMtsBuswayInputPayload;
+    if (!payload || !payload.electrical_tests_7_4_b || !payload.visual_and_mechanical_inspection) {
+      return res.status(400).json({
+        success: false,
+        error: 'Thiếu dữ liệu kiểm tra bảo trì thanh cái vỏ kim loại Busway theo ANSI/NETA MTS-2023 Mục 7.4.',
+      });
+    }
+
+    const evaluation = await generateNetaMtsBuswayAiAnalysis(payload);
+    res.json({
+      success: true,
+      data: evaluation,
+    });
+  } catch (error: any) {
+    console.error('Error analyzing ANSI/NETA MTS-2023 Metal-Enclosed Busway data:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

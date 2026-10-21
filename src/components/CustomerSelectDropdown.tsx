@@ -29,6 +29,7 @@ interface CustomerSelectDropdownProps {
   className?: string;
   label?: string;
   required?: boolean;
+  darkTheme?: boolean;
 }
 
 export const CustomerSelectDropdown: React.FC<CustomerSelectDropdownProps> = ({
@@ -38,11 +39,13 @@ export const CustomerSelectDropdown: React.FC<CustomerSelectDropdownProps> = ({
   placeholder = 'Chọn hoặc thêm Mã / Tên Khách Hàng...',
   className = '',
   label,
-  required = false
+  required = false,
+  darkTheme = false
 }) => {
   const [customers, setCustomers] = useState<CustomerRecord[]>(() => getRegisteredCustomers());
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [quickNewCustomer, setQuickNewCustomer] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
   // New customer form state
@@ -152,6 +155,38 @@ export const CustomerSelectDropdown: React.FC<CustomerSelectDropdownProps> = ({
     setNewCust({ id: '', name: '', factories: '', email: '', phone: '', address: '' });
   };
 
+  const handleQuickAdd = () => {
+    const nameToAdd = quickNewCustomer.trim() || search.trim();
+    if (!nameToAdd) return;
+
+    const existing = customers.find(
+      (c) => c.name.toLowerCase() === nameToAdd.toLowerCase()
+    );
+    if (existing) {
+      handleSelect(existing);
+      setQuickNewCustomer('');
+      return;
+    }
+
+    const nextId = getNextCustomerId(customers);
+    const created: CustomerRecord = {
+      id: nextId,
+      name: nameToAdd,
+      factories: ['Nhà máy chính'],
+      email: '',
+      phone: '',
+      address: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const updatedList = saveCustomerRecord(created);
+    setCustomers(updatedList);
+    handleSelect(created);
+    setQuickNewCustomer('');
+    setSearch('');
+  };
+
   const filtered = customers.filter(
     (c) =>
       c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -171,13 +206,23 @@ export const CustomerSelectDropdown: React.FC<CustomerSelectDropdownProps> = ({
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
       {label && (
-        <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+        <label
+          className={`block text-xs font-semibold mb-1 flex items-center justify-between ${
+            darkTheme ? 'text-slate-300' : 'text-slate-700'
+          }`}
+        >
           <span className="flex items-center gap-1.5">
-            <Building2 size={13} className="text-blue-600" />
+            <Building2 size={13} className="text-blue-500" />
             {label} {required && <span className="text-red-500">*</span>}
           </span>
-          <span className="text-[10px] font-mono text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
-            Sheet khachhang
+          <span
+            className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+              darkTheme
+                ? 'bg-slate-800 text-blue-300 border-slate-700'
+                : 'bg-blue-50 text-blue-600 border-blue-200'
+            }`}
+          >
+            Sheet khachhang ({customers.length})
           </span>
         </label>
       )}
@@ -187,24 +232,48 @@ export const CustomerSelectDropdown: React.FC<CustomerSelectDropdownProps> = ({
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className={`w-full text-left bg-white border rounded-lg px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all flex items-center justify-between shadow-2xs group ${
-            activeCustomer ? 'border-blue-300 bg-blue-50/20' : 'border-slate-300 hover:border-blue-400'
+          className={`w-full text-left border rounded-lg px-3 py-2 text-xs font-medium focus:ring-1 focus:ring-blue-500 focus:outline-hidden transition-all flex items-center justify-between shadow-2xs group ${
+            darkTheme
+              ? 'bg-slate-950 border-slate-700 text-white hover:border-blue-400'
+              : activeCustomer
+              ? 'bg-blue-50/20 border-blue-300 text-slate-900'
+              : 'bg-white border-slate-300 hover:border-blue-400 text-slate-800'
           }`}
         >
           <div className="flex items-center gap-2 min-w-0 pr-1">
-            <div className="w-5 h-5 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold shrink-0">
+            <div
+              className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                darkTheme
+                  ? 'bg-blue-900/40 text-blue-400 border border-blue-800'
+                  : 'bg-blue-100 text-blue-700'
+              }`}
+            >
               <Building2 size={12} />
             </div>
             <div className="truncate">
               {activeCustomer ? (
                 <div className="flex items-center gap-1.5 truncate">
-                  <span className="font-bold text-slate-900 truncate">{activeCustomer.name}</span>
-                  <span className="text-[10px] font-mono bg-blue-100 text-blue-800 px-1 py-0.2 rounded font-semibold shrink-0">
+                  <span className="font-bold truncate">{activeCustomer.name}</span>
+                  <span
+                    className={`text-[10px] font-mono px-1 py-0.2 rounded font-semibold shrink-0 ${
+                      darkTheme
+                        ? 'bg-slate-800 text-blue-300 border border-slate-700'
+                        : 'bg-blue-100 text-blue-800'
+                    }`}
+                  >
                     {activeCustomer.id}
                   </span>
                 </div>
               ) : (
-                <span className={cleanVal ? 'font-medium text-slate-800' : 'text-slate-400'}>
+                <span
+                  className={
+                    cleanVal
+                      ? 'font-medium'
+                      : darkTheme
+                      ? 'text-slate-500'
+                      : 'text-slate-400'
+                  }
+                >
                   {cleanVal || placeholder}
                 </span>
               )}
@@ -212,9 +281,9 @@ export const CustomerSelectDropdown: React.FC<CustomerSelectDropdownProps> = ({
           </div>
           <ChevronDown
             size={14}
-            className={`text-slate-400 group-hover:text-blue-600 shrink-0 transition-transform ${
-              isOpen ? 'rotate-180' : ''
-            }`}
+            className={`shrink-0 transition-transform ${
+              darkTheme ? 'text-slate-400' : 'text-slate-500'
+            } group-hover:text-blue-500 ${isOpen ? 'rotate-180' : ''}`}
           />
         </button>
 
@@ -235,32 +304,80 @@ export const CustomerSelectDropdown: React.FC<CustomerSelectDropdownProps> = ({
 
       {/* Floating Dropdown */}
       {isOpen && (
-        <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100 min-w-[320px]">
+        <div
+          className={`absolute left-0 right-0 mt-1.5 border rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100 min-w-[320px] ${
+            darkTheme
+              ? 'bg-slate-900 border-slate-700 text-slate-200'
+              : 'bg-white border-slate-200 text-slate-800'
+          }`}
+        >
           {/* Header & Search */}
-          <div className="p-2.5 bg-slate-50 border-b border-slate-200 space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-              <span className="flex items-center gap-1.5 text-blue-800">
-                <FileSpreadsheet size={13} className="text-blue-600" />
+          <div
+            className={`p-2.5 border-b space-y-2 ${
+              darkTheme ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'
+            }`}
+          >
+            <div className="flex items-center justify-between text-xs font-bold">
+              <span className="flex items-center gap-1.5 text-blue-500">
+                <FileSpreadsheet size={13} />
                 Danh Mục Khách Hàng ({customers.length})
               </span>
               <button
                 type="button"
                 onClick={handleOpenAddModal}
-                className="text-[11px] font-bold text-blue-700 hover:text-blue-900 flex items-center gap-1 bg-blue-100/70 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 transition-colors"
+                className={`text-[11px] font-bold flex items-center gap-1 px-2 py-0.5 rounded border transition-colors ${
+                  darkTheme
+                    ? 'bg-blue-950/60 text-blue-300 border-blue-800 hover:bg-blue-900/60'
+                    : 'bg-blue-100/70 text-blue-700 hover:bg-blue-100 border-blue-200'
+                }`}
               >
-                <Plus size={12} /> Bổ sung mới
+                <Plus size={12} /> Thêm đầy đủ
               </button>
             </div>
             <div className="relative">
-              <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
+              <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Tìm mã KH, tên doanh nghiệp, nhà máy..."
-                className="w-full text-xs pl-8 pr-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                className={`w-full text-xs pl-8 pr-2.5 py-1.5 border rounded-lg focus:outline-hidden focus:ring-1 focus:ring-blue-500 ${
+                  darkTheme
+                    ? 'bg-slate-900 border-slate-700 text-white placeholder:text-slate-500'
+                    : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'
+                }`}
                 autoFocus
               />
+            </div>
+
+            {/* Quick inline add customer */}
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="text"
+                value={quickNewCustomer}
+                onChange={(e) => setQuickNewCustomer(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleQuickAdd();
+                  }
+                }}
+                placeholder="+ Thêm tên khách hàng mới nhanh..."
+                className={`flex-1 text-[11px] px-2.5 py-1 rounded-md border border-dashed focus:outline-hidden ${
+                  darkTheme
+                    ? 'bg-slate-900/60 border-blue-500/50 text-white placeholder:text-blue-300/60 focus:border-blue-400'
+                    : 'bg-blue-50/50 border-blue-300 text-slate-800 placeholder:text-blue-700/60 focus:border-blue-500'
+                } font-medium`}
+              />
+              <button
+                type="button"
+                onClick={handleQuickAdd}
+                disabled={!quickNewCustomer.trim() && !search.trim()}
+                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold text-[11px] rounded-md transition-colors shrink-0 flex items-center gap-1 shadow-xs"
+                title="Lưu và chọn ngay khách hàng này"
+              >
+                <Plus size={12} /> Thêm
+              </button>
             </div>
           </div>
 

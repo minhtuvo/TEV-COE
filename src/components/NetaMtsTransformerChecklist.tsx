@@ -40,6 +40,8 @@ import { TevReportPrintModal } from './TevReportPrintModal';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { ProjectSelectDropdown } from './ProjectSelectDropdown';
 import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
@@ -697,37 +699,40 @@ export const NetaMtsTransformerChecklist: React.FC<Props> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    {lang === 'vi' ? 'Tên Khách Hàng (Master)' : 'Customer Name (Master)'}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="VD: Công ty Cổ phần Năng lượng TEV"
+                  <CustomerSelectDropdown
+                    label={lang === 'vi' ? 'Tên Khách Hàng (Master)' : 'Customer Name (Master)'}
                     value={data.site_info.customer_name || ''}
-                    onChange={(e) =>
+                    onChange={(custName) =>
                       setData({
                         ...data,
-                        site_info: { ...data.site_info, customer_name: e.target.value }
+                        site_info: { ...data.site_info, customer_name: custName }
                       })
                     }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 bg-slate-50 font-bold text-blue-900"
+                    placeholder="Chọn hoặc thêm Khách Hàng mới..."
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    {lang === 'vi' ? 'Tên Dự Án / Trạm Thí Nghiệm' : 'Project / Substation Name'}
-                  </label>
-                  <input
-                    type="text"
+                  <ProjectSelectDropdown
+                    label={lang === 'vi' ? 'Tên Dự Án / Nhà Máy' : 'Project / Plant Name'}
                     value={data.site_info.project_name}
-                    onChange={(e) =>
+                    customerName={data.site_info.customer_name}
+                    onCustomerAutoSelect={(cName) => {
+                      if (!data.site_info.customer_name) {
+                        setData({
+                          ...data,
+                          site_info: { ...data.site_info, customer_name: cName }
+                        });
+                      }
+                    }}
+                    onChange={(prjName) =>
                       setData({
                         ...data,
-                        site_info: { ...data.site_info, project_name: e.target.value }
+                        site_info: { ...data.site_info, project_name: prjName }
                       })
                     }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 bg-slate-50 font-semibold text-slate-900"
+                    placeholder="Chọn hoặc thêm Dự Án / Nhà Máy mới..."
+                    standard="mts"
                   />
                 </div>
 
@@ -767,7 +772,7 @@ export const NetaMtsTransformerChecklist: React.FC<Props> = ({
 
             <div>
               <label className="block text-slate-600 font-semibold mb-1">
-                {lang === 'vi' ? 'Kỹ sư FSE thí nghiệm' : 'Field Service Engineer (FSE)'}
+                {lang === 'vi' ? 'Kỹ Sư Nghiệm Thu / FSE' : 'Commissioning & FSE Engineer'}
               </label>
               <FseEngineerDropdown
                 currentEngineer={data.site_info.fse_name}

@@ -42,6 +42,7 @@ import {
 } from '../../server/netaEcsLowVoltageAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
 import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { ProjectSelectDropdown } from './ProjectSelectDropdown';
 import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
 
 interface Props {
@@ -153,6 +154,7 @@ export const NetaEcsLowVoltageChecklist: React.FC<Props> = ({
   // HEADER & METADATA STATE
   // --------------------------------------------------------------------------
   const [reportNo, setReportNo] = useState(`TEV-ECS-2024-LV-${Math.floor(100 + Math.random() * 900)}`);
+  const [customerName, setCustomerName] = useState('Công ty Cổ phần Năng lượng TEV');
   const [projectName, setProjectName] = useState('Nha May Cong Nghe Cao TEV High-Tech Plant');
   const [systemTag, setSystemTag] = useState('LV-SWITCHBOARD-MSB-01 (< 1 kV System)');
   const [voltageRatingV, setVoltageRatingV] = useState(400);
@@ -726,12 +728,25 @@ export const NetaEcsLowVoltageChecklist: React.FC<Props> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Tên Dự án / Nhà máy:</label>
-                <input
-                  type="text"
+                <CustomerSelectDropdown
+                  label="Tên Khách Hàng (Master):"
+                  value={customerName}
+                  onChange={(cName) => setCustomerName(cName)}
+                  placeholder="Chọn hoặc thêm Khách Hàng mới..."
+                />
+              </div>
+
+              <div>
+                <ProjectSelectDropdown
+                  label="Tên Dự án / Nhà máy:"
                   value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  className="w-full p-2 rounded-lg border border-slate-200 text-xs focus:ring-1 focus:ring-teal-500 focus:outline-hidden"
+                  customerName={customerName}
+                  onCustomerAutoSelect={(cName) => {
+                    if (!customerName) setCustomerName(cName);
+                  }}
+                  onChange={(pName) => setProjectName(pName)}
+                  placeholder="Chọn hoặc thêm Dự Án / Nhà Máy..."
+                  standard="ecs"
                 />
               </div>
 
@@ -768,11 +783,9 @@ export const NetaEcsLowVoltageChecklist: React.FC<Props> = ({
 
               <div>
                 <label className="block text-slate-600 font-semibold mb-1">Kỹ Sư Nghiệm Thu FSE (NETA III):</label>
-                <input
-                  type="text"
+                <FseEngineerDropdown
                   value={fseName}
-                  onChange={(e) => setFseName(e.target.value)}
-                  className="w-full p-2 rounded-lg border border-slate-200 text-xs focus:ring-1 focus:ring-teal-500 focus:outline-hidden"
+                  onChange={(eng) => setFseName(eng)}
                 />
               </div>
 

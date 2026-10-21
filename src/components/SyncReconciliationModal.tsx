@@ -360,7 +360,7 @@ export const SyncReconciliationModal: React.FC<SyncReconciliationModalProps> = (
         {/* Modal Footer with Actions */}
         <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
           <div className="text-xs text-slate-500">
-            Hỗ trợ tự động chuẩn hóa 23 cột Work Order, Danh mục Khách hàng, Thiết bị & Vật tư kho.
+            Hỗ trợ tự động chuẩn hóa Work Order, Danh mục Khách hàng, Thiết bị & Vật tư kho.
           </div>
 
           <div className="flex items-center gap-2">

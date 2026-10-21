@@ -31,6 +31,38 @@ export const DEFAULT_TEV_FSE_LIST: FseEngineer[] = [
     company: 'TEV Field Service'
   },
   {
+    id: 'fse-ks-nguyen-van-s',
+    name: 'KS. Nguyễn Văn S',
+    email: 'nguyenvans@tev.vn',
+    role: 'Kỹ sư Bảo trì Cơ điện Nhà máy',
+    phone: '0918 234 567',
+    company: 'TEV Plant Service'
+  },
+  {
+    id: 'fse-ks-tran-van-h',
+    name: 'KS. Trần Văn H',
+    email: 'tranvanh@tev.vn',
+    role: 'Kỹ sư Trưởng Vận hành & Bảo trì',
+    phone: '0919 345 678',
+    company: 'TEV Plant Service'
+  },
+  {
+    id: 'fse-ks-le-hoang-d',
+    name: 'KS. Lê Hoàng D',
+    email: 'lehoangd@tev.vn',
+    role: 'Kỹ sư Tự động hóa & SCADA',
+    phone: '0917 456 789',
+    company: 'TEV Plant Service'
+  },
+  {
+    id: 'fse-ks-pham-minh-t',
+    name: 'KS. Phạm Minh T',
+    email: 'phamminht@tev.vn',
+    role: 'Kỹ sư Thiết bị Động lực & MBA',
+    phone: '0916 567 890',
+    company: 'TEV Plant Service'
+  },
+  {
     id: 'fse-nguyen-van-long',
     name: 'Nguyễn Văn Long',
     email: 'long.nv@tev.vn',
@@ -69,10 +101,42 @@ export const DEFAULT_TEV_FSE_LIST: FseEngineer[] = [
     role: 'Kỹ sư Thí nghiệm Cáp & Tiếp địa',
     phone: '0923 456 789',
     company: 'TEV Field Service'
+  },
+  {
+    id: 'fse-ks-le-minh-tuan',
+    name: 'KS. Lê Minh Tuấn',
+    email: 'tuan.lm@tev.vn',
+    role: 'Kỹ sư NETA Thí nghiệm Điện',
+    phone: '0903 112 233',
+    company: 'TEV Field Service'
+  },
+  {
+    id: 'fse-ks-pham-quoc-hung',
+    name: 'KS. Phạm Quốc Hưng',
+    email: 'hung.pq@tev.vn',
+    role: 'Kỹ sư Rơ-le & Bảo vệ Hệ thống',
+    phone: '0904 223 344',
+    company: 'TEV Field Service'
+  },
+  {
+    id: 'fse-ks-tran-hoang-long',
+    name: 'KS. Trần Hoàng Long',
+    email: 'long.th@tev.vn',
+    role: 'Kỹ sư Hệ thống Điện & Máy phát',
+    phone: '0905 334 455',
+    company: 'TEV Field Service'
+  },
+  {
+    id: 'fse-ks-dang-van-nam',
+    name: 'KS. Đặng Văn Nam',
+    email: 'nam.dv@tev.vn',
+    role: 'Kỹ sư Khí cụ & Máy cắt Cao thế',
+    phone: '0906 445 566',
+    company: 'TEV Field Service'
   }
 ];
 
-const STORAGE_KEY = 'tev_registered_fse_engineers_v2';
+const STORAGE_KEY = 'tev_registered_fse_engineers_v3';
 export const EVT_FSE_UPDATED = 'tev_fse_updated';
 
 interface Props {
@@ -96,10 +160,12 @@ export const FseEngineerDropdown: React.FC<Props> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Ensure Võ Minh Tú is always first
-          const tu = parsed.find((e: FseEngineer) => e.email === 'sgm1707@gmail.com') || DEFAULT_TEV_FSE_LIST[0];
-          const others = parsed.filter((e: FseEngineer) => e.email !== 'sgm1707@gmail.com');
-          return [tu, ...others];
+          // Merge default list to ensure plant engineers exist
+          const existingIds = new Set(parsed.map((p: FseEngineer) => p.name.toLowerCase()));
+          const missingDefaults = DEFAULT_TEV_FSE_LIST.filter(
+            d => !existingIds.has(d.name.toLowerCase())
+          );
+          return [...parsed, ...missingDefaults];
         }
       }
     } catch {
@@ -110,6 +176,7 @@ export const FseEngineerDropdown: React.FC<Props> = ({
 
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [quickNewName, setQuickNewName] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newEngineer, setNewEngineer] = useState({
     name: '',
@@ -153,34 +220,72 @@ export const FseEngineerDropdown: React.FC<Props> = ({
   }, []);
 
   // Determine current active engineer
-  const activeEngineer = engineers.find(
+  const matchedEngineer = engineers.find(
     (e) =>
-      value?.includes(e.name) ||
-      value?.includes(e.email) ||
-      e.name.toLowerCase() === value?.toLowerCase()
-  ) || engineers[0]; // Default is Vo Minh Tu
+      value &&
+      (value.includes(e.name) ||
+        value.includes(e.email) ||
+        e.name.toLowerCase() === value.toLowerCase() ||
+        value.toLowerCase().includes(e.name.toLowerCase()))
+  );
+
+  const activeDisplayName = matchedEngineer 
+    ? matchedEngineer.name 
+    : (value && value.trim() ? value.trim() : (engineers[0]?.name || 'Võ Minh Tú'));
+  
+  const activeDisplaySub = matchedEngineer 
+    ? matchedEngineer.email 
+    : (value && value.trim() ? (matchedEngineer ? matchedEngineer.role : 'Người thực hiện / PIC') : (engineers[0]?.email || 'sgm1707@gmail.com'));
 
   const handleSelect = (eng: FseEngineer) => {
-    // Standard format for FSE: "Võ Minh Tú (sgm1707@gmail.com)"
-    const formatted = `${eng.name} (${eng.email})`;
-    onChange(formatted, eng);
+    // Send clean name to maintain consistency in Work Orders & Google Sheets
+    onChange(eng.name, eng);
     setIsOpen(false);
+    setSearch('');
+  };
+
+  const handleQuickAdd = () => {
+    const nameToAdd = quickNewName.trim() || search.trim();
+    if (!nameToAdd) return;
+
+    // Check if already exists
+    const existing = engineers.find(e => e.name.toLowerCase() === nameToAdd.toLowerCase());
+    if (existing) {
+      handleSelect(existing);
+      setQuickNewName('');
+      return;
+    }
+
+    const created: FseEngineer = {
+      id: `fse-${Date.now()}`,
+      name: nameToAdd,
+      email: `${nameToAdd.toLowerCase().replace(/[^a-z0-9]/g, '') || 'fse'}@tev.vn`,
+      role: 'Kỹ sư Hiện trường / FSE',
+      phone: '',
+      company: 'TEV Service'
+    };
+
+    const updated = [created, ...engineers];
+    setEngineers(updated);
+    handleSelect(created);
+    setQuickNewName('');
+    setSearch('');
   };
 
   const handleAddNew = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEngineer.name.trim() || !newEngineer.email.trim()) return;
+    if (!newEngineer.name.trim()) return;
 
     const created: FseEngineer = {
       id: `fse-${Date.now()}`,
       name: newEngineer.name.trim(),
-      email: newEngineer.email.trim(),
-      role: newEngineer.role.trim() || 'Kỹ sư FSE',
+      email: newEngineer.email.trim() || `${newEngineer.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@tev.vn`,
+      role: newEngineer.role.trim() || 'Kỹ sư Hiện trường / FSE',
       phone: newEngineer.phone.trim(),
       company: 'TEV Field Service'
     };
 
-    const updated = [...engineers, created];
+    const updated = [created, ...engineers];
     setEngineers(updated);
     handleSelect(created);
     setShowAddModal(false);
@@ -221,17 +326,17 @@ export const FseEngineerDropdown: React.FC<Props> = ({
       >
         <div className="flex items-center gap-2 min-w-0 pr-1">
           <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-600 to-yellow-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0 shadow-2xs">
-            {activeEngineer?.name?.slice(0, 2).toUpperCase() || 'VT'}
+            {activeDisplayName ? activeDisplayName.slice(0, 2).toUpperCase() : 'PIC'}
           </div>
           <div className="truncate">
             <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 truncate">
-              <span>{activeEngineer?.name || 'Võ Minh Tú'}</span>
+              <span>{activeDisplayName}</span>
               <span className="text-[10px] font-normal text-amber-700 bg-amber-50 border border-amber-200/80 px-1.5 py-0.2 rounded shrink-0">
-                FSE TEV
+                PIC
               </span>
             </div>
             <div className="text-[10px] text-slate-500 font-mono truncate">
-              {activeEngineer?.email || 'sgm1707@gmail.com'}
+              {activeDisplaySub}
             </div>
           </div>
         </div>
@@ -245,13 +350,13 @@ export const FseEngineerDropdown: React.FC<Props> = ({
 
       {/* Floating Dropdown */}
       {isOpen && (
-        <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100 min-w-[280px]">
+        <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in-50 zoom-in-95 duration-100 min-w-[300px]">
           {/* Header & Search */}
           <div className="p-2.5 bg-slate-50 border-b border-slate-200 space-y-2">
             <div className="flex items-center justify-between text-xs font-bold text-slate-700">
               <span className="flex items-center gap-1.5">
                 <UserCheck size={14} className="text-amber-600" />
-                Danh Sách Kỹ Sư FSE TEV ({engineers.length})
+                Người Thực Hiện / PIC ({engineers.length})
               </span>
               <button
                 type="button"
@@ -261,7 +366,7 @@ export const FseEngineerDropdown: React.FC<Props> = ({
                 }}
                 className="text-[11px] font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 hover:underline"
               >
-                <UserPlus size={12} /> Thêm FSE
+                <UserPlus size={12} /> Thêm FSE Đầy Đủ
               </button>
             </div>
             <div className="relative">
@@ -270,22 +375,61 @@ export const FseEngineerDropdown: React.FC<Props> = ({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Tìm tên, email kỹ sư FSE..."
+                placeholder="Tìm tên kỹ sư, mã hoặc chức danh..."
                 className="w-full text-xs pl-8 pr-2.5 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 bg-white"
                 autoFocus
               />
             </div>
+
+            {/* Quick Add Person Inline */}
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="text"
+                value={quickNewName}
+                onChange={(e) => setQuickNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleQuickAdd();
+                  }
+                }}
+                placeholder="+ Nhập tên người mới nhanh..."
+                className="flex-1 text-[11px] px-2 py-1 border border-dashed border-amber-300 rounded-md bg-amber-50/50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-800 placeholder:text-amber-700/60 font-medium"
+              />
+              <button
+                type="button"
+                onClick={handleQuickAdd}
+                disabled={!quickNewName.trim() && !search.trim()}
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white font-bold text-[11px] rounded-md transition-colors shrink-0 flex items-center gap-1"
+                title="Thêm và chọn ngay người này"
+              >
+                <UserPlus size={12} /> Thêm
+              </button>
+            </div>
           </div>
 
           {/* List items */}
-          <div className="max-h-56 overflow-y-auto p-1 divide-y divide-slate-100">
+          <div className="max-h-60 overflow-y-auto p-1 divide-y divide-slate-100">
             {filtered.length === 0 ? (
-              <div className="p-4 text-center text-xs text-slate-400">
-                Không tìm thấy kỹ sư phù hợp.
+              <div className="p-4 text-center text-xs space-y-2">
+                <p className="text-slate-400">Không tìm thấy kỹ sư "{search}"</p>
+                {search.trim() && (
+                  <button
+                    type="button"
+                    onClick={handleQuickAdd}
+                    className="w-full py-1.5 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <UserPlus size={13} /> Thêm "{search.trim()}" làm người thực hiện mới
+                  </button>
+                )}
               </div>
             ) : (
               filtered.map((eng) => {
-                const isSelected = activeEngineer?.id === eng.id;
+                const isSelected = 
+                  activeDisplayName?.toLowerCase() === eng.name.toLowerCase() ||
+                  matchedEngineer?.id === eng.id ||
+                  (value && value.toLowerCase().includes(eng.name.toLowerCase()));
+
                 return (
                   <button
                     key={eng.id}
@@ -336,7 +480,7 @@ export const FseEngineerDropdown: React.FC<Props> = ({
           {/* Bottom Action */}
           <div className="p-2 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[11px]">
             <span className="text-slate-500 font-medium">
-              Mặc định: <strong className="text-slate-800">Võ Minh Tú</strong>
+              Đang chọn: <strong className="text-slate-800">{activeDisplayName}</strong>
             </span>
             <button
               type="button"
@@ -346,7 +490,7 @@ export const FseEngineerDropdown: React.FC<Props> = ({
               }}
               className="text-amber-700 font-bold hover:underline flex items-center gap-1"
             >
-              <UserPlus size={12} /> Thêm mới
+              <UserPlus size={12} /> Thêm đầy đủ
             </button>
           </div>
         </div>

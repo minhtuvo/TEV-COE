@@ -415,6 +415,7 @@ export interface ProjectEquipmentItem {
   location?: string; // e.g. "Sân phân phối 110kV"
   notes?: string;
   testStandard?: string; // e.g. "ANSI/NETA ATS-2025"
+  standard?: 'ats' | 'mts' | 'ecs';
   status?: 'chờ_test' | 'đã_test' | 'cảnh_báo' | 'đạt';
 }
 
@@ -425,9 +426,12 @@ export interface ProjectMasterRecord {
   customerName: string; // e.g. "Công ty Cổ phần Năng lượng Super Energy"
   factory: string; // e.g. "Nhà máy Điện Gió Mũi Né"
   status: 'chuẩn_bị' | 'đang_thực_hiện' | 'hoàn_thành';
+  standard?: 'ats' | 'mts' | 'ecs';
   leadFse?: string; // e.g. "Võ Minh Tú"
   startDate?: string;
   endDate?: string;
+  planningStartDate?: string; // e.g. "2026-03-01"
+  planningEndDate?: string; // e.g. "2026-03-25"
   notes?: string;
   equipmentList: ProjectEquipmentItem[];
   createdAt: string;
@@ -442,9 +446,12 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
     customerName: 'Công ty Cổ phần Năng lượng Super Energy',
     factory: 'Nhà máy Điện Gió Mũi Né',
     status: 'đang_thực_hiện',
+    standard: 'ats',
     leadFse: 'Võ Minh Tú (sgm1707@gmail.com)',
     startDate: '2026-03-01',
     endDate: '2026-03-25',
+    planningStartDate: '2026-03-01',
+    planningEndDate: '2026-03-25',
     notes: 'Thí nghiệm toàn diện MBA 110kV, Máy cắt SF6, Tủ trung thế 22kV và Hệ thống Tiếp địa theo NETA ATS-2025',
     equipmentList: [
       {
@@ -454,6 +461,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '63MVA 110/22kV ONAN/ONAF Thibidi',
         location: 'Sân phân phối ngoài trời 110kV',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.2.2',
+        standard: 'ats',
         status: 'đã_test'
       },
       {
@@ -463,6 +471,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '123kV 2500A 40kA SF6 Alstom',
         location: 'Ngăn lộ xuất tuyến 131',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.6.3',
+        standard: 'ats',
         status: 'chờ_test'
       },
       {
@@ -472,6 +481,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '24kV 2000A 25kA Schneider SM6',
         location: 'Phòng phân phối trung thế 22kV',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.1.1',
+        standard: 'ats',
         status: 'chờ_test'
       },
       {
@@ -481,6 +491,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '24kV 3x240 Cu/XLPE/PVC/DSTA/PVC',
         location: 'Hào cáp chính từ T1 sang tủ tự dùng',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.3.3',
+        standard: 'ats',
         status: 'chờ_test'
       },
       {
@@ -490,6 +501,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '110V DC 200Ah AGM VRLA Fiamm',
         location: 'Phòng DC & Battery',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.18.1.3',
+        standard: 'ats',
         status: 'đã_test'
       },
       {
@@ -499,6 +511,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: 'Đồng trần C120 liên kết cọc thép bọc đồng sâu 12m',
         location: 'Toàn trạm 110kV',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.13 & IEEE Std 81',
+        standard: 'ats',
         status: 'đã_test'
       }
     ],
@@ -512,9 +525,12 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
     customerName: 'Công ty TNHH Sản xuất và Kinh doanh VinFast',
     factory: 'Tổ hợp Nhà máy Cát Hải - Hải Phòng',
     status: 'chuẩn_bị',
+    standard: 'ats',
     leadFse: 'Nguyễn Văn Bình',
     startDate: '2026-03-15',
     endDate: '2026-04-10',
+    planningStartDate: '2026-03-15',
+    planningEndDate: '2026-04-10',
     notes: 'Nghiệm thu đóng điện trạm biến áp khô và tủ phân phối xưởng Thân vỏ & Xưởng Sơn',
     equipmentList: [
       {
@@ -524,6 +540,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '2500kVA 22/0.4kV Cast Resin GE',
         location: 'Trạm điện Subst-01 Body Shop',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.2.1.2',
+        standard: 'ats',
         status: 'chờ_test'
       },
       {
@@ -533,6 +550,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: 'ACB 4000A 65kA Micrologic 6.0X',
         location: 'Tủ MSB-01 Body Shop',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.6.1.2',
+        standard: 'ats',
         status: 'chờ_test'
       },
       {
@@ -542,6 +560,7 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '250kW 380V 1480rpm ABB IP55',
         location: 'Phòng sơn Paint Shop',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.15.1',
+        standard: 'ats',
         status: 'chờ_test'
       },
       {
@@ -551,11 +570,100 @@ export const DEFAULT_PROJECTS_LIST: ProjectMasterRecord[] = [
         specs: '120kVA 3/3 Riello Master HP',
         location: 'Phòng Server & SCADA trung tâm',
         testStandard: 'ANSI/NETA ATS-2025 Mục 7.22',
+        standard: 'ats',
         status: 'chờ_test'
       }
     ],
     createdAt: '2026-03-05T08:00:00.000Z',
     updatedAt: '2026-03-05T08:00:00.000Z'
+  },
+  {
+    id: 'DA-2026-003',
+    name: 'Dự án Commissioning NETA ECS Hệ Thống Solar & Pin BESS 50MWh',
+    customerId: 'KH001',
+    customerName: 'Công ty Cổ phần Năng lượng Super Energy',
+    factory: 'Nhà máy Điện Mặt Trời Phong Điền',
+    status: 'đang_thực_hiện',
+    standard: 'ecs',
+    leadFse: 'Trần Đình Trọng (fse.trong@tev.vn)',
+    startDate: '2026-03-10',
+    endDate: '2026-04-20',
+    planningStartDate: '2026-03-10',
+    planningEndDate: '2026-04-20',
+    notes: 'Commissioning đóng điện chạy thử toàn diện Solar Farm 50MWp & Hệ thống Lưu trữ Pin BESS theo tiêu chuẩn ANSI/NETA ECS-2020',
+    equipmentList: [
+      {
+        kksCode: '=50PV-INV01',
+        name: 'Inverter trung tâm Solar Farm 3125kVA Sungrow',
+        type: 'Pin & UPS',
+        specs: '3125kVA 1500V DC / 600V AC Sungrow SG3125HV',
+        location: 'Trạm Inverter Block 01',
+        testStandard: 'ANSI/NETA ECS Section 8.1 Renewable PV',
+        standard: 'ecs',
+        status: 'đã_test'
+      },
+      {
+        kksCode: '=50BESS-CONT01',
+        name: 'Container Pin Lưu trữ Năng lượng BESS 5MWh LFP',
+        type: 'Pin & UPS',
+        specs: '1500V DC 5MWh CATL EnerC LFP Liquid Cooling',
+        location: 'Khu vực BESS B01',
+        testStandard: 'ANSI/NETA ECS Section 8.2 Energy Storage',
+        standard: 'ecs',
+        status: 'đang_test' as any
+      },
+      {
+        kksCode: '=50RMU-MV01',
+        name: 'Tủ RMU 24kV kết nối xuất tuyến Solar-BESS',
+        type: 'Tủ điện',
+        specs: '24kV 630A 20kA ABB SafeRing CCV',
+        location: 'Trạm nâng áp Solar Substation',
+        testStandard: 'ANSI/NETA ECS Section 7.2 MV Switchgear',
+        standard: 'ecs',
+        status: 'chờ_test'
+      }
+    ],
+    createdAt: '2026-03-08T08:00:00.000Z',
+    updatedAt: '2026-03-08T08:00:00.000Z'
+  },
+  {
+    id: 'DA-2026-004',
+    name: 'Dự án Bảo Trì Định Kỳ NETA MTS Trạm Biến Áp & Busway Formosa',
+    customerId: 'KH003',
+    customerName: 'Tập đoàn Thép Formosa Hà Tĩnh',
+    factory: 'Trạm điện trung tâm 110/22kV Formosa',
+    status: 'chuẩn_bị',
+    standard: 'mts',
+    leadFse: 'Lê Hoàng Nam (nam.lh@tev.vn)',
+    startDate: '2026-04-01',
+    endDate: '2026-04-30',
+    planningStartDate: '2026-04-01',
+    planningEndDate: '2026-04-30',
+    notes: 'Bảo trì định kỳ NETA MTS Mục 7.4 Thanh cái vỏ kim loại Busway 24kV, Biến áp lực 40MVA và Phân tích DGA dầu',
+    equipmentList: [
+      {
+        kksCode: '=FHS-BUSWAY-MV1',
+        name: 'Thanh cái dẫn điện vỏ kim loại Busway 24kV 2500A Tuyến A',
+        type: 'Cáp điện',
+        specs: '24kV 2500A IP68 Cast Resin Busway Henikwon',
+        location: 'Trục nối từ MBA 40MVA sang tủ Switchgear 22kV',
+        testStandard: 'ANSI/NETA MTS-2023 Mục 7.4 Busways',
+        standard: 'mts',
+        status: 'chờ_test'
+      },
+      {
+        kksCode: '=FHS-TR02-40MVA',
+        name: 'Máy biến áp lực T2 110/22kV 40MVA ngâm dầu',
+        type: 'Máy biến áp',
+        specs: '40MVA 115/23kV ONAN/ONAF Dongfang',
+        location: 'Trạm biến áp trung tâm',
+        testStandard: 'ANSI/NETA MTS-2023 Mục 7.2.2 Liquid Transformers',
+        standard: 'mts',
+        status: 'chờ_test'
+      }
+    ],
+    createdAt: '2026-03-12T08:00:00.000Z',
+    updatedAt: '2026-03-12T08:00:00.000Z'
   }
 ];
 
@@ -565,7 +673,13 @@ export function getRegisteredProjects(): ProjectMasterRecord[] {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Ensure planning dates and standard backward compatibility
+        return parsed.map((p: any) => ({
+          ...p,
+          standard: p.standard || (p.name?.toLowerCase().includes('ecs') ? 'ecs' : p.name?.toLowerCase().includes('mts') ? 'mts' : 'ats'),
+          planningStartDate: p.planningStartDate || p.startDate || '2026-03-01',
+          planningEndDate: p.planningEndDate || p.endDate || '2026-03-25'
+        }));
       }
     }
   } catch (e) {
@@ -676,10 +790,12 @@ export const SHEET_PROJECT_HEADERS = [
   'Mã KH',
   'Tên Khách Hàng',
   'Nhà Máy / Trạm',
+  'Tiêu Chuẩn',
   'Số Lượng Thiết Bị',
   'Danh Sách KKS & Thiết Bị',
   'Kỹ Sư Trưởng',
-  'Ngày Bắt Đầu',
+  'Planning Bắt Đầu',
+  'Planning Kết Thúc',
   'Trạng Thái',
   'Ghi Chú',
   'Ngày Cập Nhật'
@@ -736,10 +852,12 @@ export function projectToSheetRow(project: ProjectMasterRecord): any[] {
     project.customerId || '',
     project.customerName || '',
     project.factory || '',
+    (project.standard || 'ats').toUpperCase(),
     (project.equipmentList || []).length,
     equipmentSummary,
     project.leadFse || '',
-    project.startDate || '',
+    project.planningStartDate || project.startDate || '',
+    project.planningEndDate || project.endDate || '',
     project.status || 'chuẩn_bị',
     project.notes || '',
     nowStr
@@ -756,7 +874,10 @@ export function sheetRowToProject(row: any[]): ProjectMasterRecord | null {
     return null;
   }
 
-  const rawEquipmentSummary = String(row[6] || '').trim();
+  // Equipment list summary can be at row[7] (standard) or row[6] (fallback)
+  const candidate7 = String(row[7] || '').trim();
+  const candidate6 = String(row[6] || '').trim();
+  const rawEquipmentSummary = candidate7.includes(':') ? candidate7 : (candidate6.includes(':') ? candidate6 : candidate7);
   const parsedEquipmentList: ProjectEquipmentItem[] = [];
 
   if (rawEquipmentSummary) {
@@ -791,6 +912,8 @@ export function sheetRowToProject(row: any[]): ProjectMasterRecord | null {
     });
   }
 
+  const rawStd = String(row[5] || '').toLowerCase();
+  const standard: 'ats' | 'mts' | 'ecs' = rawStd.includes('mts') ? 'mts' : rawStd.includes('ecs') ? 'ecs' : 'ats';
   const nowStr = new Date().toISOString();
   return {
     id: col0 || `DA-${Date.now()}`,
@@ -798,13 +921,17 @@ export function sheetRowToProject(row: any[]): ProjectMasterRecord | null {
     customerId: String(row[2] || ''),
     customerName: String(row[3] || ''),
     factory: String(row[4] || ''),
-    leadFse: String(row[7] || ''),
-    startDate: String(row[8] || ''),
-    status: (row[9] === 'đang_thực_hiện' || row[9] === 'hoàn_thành') ? row[9] : 'chuẩn_bị',
-    notes: String(row[10] || ''),
+    standard,
+    leadFse: String(row[8] || row[7] || ''),
+    planningStartDate: String(row[9] || ''),
+    planningEndDate: String(row[10] || ''),
+    startDate: String(row[9] || ''),
+    endDate: String(row[10] || ''),
+    status: (row[11] === 'đang_thực_hiện' || row[11] === 'hoàn_thành') ? row[11] : 'chuẩn_bị',
+    notes: String(row[12] || ''),
     equipmentList: parsedEquipmentList,
     createdAt: nowStr,
-    updatedAt: nowStr
+    updatedAt: String(row[13] || nowStr)
   };
 }
 

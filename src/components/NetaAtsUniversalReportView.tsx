@@ -38,6 +38,9 @@ import {
   saveAtsPayload,
   resetAtsPayload,
 } from '../services/netaAtsDataService';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { ProjectSelectDropdown } from './ProjectSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
 
 interface Props {
   initialSpecId?: string;
@@ -69,6 +72,21 @@ export const NetaAtsUniversalReportView: React.FC<Props> = ({
   const [jsonParseError, setJsonParseError] = useState<string | null>(null);
   const [isSimulatingAi, setIsSimulatingAi] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [isEditingSiteInfo, setIsEditingSiteInfo] = useState(false);
+
+  const handleUpdateSiteField = (field: string, val: string) => {
+    const existing = getAtsPayload(selectedId) || { ...currentSpec.samplePayloadJson };
+    const currentSite = existing.site_info || { ...site };
+    const updated = {
+      ...existing,
+      site_info: {
+        ...currentSite,
+        [field]: val
+      }
+    };
+    saveAtsPayload(selectedId, updated);
+    setPayloadVersion((v) => v + 1);
+  };
 
   // Sync if initialSpecId changes externally or when switching to tev-report
   React.useEffect(() => {
@@ -414,8 +432,8 @@ export const NetaAtsUniversalReportView: React.FC<Props> = ({
               disabled={isSimulatingAi}
               className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all"
             >
-              <Sparkles size={14} />
-              <span>{isSimulatingAi ? (isVi ? 'Đang đối soát...' : 'Analyzing...') : (isVi ? 'Chạy AI NETA Đối Soát' : 'Run AI Evaluation')}</span>
+              <ShieldCheck size={14} />
+              <span>{isSimulatingAi ? (isVi ? 'Đang thẩm định...' : 'Analyzing...') : (isVi ? 'Thẩm Định Kỹ Thuật NETA ATS' : 'NETA ATS Technical Evaluation')}</span>
             </button>
           </div>
         </div>
@@ -515,27 +533,98 @@ export const NetaAtsUniversalReportView: React.FC<Props> = ({
             </div>
 
             {/* Equipment Site Metadata Box */}
-            <div className="text-xs space-y-1.5 bg-white/90 p-3.5 rounded-xl border border-slate-200/90 shadow-xs shrink-0 min-w-[260px]">
-              <div>
-                <strong className="text-slate-500">{isVi ? 'Mã thiết bị:' : 'Equipment Tag:'}</strong>{' '}
-                <span className="font-mono font-bold text-slate-900">{site.equipment_tag}</span>
+            <div className="text-xs space-y-1.5 bg-white/90 p-3.5 rounded-xl border border-slate-200/90 shadow-xs shrink-0 min-w-[280px]">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-1 mb-1">
+                <span className="font-bold text-slate-800 flex items-center gap-1">
+                  <Database size={13} className="text-blue-600" />
+                  {isVi ? 'Thông Tin Site / Master' : 'Site & Master Info'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingSiteInfo(!isEditingSiteInfo)}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-colors"
+                >
+                  {isEditingSiteInfo ? (isVi ? '✕ Đóng' : '✕ Close') : (isVi ? '✏️ Chỉnh Sửa' : '✏️ Edit')}
+                </button>
               </div>
-              <div>
-                <strong className="text-slate-500">{isVi ? 'Dự án / Nhà máy:' : 'Substation / Plant:'}</strong>{' '}
-                <span className="font-semibold text-slate-900">{site.project_name}</span>
-              </div>
-              <div>
-                <strong className="text-slate-500">{isVi ? 'Công suất / Cấp áp:' : 'Rating / Voltage:'}</strong>{' '}
-                <span className="font-semibold text-slate-900">{site.equipment_rating}</span>
-              </div>
-              <div>
-                <strong className="text-slate-500">{isVi ? 'Kỹ sư FSE:' : 'Field Engineer:'}</strong>{' '}
-                <span className="font-semibold text-slate-900">{site.fse_name}</span>
-              </div>
-              <div>
-                <strong className="text-slate-500">{isVi ? 'Ngày thử nghiệm:' : 'Test Date:'}</strong>{' '}
-                <span className="font-semibold text-slate-900">{site.test_date}</span>
-              </div>
+
+              {isEditingSiteInfo ? (
+                <div className="space-y-2 pt-1 animate-in fade-in-50 duration-150">
+                  <CustomerSelectDropdown
+                    label={isVi ? 'Tên Khách Hàng (Master)' : 'Customer (Master)'}
+                    value={(site as any).customer_name || ''}
+                    onChange={(cName) => handleUpdateSiteField('customer_name', cName)}
+                    placeholder={isVi ? 'Chọn hoặc thêm Khách Hàng...' : 'Select or add Customer...'}
+                  />
+
+                  <ProjectSelectDropdown
+                    label={isVi ? 'Tên Dự Án / Nhà Máy' : 'Project / Plant'}
+                    value={site.project_name}
+                    customerName={(site as any).customer_name}
+                    onChange={(pName) => handleUpdateSiteField('project_name', pName)}
+                    placeholder={isVi ? 'Chọn hoặc thêm Dự Án...' : 'Select or add Project...'}
+                    standard="ats"
+                  />
+
+                  <div>
+                    <label className="block text-slate-500 font-semibold mb-0.5 text-[11px]">
+                      {isVi ? 'Kỹ Sư Nghiệm Thu (FSE):' : 'Commissioning Engineer:'}
+                    </label>
+                    <FseEngineerDropdown
+                      value={site.fse_name}
+                      onChange={(eng) => handleUpdateSiteField('fse_name', eng)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 pt-1">
+                    <div>
+                      <label className="block text-slate-500 font-semibold mb-0.5 text-[10px]">
+                        {isVi ? 'Mã thiết bị:' : 'Tag:'}
+                      </label>
+                      <input
+                        type="text"
+                        value={site.equipment_tag}
+                        onChange={(e) => handleUpdateSiteField('equipment_tag', e.target.value)}
+                        className="w-full text-xs font-mono font-bold px-2 py-1 bg-slate-50 border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-500 font-semibold mb-0.5 text-[10px]">
+                        {isVi ? 'Ngày đo:' : 'Date:'}
+                      </label>
+                      <input
+                        type="date"
+                        value={site.test_date}
+                        onChange={(e) => handleUpdateSiteField('test_date', e.target.value)}
+                        className="w-full text-xs px-2 py-1 bg-slate-50 border rounded"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <strong className="text-slate-500">{isVi ? 'Mã thiết bị:' : 'Equipment Tag:'}</strong>{' '}
+                    <span className="font-mono font-bold text-slate-900">{site.equipment_tag}</span>
+                  </div>
+                  <div>
+                    <strong className="text-slate-500">{isVi ? 'Dự án / Nhà máy:' : 'Substation / Plant:'}</strong>{' '}
+                    <span className="font-semibold text-slate-900">{site.project_name}</span>
+                  </div>
+                  <div>
+                    <strong className="text-slate-500">{isVi ? 'Công suất / Cấp áp:' : 'Rating / Voltage:'}</strong>{' '}
+                    <span className="font-semibold text-slate-900">{site.equipment_rating}</span>
+                  </div>
+                  <div>
+                    <strong className="text-slate-500">{isVi ? 'Kỹ sư Nghiệm thu:' : 'Field Engineer:'}</strong>{' '}
+                    <span className="font-semibold text-slate-900">{site.fse_name}</span>
+                  </div>
+                  <div>
+                    <strong className="text-slate-500">{isVi ? 'Ngày thử nghiệm:' : 'Test Date:'}</strong>{' '}
+                    <span className="font-semibold text-slate-900">{site.test_date}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

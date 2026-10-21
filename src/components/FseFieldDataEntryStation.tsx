@@ -58,6 +58,7 @@ import {
   getNextCustomerId
 } from '../services/masterDirectoryService';
 import { MasterDirectorySheetManagerModal } from './MasterDirectorySheetManagerModal';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
 import { NetaAtsUniversalReportView } from './NetaAtsUniversalReportView';
 import {
   NETA_ATS_23_MASTER_SPECS,
@@ -69,6 +70,42 @@ import {
   saveAtsPayload,
   getAtsPayload
 } from '../services/netaAtsDataService';
+
+function parseToDatetimeLocal(val?: string): string {
+  if (!val || typeof val !== 'string') return '';
+  const s = val.trim();
+  if (!s || s.toLowerCase() === 'chưa ghi nhận') return '';
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s.slice(0, 16);
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(s)) return s.replace(/\s+/, 'T').slice(0, 16);
+  const dmyMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(\d{2}:\d{2})?/);
+  if (dmyMatch) {
+    const [, d, m, y, t] = dmyMatch;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T${t || '08:00'}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  }
+  return '';
+}
+
+function formatFromDatetimeLocal(val: string): string {
+  if (!val) return '';
+  return val.replace('T', ' ').slice(0, 16);
+}
+
+function calculateMilestoneDiffHours(t0Str?: string, t1Str?: string): number | null {
+  if (!t0Str || !t1Str) return null;
+  const d0 = new Date(t0Str.replace(' ', 'T')).getTime();
+  const d1 = new Date(t1Str.replace(' ', 'T')).getTime();
+  if (isNaN(d0) || isNaN(d1) || d1 < d0) return null;
+  return Number(((d1 - d0) / (1000 * 60 * 60)).toFixed(1));
+}
 
 export interface CustomerItem {
   id: string;
@@ -1137,7 +1174,7 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
                 Trạm Nhập Liệu Hiện Trường & Đồng Bộ Google Sheet 2 Chiều
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">
-                Đồng nhất danh mục Khách hàng (<code className="text-amber-300">khachhang</code>), Thiết bị (<code className="text-cyan-300">thietbi</code>) và Phiếu Công Việc 23 cột (<code className="text-emerald-300">TEV Service Flatform</code>).
+                Đồng nhất danh mục Khách hàng (<code className="text-amber-300">khachhang</code>), Thiết bị (<code className="text-cyan-300">thietbi</code>) và Phiếu Công Việc (<code className="text-emerald-300">TEV Service Flatform</code>).
               </p>
             </div>
           </div>
@@ -1209,7 +1246,7 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
           <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800">
             <span className="text-slate-400 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Sheet WO (23 Cột):
+              Sheet WO:
             </span>
             <span className="font-mono font-bold text-emerald-300">TEV Service Flatform ({workOrders.length})</span>
           </div>
@@ -2869,7 +2906,7 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
                 </span>
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm">
-                    Phiếu Công Việc Work Order & Work Permit (23 Cột Chuẩn TEV)
+                    Phiếu Công Việc Work Order & Work Permit Chuẩn TEV
                   </h3>
                   <p className="text-xs text-slate-500">Đồng bộ tự động 2 chiều lên sheet <code className="text-emerald-700 font-bold">TEV Service Flatform</code></p>
                 </div>
@@ -3094,7 +3131,7 @@ export const FseFieldDataEntryStation: React.FC<Props> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <Clock size={15} className="text-indigo-600" />
-                  Ghi nhận mốc thời gian dừng máy & sửa chữa (Cột 20 - 23)
+                  Ghi nhận mốc thời gian dừng máy &amp; sửa chữa
                 </span>
                 <span className="text-[11px] text-slate-500">Nhấn nút để ghi nhận thời gian thực tế tức thì</span>
               </div>

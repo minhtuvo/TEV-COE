@@ -75,6 +75,8 @@ import {
   resolveEquipmentTypeToSpecId
 } from '../services/masterDirectoryService';
 import { ProjectCategorizedEquipmentTable } from './ProjectCategorizedEquipmentTable';
+import { ProjectPortfolioGanttTimeline } from './ProjectPortfolioGanttTimeline';
+import { calculatePmpProjectHealth } from '../utils/pmpStandard';
 
 interface MasterDirectorySheetManagerModalProps {
   isOpen: boolean;
@@ -83,7 +85,7 @@ interface MasterDirectorySheetManagerModalProps {
   googleSheetUrl?: string;
   onSyncAll?: () => void;
   initialTab?: 'fse' | 'khachhang' | 'thietbi' | 'duan' | 'create_tab';
-  onNavigateToNetaForm?: (project: ProjectMasterRecord, equipment: ProjectEquipmentItem, standard: 'ats' | 'mts') => void;
+  onNavigateToNetaForm?: (project: ProjectMasterRecord, equipment: ProjectEquipmentItem, standard: 'ats' | 'mts' | 'ecs') => void;
   onSelectProjectForWorkOrder?: (project: ProjectMasterRecord) => void;
 }
 
@@ -110,16 +112,16 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
   // Fullscreen Workspace Mode (default true for spacious spreadsheet management)
   const [isFullscreen, setIsFullscreen] = useState<boolean>(true);
 
-  // Track ATS vs MTS standard selection per equipment
-  const [equipmentStandardMap, setEquipmentStandardMap] = useState<Record<string, 'ats' | 'mts'>>({});
+  // Track ATS vs MTS vs ECS standard selection per equipment
+  const [equipmentStandardMap, setEquipmentStandardMap] = useState<Record<string, 'ats' | 'mts' | 'ecs'>>({});
 
   const handleNavigateToNeta = (
     project: ProjectMasterRecord,
     equipment: ProjectEquipmentItem,
-    overrideStandard?: 'ats' | 'mts'
+    overrideStandard?: 'ats' | 'mts' | 'ecs'
   ) => {
     const key = `${project.id}_${equipment.kksCode}`;
-    const standard = overrideStandard || equipmentStandardMap[key] || 'ats';
+    const standard = overrideStandard || equipmentStandardMap[key] || project.standard || 'ats';
 
     if (onNavigateToNetaForm) {
       onNavigateToNetaForm(project, equipment, standard);
@@ -192,8 +194,11 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
     customerName: '',
     factory: '',
     leadFse: '',
+    standard: 'ats' as 'ats' | 'mts' | 'ecs',
     startDate: new Date().toISOString().split('T')[0],
     endDate: '',
+    planningStartDate: new Date().toISOString().split('T')[0],
+    planningEndDate: '',
     notes: '',
     status: 'chuẩn_bị' as 'chuẩn_bị' | 'đang_thực_hiện' | 'hoàn_thành'
   });
@@ -584,6 +589,8 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
   const handleOpenAddProject = () => {
     const nextPrjId = getNextProjectId(projects);
     const firstCust = customers[0];
+    const defaultStart = new Date().toISOString().split('T')[0];
+    const defaultEnd = new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setNewPrj({
       id: nextPrjId,
       name: '',
@@ -591,8 +598,11 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
       customerName: firstCust?.name || '',
       factory: (firstCust?.factories && firstCust.factories[0]) || 'Nhà máy chính',
       leadFse: engineers[0]?.name || 'Võ Minh Tú',
-      startDate: new Date().toISOString().split('T')[0],
-      endDate: '',
+      standard: 'ats',
+      startDate: defaultStart,
+      endDate: defaultEnd,
+      planningStartDate: defaultStart,
+      planningEndDate: defaultEnd,
       notes: '',
       status: 'chuẩn_bị'
     });
@@ -602,6 +612,9 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
 
   const handleEditProjectClick = (prj: ProjectMasterRecord) => {
     setEditingProject(prj);
+    const pStart = prj.planningStartDate || prj.startDate || '';
+    const pEnd = prj.planningEndDate || prj.endDate || '';
+    const std = prj.standard || (prj.name?.toLowerCase().includes('ecs') ? 'ecs' : prj.name?.toLowerCase().includes('mts') ? 'mts' : 'ats');
     setNewPrj({
       id: prj.id,
       name: prj.name,
@@ -609,8 +622,11 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
       customerName: prj.customerName,
       factory: prj.factory,
       leadFse: prj.leadFse || '',
-      startDate: prj.startDate || '',
-      endDate: prj.endDate || '',
+      standard: std,
+      startDate: prj.startDate || pStart,
+      endDate: prj.endDate || pEnd,
+      planningStartDate: pStart,
+      planningEndDate: pEnd,
       notes: prj.notes || '',
       status: prj.status || 'chuẩn_bị'
     });
@@ -640,8 +656,11 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
       customerName,
       factory: newPrj.factory.trim() || 'Nhà máy chính',
       leadFse: newPrj.leadFse.trim(),
-      startDate: newPrj.startDate,
-      endDate: newPrj.endDate,
+      standard: newPrj.standard,
+      startDate: newPrj.startDate || newPrj.planningStartDate,
+      endDate: newPrj.endDate || newPrj.planningEndDate,
+      planningStartDate: newPrj.planningStartDate || newPrj.startDate,
+      planningEndDate: newPrj.planningEndDate || newPrj.endDate,
       notes: newPrj.notes,
       status: newPrj.status,
       equipmentList: editingProject ? editingProject.equipmentList : [],
@@ -1277,6 +1296,17 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
           {/* ================================================================= */}
           {activeTab === 'duan' && (
             <div className="space-y-4">
+              {/* TIMELINE GANTT CHART OVERVIEW FOR PROJECT MANAGERS */}
+              <ProjectPortfolioGanttTimeline
+                projects={projects}
+                onSelectProject={(selectedPrj) => {
+                  const el = document.getElementById(`project_card_${selectedPrj.id}`);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                onOpenManageEquipment={handleOpenManageProjectEquipment}
+                onOpenAddProject={handleOpenAddProject}
+              />
+
               {/* Sheet Tab Action Card */}
               <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 border border-indigo-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
                 <div className="space-y-1">
@@ -1287,7 +1317,7 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                     </span>
                   </div>
                   <p className="text-xs text-slate-600">
-                    Bộ phận Field Service chuẩn bị trước Dự án, gắn Khách hàng và soạn danh sách thiết bị (Loại thiết bị, Mã KKS code). 
+                    Bộ phận Field Service chuẩn bị trước Dự án, gắn Khách hàng, kế hoạch Planning (Bắt đầu - Kết thúc), tiêu chuẩn kiểm định <strong>(ATS / MTS / ECS)</strong> và soạn danh sách thiết bị KKS code. 
                     Khi kỹ sư ra site chỉ cần <strong>nhập hoặc chọn Mã dự án</strong> là hệ thống tự động đổ đầy đủ Khách hàng và dropdown các thiết bị KKS tương ứng để kiểm tra test ngay!
                   </p>
                 </div>
@@ -1336,18 +1366,48 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                         eq.name.toLowerCase().includes(search.toLowerCase())
                       ))
                   )
-                  .map((prj) => (
+                  .map((prj) => {
+                    const std = prj.standard || (prj.name?.toLowerCase().includes('ecs') ? 'ecs' : prj.name?.toLowerCase().includes('mts') ? 'mts' : 'ats');
+                    const planningStart = prj.planningStartDate || prj.startDate || '2026-03-01';
+                    const planningEnd = prj.planningEndDate || prj.endDate || '2026-03-25';
+                    const durationDays = (() => {
+                      const s = new Date(planningStart).getTime();
+                      const e = new Date(planningEnd).getTime();
+                      return Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1);
+                    })();
+                    const pmpHealth = calculatePmpProjectHealth(prj);
+
+                    return (
                     <div
                       key={prj.id}
-                      className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs hover:border-indigo-300 transition-all space-y-3"
+                      id={`project_card_${prj.id}`}
+                      className={`bg-white border rounded-xl p-4 shadow-2xs transition-all space-y-3 ${
+                        pmpHealth.isOverdue
+                          ? 'border-rose-300 ring-1 ring-rose-200/50 hover:border-rose-400'
+                          : pmpHealth.status === 'at_risk'
+                          ? 'border-amber-300 ring-1 ring-amber-200/50 hover:border-amber-400'
+                          : 'border-slate-200 hover:border-indigo-300'
+                      }`}
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
                         <div className="flex items-center gap-2.5">
-                          <span className="px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-900 font-mono font-black text-xs">
+                          <span className="px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-800 font-mono font-black text-xs">
                             {prj.id}
                           </span>
                           <div>
-                            <h4 className="font-bold text-slate-900 text-sm">{prj.name}</h4>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-slate-900 text-sm">{prj.name}</h4>
+                              {/* Standard Badge */}
+                              <span className={`px-2 py-0.2 rounded font-mono font-extrabold text-[10px] ${
+                                std === 'ecs'
+                                  ? 'bg-teal-100 text-teal-800 border border-teal-300'
+                                  : std === 'mts'
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-blue-100 text-blue-800 border border-blue-300'
+                              }`}>
+                                {std.toUpperCase()}
+                              </span>
+                            </div>
                             <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-2 mt-0.5">
                               <span className="font-semibold text-blue-700">KH: {prj.customerId} - {prj.customerName}</span>
                               <span>•</span>
@@ -1362,15 +1422,19 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 self-end sm:self-center">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            prj.status === 'hoàn_thành'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : prj.status === 'đang_thực_hiện'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-amber-100 text-amber-900'
-                          }`}>
-                            {prj.status === 'hoàn_thành' ? 'Đã hoàn thành' : prj.status === 'đang_thực_hiện' ? 'Đang thực hiện' : 'Chuẩn bị trước'}
+                        <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+                          {/* PMP Standard RAG Health Badge */}
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 ${pmpHealth.colorScheme.badgeBg} ${pmpHealth.colorScheme.badgeText} ${pmpHealth.colorScheme.badgeBorder}`}
+                            title={`Chỉ số tiến độ SPI: ${pmpHealth.spi} | Kế hoạch: ${pmpHealth.plannedProgressPercent}% | Thực tế: ${pmpHealth.actualProgressPercent}%`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${pmpHealth.colorScheme.dotColor}`} />
+                            <span>PMP: {pmpHealth.label}</span>
+                            {pmpHealth.isOverdue && (
+                              <span className="font-mono text-[9px] bg-rose-600 text-white px-1 py-0.2 rounded font-extrabold uppercase ml-0.5">
+                                Trễ {Math.abs(pmpHealth.varianceDays)}d
+                              </span>
+                            )}
                           </span>
 
                           <button
@@ -1416,6 +1480,118 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                         </div>
                       </div>
 
+                      {/* PMP EVM Progress & Schedule Variance Bar */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-700">Tiến độ KKS Hiện Trường:</span>
+                            <span className="font-mono font-black text-slate-900">{pmpHealth.actualProgressPercent}%</span>
+                            <span>({prj.equipmentList?.filter(e => e.status === 'đã_test').length || 0}/{prj.equipmentList?.length || 0} thiết bị)</span>
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-500">
+                            Tiến độ lý thuyết: <strong className="text-slate-700">{pmpHealth.plannedProgressPercent}%</strong> • SPI: <strong className={pmpHealth.spi >= 0.95 ? 'text-emerald-700' : pmpHealth.spi >= 0.8 ? 'text-amber-700' : 'text-rose-700'}>{pmpHealth.spi}</strong>
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden flex border border-slate-200">
+                          <div
+                            className={`h-full bg-gradient-to-r ${pmpHealth.colorScheme.barGradient} transition-all rounded-full`}
+                            style={{ width: `${pmpHealth.actualProgressPercent}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* PLANNING TIME & STANDARDS SUMMARY ROW - PMP COLOR FORMATTED */}
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-slate-50/90 border border-slate-200/90 rounded-xl p-2.5 text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
+                            <Calendar size={14} />
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Planning Bắt Đầu</div>
+                            <div className="font-mono font-bold text-slate-900">{planningStart}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <div className={`p-1.5 rounded-lg ${
+                            pmpHealth.isOverdue
+                              ? 'bg-rose-100 text-rose-700 animate-pulse'
+                              : pmpHealth.isEndingSoon
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            <Clock size={14} />
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1">
+                              <span>Planning Kết Thúc</span>
+                              {pmpHealth.isOverdue && (
+                                <span className="text-[9px] text-rose-600 font-extrabold uppercase">● Quá hạn</span>
+                              )}
+                            </div>
+                            <div className={`font-mono font-bold ${
+                              pmpHealth.isOverdue
+                                ? 'text-rose-700'
+                                : pmpHealth.isEndingSoon
+                                ? 'text-amber-800'
+                                : 'text-slate-900'
+                            }`}>{planningEnd}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-lg bg-slate-200 text-slate-700">
+                            <Layers size={14} />
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Thời Lượng & Hạn</div>
+                            <div className="font-mono font-bold text-slate-900 flex items-center gap-1.5">
+                              <span>{durationDays} ngày</span>
+                              <span className={`text-[10px] font-semibold px-1 rounded ${
+                                pmpHealth.status === 'completed'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : pmpHealth.isOverdue
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : pmpHealth.varianceDays <= 5
+                                  ? 'bg-amber-100 text-amber-900'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {pmpHealth.status === 'completed'
+                                  ? 'Đã xong'
+                                  : pmpHealth.isOverdue
+                                  ? `Trễ ${Math.abs(pmpHealth.varianceDays)}d`
+                                  : `Còn ${pmpHealth.varianceDays}d`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <div className={`p-1.5 rounded-lg ${
+                            std === 'ecs' ? 'bg-teal-100 text-teal-700' : std === 'mts' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            <ShieldCheck size={14} />
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Tiêu Chuẩn NETA</div>
+                            <div className="flex items-center gap-1 font-bold">
+                              <span className={`px-2 py-0.2 rounded text-[10px] font-mono font-extrabold ${
+                                std === 'ecs'
+                                  ? 'bg-teal-600 text-white'
+                                  : std === 'mts'
+                                  ? 'bg-amber-500 text-slate-950'
+                                  : 'bg-blue-600 text-white'
+                              }`}>
+                                {std.toUpperCase()}
+                              </span>
+                              <span className="text-[10px] text-slate-600">
+                                {std === 'ecs' ? 'Commissioning' : std === 'mts' ? 'Bảo dưỡng' : 'Nghiệm thu'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Quick Field Entry Launcher for the Project */}
                       <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-amber-50 border border-indigo-200/90 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-2xs">
                         <div className="flex items-center gap-2.5">
@@ -1430,7 +1606,7 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                               <span className="text-slate-700 font-medium">{prj.name}</span>
                             </div>
                             <p className="text-[11px] text-slate-500 mt-0.5">
-                              Chọn thiết bị KKS & tiêu chuẩn (ATS: nghiệm thu đưa vào vận hành | MST: bảo dưỡng định kỳ) để mở form NETA chuẩn
+                              Chọn thiết bị KKS & tiêu chuẩn (ATS: nghiệm thu đưa vào vận hành | MTS: bảo dưỡng định kỳ | ECS: commissioning vận hành) để mở form NETA chuẩn
                             </p>
                           </div>
                         </div>
@@ -1453,10 +1629,11 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                               <select
                                 id={`quick_std_${prj.id}`}
                                 className="text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-bold text-indigo-900 outline-none"
-                                defaultValue="ats"
+                                defaultValue={std}
                               >
                                 <option value="ats">ANSI/NETA ATS (Nghiệm thu)</option>
-                                <option value="mts">ANSI/NETA MST / MTS (Bảo dưỡng)</option>
+                                <option value="mts">ANSI/NETA MTS (Bảo dưỡng)</option>
+                                <option value="ecs">ANSI/NETA ECS (Commissioning)</option>
                               </select>
 
                               <button
@@ -1465,7 +1642,7 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                                   const eqSelect = document.getElementById(`quick_eq_${prj.id}`) as HTMLSelectElement;
                                   const stdSelect = document.getElementById(`quick_std_${prj.id}`) as HTMLSelectElement;
                                   const chosenKks = eqSelect?.value || prj.equipmentList![0].kksCode;
-                                  const chosenStd = (stdSelect?.value || 'ats') as 'ats' | 'mts';
+                                  const chosenStd = (stdSelect?.value || std || 'ats') as 'ats' | 'mts' | 'ecs';
                                   const targetEq = prj.equipmentList!.find(e => e.kksCode === chosenKks) || prj.equipmentList![0];
                                   handleNavigateToNeta(prj, targetEq, chosenStd);
                                 }}
@@ -1516,7 +1693,8 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                         />
                       </div>
                     </div>
-                  ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -2137,7 +2315,20 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Tiêu Chuẩn Chính (NETA)</label>
+                  <select
+                    value={newPrj.standard}
+                    onChange={(e) => setNewPrj({ ...newPrj, standard: e.target.value as any })}
+                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-bold text-indigo-900 bg-indigo-50/50"
+                  >
+                    <option value="ats">ANSI/NETA ATS (Nghiệm thu đóng điện)</option>
+                    <option value="mts">ANSI/NETA MTS (Bảo dưỡng định kỳ)</option>
+                    <option value="ecs">ANSI/NETA ECS (Commissioning vận hành)</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Kỹ Sư Trưởng Phụ Trách</label>
                   <select
@@ -2154,37 +2345,55 @@ export const MasterDirectorySheetManagerModal: React.FC<MasterDirectorySheetMana
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Trạng Thái Dự Án</label>
+                  <label className="block font-semibold text-slate-700 mb-1">Trạng Thái (PMP Phase)</label>
                   <select
                     value={newPrj.status}
                     onChange={(e) => setNewPrj({ ...newPrj, status: e.target.value as any })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-semibold"
                   >
-                    <option value="chuẩn_bị">Chuẩn bị trước</option>
-                    <option value="đang_thực_hiện">Đang thực hiện ngoài site</option>
-                    <option value="hoàn_thành">Đã hoàn thành</option>
+                    <option value="chuẩn_bị">Chuẩn bị trước (PMP: Planning / Baseline)</option>
+                    <option value="đang_thực_hiện">Đang thực hiện ngoài site (PMP: Executing)</option>
+                    <option value="hoàn_thành">Đã hoàn thành (PMP: Closing / Completed)</option>
                   </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Ngày Bắt Đầu Dự Kiến</label>
-                  <input
-                    type="date"
-                    value={newPrj.startDate}
-                    onChange={(e) => setNewPrj({ ...newPrj, startDate: e.target.value })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  />
+              {/* Planning Dates Section */}
+              <div className="p-2.5 bg-gradient-to-r from-indigo-50/60 to-purple-50/60 rounded-xl border border-indigo-200/80 space-y-2">
+                <div className="font-bold text-slate-800 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Calendar size={13} className="text-indigo-700" />
+                    <span>Planning Thời Gian Bắt Đầu & Kết Thúc (Gantt Portfolio)</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-700 font-mono font-semibold">
+                    Kế hoạch triển khai PM/FSE
+                  </span>
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Ngày Hoàn Thành Dự Kiến</label>
-                  <input
-                    type="date"
-                    value={newPrj.endDate}
-                    onChange={(e) => setNewPrj({ ...newPrj, endDate: e.target.value })}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Planning Bắt Đầu *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={newPrj.planningStartDate}
+                      onChange={(e) => setNewPrj({ ...newPrj, planningStartDate: e.target.value, startDate: e.target.value })}
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono font-bold bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Planning Kết Thúc *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={newPrj.planningEndDate}
+                      onChange={(e) => setNewPrj({ ...newPrj, planningEndDate: e.target.value, endDate: e.target.value })}
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono font-bold bg-white"
+                    />
+                  </div>
                 </div>
               </div>
 

@@ -34,6 +34,9 @@ import {
   performDeterministicEcsMvAnalysis,
   ECS_MV_SYSTEM_INSTRUCTION
 } from '../../server/netaEcsMediumVoltageAnalyzer';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { ProjectSelectDropdown } from './ProjectSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -159,6 +162,7 @@ export const NetaEcsMediumVoltageChecklist: React.FC<Props> = ({
 
   // Metadata
   const [reportNo, setReportNo] = useState(`TEV-ECS-2024-MV-${Math.floor(100 + Math.random() * 900)}`);
+  const [customerName, setCustomerName] = useState('Công ty Cổ phần Năng lượng TEV');
   const [projectName, setProjectName] = useState('Tram Bien Ap Trung The TEV Substation');
   const [systemTag, setSystemTag] = useState('MV-SWITCHGEAR-22KV-BUS-A (22 kV System)');
   const [nominalVoltageKv, setNominalVoltageKv] = useState(22);
@@ -721,12 +725,25 @@ export const NetaEcsMediumVoltageChecklist: React.FC<Props> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Tên Dự án / Trạm biến áp:</label>
-                <input
-                  type="text"
+                <CustomerSelectDropdown
+                  label="Tên Khách Hàng (Master):"
+                  value={customerName}
+                  onChange={(cName) => setCustomerName(cName)}
+                  placeholder="Chọn hoặc thêm Khách Hàng mới..."
+                />
+              </div>
+
+              <div>
+                <ProjectSelectDropdown
+                  label="Tên Dự án / Trạm biến áp:"
                   value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  className="w-full p-2 rounded-lg border border-slate-200 text-xs focus:ring-1 focus:ring-teal-500 focus:outline-hidden"
+                  customerName={customerName}
+                  onCustomerAutoSelect={(cName) => {
+                    if (!customerName) setCustomerName(cName);
+                  }}
+                  onChange={(pName) => setProjectName(pName)}
+                  placeholder="Chọn hoặc thêm Dự Án / Nhà Máy..."
+                  standard="ecs"
                 />
               </div>
 
@@ -763,11 +780,9 @@ export const NetaEcsMediumVoltageChecklist: React.FC<Props> = ({
 
               <div>
                 <label className="block text-slate-600 font-semibold mb-1">Kỹ Sư Nghiệm Thu FSE (NETA III):</label>
-                <input
-                  type="text"
+                <FseEngineerDropdown
                   value={fseName}
-                  onChange={(e) => setFseName(e.target.value)}
-                  className="w-full p-2 rounded-lg border border-slate-200 text-xs focus:ring-1 focus:ring-teal-500 focus:outline-hidden"
+                  onChange={(eng) => setFseName(eng)}
                 />
               </div>
 

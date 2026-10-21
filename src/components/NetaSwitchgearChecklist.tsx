@@ -41,6 +41,8 @@ import { TevReportPrintModal } from './TevReportPrintModal';
 import { NameplateScannerModal } from './NameplateScannerModal';
 import { ExtractedNameplateData } from '../../server/nameplateOcrAnalyzer';
 import { FseEngineerDropdown } from './FseEngineerDropdown';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { ProjectSelectDropdown } from './ProjectSelectDropdown';
 import { useAtsFormSync } from '../hooks/useAtsFormSync';
 
 interface Props {
@@ -494,16 +496,35 @@ export const NetaSwitchgearChecklist: React.FC<Props> = ({ onSaveReport, onNavig
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Tên Dự Án / Nhà Máy</label>
-                <input
-                  type="text"
-                  value={data.site_info.project_name}
-                  onChange={e => setData(prev => ({
+                <CustomerSelectDropdown
+                  label="Tên Khách Hàng (Master)"
+                  value={data.site_info.customer_name || ''}
+                  onChange={(custName) => setData(prev => ({
                     ...prev,
-                    site_info: { ...prev.site_info, project_name: e.target.value }
+                    site_info: { ...prev.site_info, customer_name: custName }
                   }))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
-                  placeholder="Ví dụ: Tram Khieu TEV Industrial Factory"
+                  placeholder="Chọn hoặc thêm Khách Hàng mới..."
+                />
+              </div>
+
+              <div>
+                <ProjectSelectDropdown
+                  label="Tên Dự Án / Nhà Máy"
+                  value={data.site_info.project_name}
+                  customerName={data.site_info.customer_name}
+                  onCustomerAutoSelect={(cName) => {
+                    if (!data.site_info.customer_name) {
+                      setData(prev => ({
+                        ...prev,
+                        site_info: { ...prev.site_info, customer_name: cName }
+                      }));
+                    }
+                  }}
+                  onChange={(prjName) => setData(prev => ({
+                    ...prev,
+                    site_info: { ...prev.site_info, project_name: prjName }
+                  }))}
+                  placeholder="Chọn hoặc thêm Dự Án / Nhà Máy mới..."
                 />
               </div>
 
@@ -536,7 +557,7 @@ export const NetaSwitchgearChecklist: React.FC<Props> = ({ onSaveReport, onNavig
               </div>
 
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Kỹ Sư Kiểm Định (FSE)</label>
+                <label className="block text-slate-600 font-semibold mb-1">Kỹ Sư Nghiệm Thu / FSE</label>
                 <FseEngineerDropdown
                   value={data.site_info.fse_name}
                   onChange={val => setData(prev => ({
@@ -1190,12 +1211,12 @@ export const NetaSwitchgearChecklist: React.FC<Props> = ({ onSaveReport, onNavig
         </div>
       </div>
 
-      {/* Primary Action Button: Run AI Analysis */}
+      {/* Primary Action Button: Run Technical Analysis */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-gradient-to-r from-slate-900 to-indigo-950 rounded-2xl shadow-md border border-indigo-500/30 text-white">
         <div className="space-y-1 text-center sm:text-left">
           <div className="flex items-center justify-center sm:justify-start gap-2">
-            <Sparkles size={18} className="text-amber-400 animate-spin" style={{ animationDuration: '6s' }} />
-            <span className="text-sm font-bold text-white">Trợ Lý AI Chuyên Gia Field Service (TEV Platform AI)</span>
+            <ShieldCheck size={18} className="text-amber-400" />
+            <span className="text-sm font-bold text-white">Thẩm Định Kỹ Thuật Hiện Trường (TEV Standard Platform)</span>
           </div>
           <p className="text-xs text-slate-300">
             Tự động đối soát toàn bộ thông số với tiêu chuẩn ANSI/NETA ATS-2025 Mục 7.1.1, phân loại rủi ro và xuất khuyến nghị hành động 4 phần.
@@ -1215,12 +1236,12 @@ export const NetaSwitchgearChecklist: React.FC<Props> = ({ onSaveReport, onNavig
             {isAnalyzing ? (
               <>
                 <RefreshCw size={15} className="animate-spin text-white" />
-                <span>Đang Đối Soát Tiêu Chuẩn NETA...</span>
+                <span>Đang Thẩm Định Tiêu Chuẩn NETA...</span>
               </>
             ) : (
               <>
-                <Sparkles size={15} className="text-slate-950" />
-                <span>Chạy Đối Soát AI (Gemini 3.8 Flash)</span>
+                <ShieldCheck size={15} className="text-slate-950" />
+                <span>Thẩm Định Kỹ Thuật NETA ATS-2025</span>
               </>
             )}
           </button>
@@ -1309,7 +1330,7 @@ export const NetaSwitchgearChecklist: React.FC<Props> = ({ onSaveReport, onNavig
           }`}>
             <div className="font-bold flex items-center gap-1.5 mb-1 text-sm">
               <FileCheck2 size={16} />
-              Đánh Giá Trọng Yếu Từ TEV Field Service AI:
+              Đánh Giá Trọng Yếu Hiện Trường (TEV Standard):
             </div>
             <div>{analysisResult.status_reason}</div>
           </div>

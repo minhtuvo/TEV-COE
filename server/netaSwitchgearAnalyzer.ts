@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 export interface NetaSwitchgearInputPayload {
   site_info: {
     project_name: string;
+    customer_name?: string;
     switchgear_tag: string;
     switchgear_rating: string;
     fse_name: string;

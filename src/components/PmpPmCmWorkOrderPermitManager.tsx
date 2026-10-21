@@ -34,7 +34,11 @@ import {
   Wrench,
   Layers,
   ArrowUpRight,
-  Users
+  Users,
+  Maximize2,
+  Minimize2,
+  CalendarDays,
+  RotateCcw
 } from 'lucide-react';
 import { CustomerSelectDropdown } from './CustomerSelectDropdown';
 import { EquipmentSelectDropdown } from './EquipmentSelectDropdown';
@@ -352,6 +356,55 @@ function deducePriorityCode(wo: WorkOrderItem): PriorityCode {
 }
 
 // ============================================================================
+// HELPERS: DATETIME-LOCAL CONVERSION FOR MILESTONES (COLUMNS 20-23)
+// ============================================================================
+function parseToDatetimeLocal(val?: string): string {
+  if (!val || typeof val !== 'string') return '';
+  const s = val.trim();
+  if (!s || s.toLowerCase() === 'chưa ghi nhận') return '';
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s.slice(0, 16);
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(s)) return s.replace(/\s+/, 'T').slice(0, 16);
+  const dmyMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(\d{2}:\d{2})?/);
+  if (dmyMatch) {
+    const [, d, m, y, t] = dmyMatch;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T${t || '08:00'}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  }
+  return '';
+}
+
+function formatFromDatetimeLocal(val: string): string {
+  if (!val) return '';
+  return val.replace('T', ' ').slice(0, 16);
+}
+
+function getNowFormattedDatetime(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function calculateMilestoneDiffHours(t0Str?: string, t1Str?: string): number | null {
+  if (!t0Str || !t1Str) return null;
+  const d0 = new Date(t0Str.replace(' ', 'T')).getTime();
+  const d1 = new Date(t1Str.replace(' ', 'T')).getTime();
+  if (isNaN(d0) || isNaN(d1) || d1 < d0) return null;
+  return Number(((d1 - d0) / (1000 * 60 * 60)).toFixed(1));
+}
+
+// ============================================================================
 // 3. MAIN COMPONENT: PmpPmCmWorkOrderPermitManager
 // ============================================================================
 
@@ -372,10 +425,10 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
   pmUpcomingTasks = [],
   userEmail = 'sgm1707@gmail.com'
 }) => {
-  // Navigation Tabs
+  // Navigation Tabs: Default to 'pm-dashboard' as requested
   const [activeSubTab, setActiveSubTab] = useState<
     'all-work' | 'daily-meeting' | 'pm-matrix' | 'wp-loto' | 'pm-dashboard' | 'alerts' | 'sheets'
-  >('all-work');
+  >('pm-dashboard');
 
   // View modes for Work Orders Table: 'full-23-cols' | 'workflow-kanban' | 'compact'
   const [viewMode, setViewMode] = useState<'full-23-cols' | 'workflow-kanban' | 'compact'>('full-23-cols');
@@ -396,6 +449,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
   const [isCloseWpModalOpen, setIsCloseWpModalOpen] = useState(false);     // Modal 5: Đóng WP nghiệm thu hiện trường
   const [isCloseWoModalOpen, setIsCloseWoModalOpen] = useState(false);     // Modal 6: Đóng WO trên CMMS
   const [isEdit23ColsModalOpen, setIsEdit23ColsModalOpen] = useState(false); // Modal 7: Sửa chi tiết 23 Cột
+  const [isFullScreenEdit23Modal, setIsFullScreenEdit23Modal] = useState(true); // Hiển thị toàn màn hình theo yêu cầu
   const [isPrintPermitOpen, setIsPrintPermitOpen] = useState(false);       // Modal 8: In giấy phép Work Permit A4
 
   // Selected item for active modal action
@@ -914,7 +968,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
                 <CheckCircle size={14} className="text-emerald-400" />
-                Chuẩn CMMS Nhà Máy & 23 Cột TEV
+                Chuẩn CMMS Nhà Máy TEV
               </span>
               <span className="px-3 py-1 rounded-full text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
                 <Shield size={14} className="text-blue-400" />
@@ -946,10 +1000,10 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
               <button
                 onClick={handleOpenCreateWr}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-700 hover:to-amber-700 text-white font-bold text-xs rounded-xl shadow-md transition-all hover:scale-[1.02] active:scale-[0.98]"
-                title="Field Service / Operator đi site phát hiện khiếm khuyết mở phiếu WR mới"
+                title="Field Service / Operator đi site phát hiện khiếm khuyết mở phiếu WR/CM mới"
               >
                 <AlertTriangle size={16} />
-                <span>+ Mở Yêu Cầu WR (Khiếm Khuyết Site)</span>
+                <span>+ Mở Yêu Cầu WR/CM</span>
               </button>
 
               {/* Button 2: Create recurring PM Plan */}
@@ -990,10 +1044,10 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
               <button
                 onClick={handleExport23ColumnsCsv}
                 className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold rounded-lg transition-colors"
-                title="Xuất bảng Excel/CSV 23 Cột Chuẩn TEV"
+                title="Xuất bảng Excel/CSV Chuẩn TEV"
               >
                 <Download size={13} className="text-amber-400" />
-                <span>CSV (23 Cột)</span>
+                <span>Xuất CSV</span>
               </button>
             </div>
           </div>
@@ -1146,7 +1200,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
             {plantKpis.totalDowntimeHours} <span className="text-xs font-normal text-slate-500">h</span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            Tính từ Cột 20 ➔ 23
+            Tính từ mốc Dừng máy ➔ Chạy lại
           </div>
         </div>
       </div>
@@ -1155,6 +1209,20 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
       {/* 4. MAIN SUB-TABS: WORKFLOW-DRIVEN SECTIONS                           */}
       {/* ==================================================================== */}
       <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-xs flex flex-wrap gap-1.5 text-xs">
+        {/* TAB 1: Dashboard & Tiến Độ PM displayed first as requested */}
+        <button
+          onClick={() => setActiveSubTab('pm-dashboard')}
+          className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all ${
+            activeSubTab === 'pm-dashboard'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <BarChart3 size={15} />
+          <span>Dashboard & Tiến Độ PM</span>
+        </button>
+
+        {/* TAB 2: Danh Sách & Quản Lý Phiếu */}
         <button
           onClick={() => setActiveSubTab('all-work')}
           className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all ${
@@ -1164,7 +1232,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
           }`}
         >
           <ClipboardList size={15} />
-          <span>Danh Sách & Quản Lý Phiếu (23 Cột)</span>
+          <span>Danh Sách & Quản Lý Phiếu</span>
           <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
             activeSubTab === 'all-work' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700'
           }`}>
@@ -1214,18 +1282,6 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
         </button>
 
         <button
-          onClick={() => setActiveSubTab('pm-dashboard')}
-          className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all ${
-            activeSubTab === 'pm-dashboard'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <BarChart3 size={15} />
-          <span>Dashboard & Tiến Độ PM</span>
-        </button>
-
-        <button
           onClick={() => setActiveSubTab('alerts')}
           className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all ${
             activeSubTab === 'alerts'
@@ -1270,9 +1326,9 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                     viewMode === 'full-23-cols' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                   }`}
-                  title="Chế độ Ma trận 23 Cột Chuẩn TEV"
+                  title="Chế độ Bảng Chi Tiết Chuẩn TEV"
                 >
-                  📊 Ma Trận 23 Cột
+                  📊 Bảng Chi Tiết
                 </button>
                 <button
                   onClick={() => setViewMode('workflow-kanban')}
@@ -1380,7 +1436,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
               <div className="p-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-slate-800">
-                    Bảng Quản Trị 23 Cột Chuẩn TEV Service Flatform
+                    Bảng Quản Trị Chuẩn TEV Service Flatform
                   </span>
                   <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold">
                     {filteredOrders.length} phiếu hiển thị
@@ -1388,19 +1444,19 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
                 </div>
                 <div className="flex items-center gap-3 text-[11px] text-slate-500">
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded bg-blue-500"></span> Cột 1-5: Định danh & WP
+                    <span className="w-2.5 h-2.5 rounded bg-blue-500"></span> Định danh &amp; WP
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded bg-amber-500"></span> Cột 6-9: Phân loại & KH
+                    <span className="w-2.5 h-2.5 rounded bg-amber-500"></span> Phân loại &amp; KH
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded bg-indigo-500"></span> Cột 10-14: RACI
+                    <span className="w-2.5 h-2.5 rounded bg-indigo-500"></span> Phân công RACI
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded bg-rose-500"></span> Cột 15-17: LOTO & Vật tư
+                    <span className="w-2.5 h-2.5 rounded bg-rose-500"></span> LOTO &amp; Vật tư
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded bg-emerald-500"></span> Cột 18-23: Mốc giờ dừng máy
+                    <span className="w-2.5 h-2.5 rounded bg-emerald-500"></span> Mốc giờ dừng máy
                   </span>
                 </div>
               </div>
@@ -1479,7 +1535,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
                                   setIsEdit23ColsModalOpen(true);
                                 }}
                                 className="hover:underline flex items-center gap-1"
-                                title="Nhấn để xem / sửa toàn diện 23 cột"
+                                title="Nhấn để xem / chỉnh sửa phiếu"
                               >
                                 {wo.id || wo.wrId || 'WO-CHƯA-DUYỆT'}
                               </button>
@@ -1779,7 +1835,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
                                     setIsEdit23ColsModalOpen(true);
                                   }}
                                   className="p-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700"
-                                  title="Chỉnh sửa 23 Cột"
+                                  title="Chỉnh sửa chi tiết"
                                 >
                                   <Wrench size={13} />
                                 </button>
@@ -1937,7 +1993,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
                         }}
                         className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold"
                       >
-                        Sửa 23 Cột
+                        Sửa Chi Tiết
                       </button>
                     </div>
                   </div>
@@ -3098,160 +3154,471 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
       {/* 17. MODAL 7: CHỈNH SỬA CHI TIẾT ĐẦY ĐỦ 23 CỘT CHUẨN TEV              */}
       {/* ==================================================================== */}
       {isEdit23ColsModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden my-6 border border-slate-200">
-            <div className="px-6 py-4 bg-gradient-to-r from-slate-900 to-indigo-950 text-white flex items-center justify-between">
+        <div className={`fixed inset-0 z-50 flex ${
+          isFullScreenEdit23Modal 
+            ? 'p-0 w-screen h-screen' 
+            : 'bg-slate-900/80 backdrop-blur-xs items-center justify-center p-2 sm:p-4 overflow-y-auto'
+        }`}>
+          <div className={`bg-white shadow-2xl flex flex-col overflow-hidden ${
+            isFullScreenEdit23Modal
+              ? 'w-full h-full rounded-none border-0'
+              : 'w-full max-w-6xl rounded-2xl my-auto max-h-[94vh] border border-slate-200'
+          }`}>
+            <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between shrink-0 shadow-md">
               <div>
-                <h3 className="font-bold text-base">Chỉnh Sửa Chi Tiết 23 Cột Chuẩn TEV Service Flatform</h3>
-                <p className="text-xs text-slate-300">WO: {activeItem.id} • WP: {activeItem.workPermitId || '---'}</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-base sm:text-lg">Chỉnh Sửa Chi Tiết Phiếu Công Việc TEV Service Flatform</h3>
+                  {isFullScreenEdit23Modal && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/30 text-blue-300 border border-blue-400/30">
+                      Toàn Màn Hình
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-300">
+                  WO: <span className="font-mono font-bold text-emerald-400">{activeItem.id || '---'}</span>
+                  {' • '}
+                  WP: <span className="font-mono font-bold text-cyan-300">{activeItem.workPermitId || '---'}</span>
+                  {' • '}
+                  Thiết bị: <span className="font-semibold text-amber-300">{Array.isArray(activeItem.equipmentId) ? activeItem.equipmentId.join(', ') : (activeItem.equipmentId || '---')}</span>
+                </p>
               </div>
-              <button onClick={() => setIsEdit23ColsModalOpen(false)} className="text-slate-300 hover:text-white">
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsFullScreenEdit23Modal(!isFullScreenEdit23Modal)}
+                  className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors flex items-center gap-1.5 text-xs font-semibold"
+                  title={isFullScreenEdit23Modal ? 'Thu nhỏ cửa sổ' : 'Phóng to toàn màn hình'}
+                >
+                  {isFullScreenEdit23Modal ? (
+                    <>
+                      <Minimize2 size={16} />
+                      <span className="hidden sm:inline">Thu nhỏ</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 size={16} />
+                      <span className="hidden sm:inline">Toàn màn hình</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEdit23ColsModalOpen(false)}
+                  className="p-1.5 rounded-lg bg-white/10 hover:bg-rose-600 text-slate-300 hover:text-white transition-colors"
+                  title="Đóng cửa sổ"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
-            <div className="p-6 max-h-[65vh] overflow-y-auto space-y-4 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className={`p-6 md:p-8 overflow-y-auto space-y-6 text-xs ${
+              isFullScreenEdit23Modal ? 'flex-1 max-h-none' : 'max-h-[75vh]'
+            }`}>
+              {/* KHỐI 1: THÔNG TIN NHẬN DIỆN VÀ PHÂN LOẠI CÔNG VIỆC */}
+              <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200/80 space-y-4">
+                <div className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                  Thông Tin Chung Phiếu Công Việc
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">1. Mã WO</label>
+                    <input
+                      type="text"
+                      value={activeItem.id || ''}
+                      onChange={(e) => setActiveItem({ ...activeItem, id: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold text-emerald-800 bg-emerald-50/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">2. Mã Work Permit</label>
+                    <input
+                      type="text"
+                      value={activeItem.workPermitId || ''}
+                      onChange={(e) => setActiveItem({ ...activeItem, workPermitId: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold text-blue-800 bg-blue-50/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">6. Failure Code</label>
+                    <select
+                      value={activeItem.failureCode || 'ROUTINE-PM'}
+                      onChange={(e) => setActiveItem({ ...activeItem, failureCode: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg font-semibold text-rose-700 bg-white"
+                    >
+                      {FAILURE_CODES.map(fc => (
+                        <option key={fc.code} value={fc.code}>{fc.code} - {fc.desc}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">1. Mã WO</label>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">3. Tiêu đề công việc</label>
                   <input
                     type="text"
-                    value={activeItem.id || ''}
-                    onChange={(e) => setActiveItem({ ...activeItem, id: e.target.value })}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono font-bold text-emerald-800"
+                    value={activeItem.title || ''}
+                    onChange={(e) => setActiveItem({ ...activeItem, title: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-semibold"
                   />
                 </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">2. Mã Work Permit</label>
-                  <input
-                    type="text"
-                    value={activeItem.workPermitId || ''}
-                    onChange={(e) => setActiveItem({ ...activeItem, workPermitId: e.target.value })}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono font-bold text-blue-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">6. Failure Code</label>
-                  <select
-                    value={activeItem.failureCode || 'ROUTINE-PM'}
-                    onChange={(e) => setActiveItem({ ...activeItem, failureCode: e.target.value })}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-semibold text-rose-700"
-                  >
-                    {FAILURE_CODES.map(fc => (
-                      <option key={fc.code} value={fc.code}>{fc.code} - {fc.desc}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">3. Tiêu đề công việc</label>
-                <input
-                  type="text"
-                  value={activeItem.title || ''}
-                  onChange={(e) => setActiveItem({ ...activeItem, title: e.target.value })}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-semibold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">4. Mô tả chi tiết</label>
-                <textarea
-                  rows={2}
-                  value={activeItem.description || ''}
-                  onChange={(e) => setActiveItem({ ...activeItem, description: e.target.value })}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">10. Mức ưu tiên (Priority)</label>
-                  <select
-                    value={activeItem.priorityCode || 'P3'}
-                    onChange={(e) => setActiveItem({ ...activeItem, priorityCode: e.target.value as any })}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-bold"
-                  >
-                    <option value="P1">P1: Làm ngay</option>
-                    <option value="P3">P3: Trong 1 tuần</option>
-                    <option value="P6">P6: Bảo trì định kỳ</option>
-                    <option value="P7">P7: Shutdown</option>
-                    <option value="P9">P9: DMR</option>
-                  </select>
-                </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">11. Vòng đời CMMS Stage</label>
-                  <select
-                    value={activeItem.workflowStage || '3_planning'}
-                    onChange={(e) => setActiveItem({ ...activeItem, workflowStage: e.target.value as any })}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-bold text-blue-700"
-                  >
-                    {Object.entries(WORKFLOW_STAGES).map(([k, v]) => (
-                      <option key={k} value={k}>{v.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">12. Người thực hiện (PIC)</label>
-                  <input
-                    type="text"
-                    value={activeItem.assignedTo || ''}
-                    onChange={(e) => setActiveItem({ ...activeItem, assignedTo: e.target.value })}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded"
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">4. Mô tả chi tiết</label>
+                  <textarea
+                    rows={2}
+                    value={activeItem.description || ''}
+                    onChange={(e) => setActiveItem({ ...activeItem, description: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
                   />
                 </div>
               </div>
 
-              {/* Mốc thời gian dừng máy (Cột 20-23) */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                  <Clock size={14} className="text-indigo-600" />
-                  Mốc Thời Gian Dừng Máy & Sửa Chữa (Cột 20 - 23)
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {/* KHỐI 2: ĐIỀU ĐỘ, TIẾN ĐỘ & NGƯỜI THỰC HIỆN */}
+              <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200/80 space-y-4">
+                <div className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                  Tiến Độ, Mức Ưu Tiên & Phân Công Nhân Sự
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-[10px] text-rose-700 font-bold mb-0.5">20. Bắt đầu dừng máy</label>
-                    <input
-                      type="text"
-                      value={activeItem.downtimeStart || ''}
-                      onChange={(e) => setActiveItem({ ...activeItem, downtimeStart: e.target.value })}
-                      placeholder="Chưa ghi nhận"
-                      className="w-full text-xs font-mono border rounded p-1 bg-white"
-                    />
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">10. Mức ưu tiên (Priority)</label>
+                    <select
+                      value={activeItem.priorityCode || 'P3'}
+                      onChange={(e) => setActiveItem({ ...activeItem, priorityCode: e.target.value as any })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold bg-white"
+                    >
+                      <option value="P1">P1: Làm ngay (Emergency/Breakdown)</option>
+                      <option value="P3">P3: Trong 1 tuần (High Priority)</option>
+                      <option value="P6">P6: Bảo trì định kỳ (Scheduled PM)</option>
+                      <option value="P7">P7: Shutdown (Dừng nhà máy)</option>
+                      <option value="P9">P9: DMR (Defect & Reliability)</option>
+                    </select>
                   </div>
+
                   <div>
-                    <label className="block text-[10px] text-amber-700 font-bold mb-0.5">21. Bắt đầu sửa</label>
-                    <input
-                      type="text"
-                      value={activeItem.repairStart || ''}
-                      onChange={(e) => setActiveItem({ ...activeItem, repairStart: e.target.value })}
-                      placeholder="Chưa ghi nhận"
-                      className="w-full text-xs font-mono border rounded p-1 bg-white"
-                    />
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">11. Vòng đời CMMS Stage</label>
+                    <select
+                      value={activeItem.workflowStage || '3_planning'}
+                      onChange={(e) => setActiveItem({ ...activeItem, workflowStage: e.target.value as any })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-blue-700 bg-white"
+                    >
+                      {Object.entries(WORKFLOW_STAGES).map(([k, v]) => (
+                        <option key={k} value={k}>{v.label}</option>
+                      ))}
+                    </select>
                   </div>
+
                   <div>
-                    <label className="block text-[10px] text-blue-700 font-bold mb-0.5">22. Kết thúc sửa</label>
-                    <input
-                      type="text"
-                      value={activeItem.repairEnd || ''}
-                      onChange={(e) => setActiveItem({ ...activeItem, repairEnd: e.target.value })}
-                      placeholder="Chưa ghi nhận"
-                      className="w-full text-xs font-mono border rounded p-1 bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-emerald-700 font-bold mb-0.5">23. Chạy lại máy</label>
-                    <input
-                      type="text"
-                      value={activeItem.restartTime || ''}
-                      onChange={(e) => setActiveItem({ ...activeItem, restartTime: e.target.value })}
-                      placeholder="Chưa ghi nhận"
-                      className="w-full text-xs font-mono border rounded p-1 bg-white"
+                    <FseEngineerDropdown
+                      label="12. Người thực hiện (PIC)"
+                      value={activeItem.assignedTo || ''}
+                      onChange={(val) => setActiveItem({ ...activeItem, assignedTo: val })}
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* KHỐI 3: MỐC THỜI GIAN DỪNG MÁY (CỘT 20-23) - CALENDAR PICKER CHUẨN */}
+              <div className="p-5 bg-gradient-to-br from-slate-50 to-indigo-50/30 border border-slate-200 rounded-2xl space-y-4 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
+                  <div>
+                    <span className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <CalendarDays size={18} className="text-indigo-600" />
+                      Mốc Thời Gian Dừng Máy &amp; Sửa Chữa (Chuẩn TEV Service Flatform)
+                    </span>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Lựa chọn trực tiếp trên Calendar · Hỗ trợ bấm "Bây giờ" hoặc mở lịch chọn ngày giờ chính xác · Chuẩn tính toán ARP-E
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-semibold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+                      Định dạng chuẩn: YYYY-MM-DD HH:mm
+                    </span>
+                  </div>
+                </div>
+
+                {/* Milestone Step Progress Indicator */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-[10px] font-bold text-slate-600 pb-1">
+                  <div className="p-1.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-800">
+                    Bước 1: 🛑 Dừng máy
+                  </div>
+                  <div className="p-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
+                    Bước 2: 🔧 Bắt đầu sửa
+                  </div>
+                  <div className="p-1.5 bg-blue-50 border border-blue-200 rounded-lg text-blue-800">
+                    Bước 3: 🏁 Kết thúc sửa
+                  </div>
+                  <div className="p-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800">
+                    Bước 4: ⚡ Chạy lại máy
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* 20. Bắt đầu dừng máy */}
+                  <div className="bg-white p-3.5 rounded-xl border-2 border-rose-200 shadow-xs hover:border-rose-400 transition-all space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-rose-700 font-bold flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                        20. Bắt đầu dừng máy
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const now = getNowFormattedDatetime();
+                          setActiveItem({ ...activeItem, downtimeStart: now });
+                        }}
+                        className="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-[10px] text-rose-700 font-bold transition-colors"
+                        title="Điền thời gian hiện tại"
+                      >
+                        🕒 Bây giờ
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="downtimeStartInput"
+                        type="datetime-local"
+                        value={parseToDatetimeLocal(activeItem.downtimeStart)}
+                        onChange={(e) => {
+                          const formatted = formatFromDatetimeLocal(e.target.value);
+                          setActiveItem({ ...activeItem, downtimeStart: formatted });
+                        }}
+                        onClick={(e) => {
+                          try { (e.target as any).showPicker?.(); } catch {}
+                        }}
+                        className="w-full text-xs font-mono font-bold border border-slate-300 rounded-lg pl-8 pr-2 py-2 bg-slate-50/40 hover:bg-white focus:bg-white focus:border-rose-500 focus:ring-2 focus:ring-rose-200 outline-none transition-all cursor-pointer text-slate-800"
+                      />
+                      <CalendarDays size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-rose-600 pointer-events-none" />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                      <span className="font-mono text-slate-600 truncate">
+                        {activeItem.downtimeStart || <span className="text-slate-400 italic">Chưa ghi nhận</span>}
+                      </span>
+                      {activeItem.downtimeStart && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveItem({ ...activeItem, downtimeStart: '' })}
+                          className="text-slate-400 hover:text-rose-600 ml-1 font-semibold text-[10px]"
+                        >
+                          Xóa
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 21. Bắt đầu sửa */}
+                  <div className="bg-white p-3.5 rounded-xl border-2 border-amber-200 shadow-xs hover:border-amber-400 transition-all space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-amber-700 font-bold flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                        21. Bắt đầu sửa
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const now = getNowFormattedDatetime();
+                          setActiveItem({ ...activeItem, repairStart: now });
+                        }}
+                        className="px-2 py-0.5 rounded bg-amber-50 hover:bg-amber-100 text-[10px] text-amber-700 font-bold transition-colors"
+                        title="Điền thời gian hiện tại"
+                      >
+                        🕒 Bây giờ
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="repairStartInput"
+                        type="datetime-local"
+                        value={parseToDatetimeLocal(activeItem.repairStart)}
+                        onChange={(e) => {
+                          const formatted = formatFromDatetimeLocal(e.target.value);
+                          setActiveItem({ ...activeItem, repairStart: formatted });
+                        }}
+                        onClick={(e) => {
+                          try { (e.target as any).showPicker?.(); } catch {}
+                        }}
+                        className="w-full text-xs font-mono font-bold border border-slate-300 rounded-lg pl-8 pr-2 py-2 bg-slate-50/40 hover:bg-white focus:bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none transition-all cursor-pointer text-slate-800"
+                      />
+                      <CalendarDays size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-600 pointer-events-none" />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                      <span className="font-mono text-slate-600 truncate">
+                        {activeItem.repairStart || <span className="text-slate-400 italic">Chưa ghi nhận</span>}
+                      </span>
+                      {activeItem.repairStart && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveItem({ ...activeItem, repairStart: '' })}
+                          className="text-slate-400 hover:text-amber-600 ml-1 font-semibold text-[10px]"
+                        >
+                          Xóa
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 22. Kết thúc sửa */}
+                  <div className="bg-white p-3.5 rounded-xl border-2 border-blue-200 shadow-xs hover:border-blue-400 transition-all space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-blue-700 font-bold flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                        22. Kết thúc sửa
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const now = getNowFormattedDatetime();
+                          setActiveItem({ ...activeItem, repairEnd: now });
+                        }}
+                        className="px-2 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-[10px] text-blue-700 font-bold transition-colors"
+                        title="Điền thời gian hiện tại"
+                      >
+                        🕒 Bây giờ
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="repairEndInput"
+                        type="datetime-local"
+                        value={parseToDatetimeLocal(activeItem.repairEnd)}
+                        onChange={(e) => {
+                          const formatted = formatFromDatetimeLocal(e.target.value);
+                          setActiveItem({ ...activeItem, repairEnd: formatted });
+                        }}
+                        onClick={(e) => {
+                          try { (e.target as any).showPicker?.(); } catch {}
+                        }}
+                        className="w-full text-xs font-mono font-bold border border-slate-300 rounded-lg pl-8 pr-2 py-2 bg-slate-50/40 hover:bg-white focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all cursor-pointer text-slate-800"
+                      />
+                      <CalendarDays size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-blue-600 pointer-events-none" />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                      <span className="font-mono text-slate-600 truncate">
+                        {activeItem.repairEnd || <span className="text-slate-400 italic">Chưa ghi nhận</span>}
+                      </span>
+                      {activeItem.repairEnd && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveItem({ ...activeItem, repairEnd: '' })}
+                          className="text-slate-400 hover:text-blue-600 ml-1 font-semibold text-[10px]"
+                        >
+                          Xóa
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 23. Chạy lại máy */}
+                  <div className="bg-white p-3.5 rounded-xl border-2 border-emerald-200 shadow-xs hover:border-emerald-400 transition-all space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-emerald-700 font-bold flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                        23. Chạy lại máy
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const now = getNowFormattedDatetime();
+                          setActiveItem({ ...activeItem, restartTime: now });
+                        }}
+                        className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-[10px] text-emerald-700 font-bold transition-colors"
+                        title="Điền thời gian hiện tại"
+                      >
+                        🕒 Bây giờ
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="restartTimeInput"
+                        type="datetime-local"
+                        value={parseToDatetimeLocal(activeItem.restartTime)}
+                        onChange={(e) => {
+                          const formatted = formatFromDatetimeLocal(e.target.value);
+                          setActiveItem({ ...activeItem, restartTime: formatted });
+                        }}
+                        onClick={(e) => {
+                          try { (e.target as any).showPicker?.(); } catch {}
+                        }}
+                        className="w-full text-xs font-mono font-bold border border-slate-300 rounded-lg pl-8 pr-2 py-2 bg-slate-50/40 hover:bg-white focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all cursor-pointer text-slate-800"
+                      />
+                      <CalendarDays size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-600 pointer-events-none" />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                      <span className="font-mono text-slate-600 truncate">
+                        {activeItem.restartTime || <span className="text-slate-400 italic">Chưa ghi nhận</span>}
+                      </span>
+                      {activeItem.restartTime && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveItem({ ...activeItem, restartTime: '' })}
+                          className="text-slate-400 hover:text-emerald-600 ml-1 font-semibold text-[10px]"
+                        >
+                          Xóa
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Calculated Durations (ARP-E Standard) */}
+                {(() => {
+                  const waitHrs = calculateMilestoneDiffHours(activeItem.downtimeStart, activeItem.repairStart);
+                  const repairHrs = calculateMilestoneDiffHours(activeItem.repairStart, activeItem.repairEnd);
+                  const restartHrs = calculateMilestoneDiffHours(activeItem.repairEnd, activeItem.restartTime);
+                  const totalDtHrs = calculateMilestoneDiffHours(activeItem.downtimeStart, activeItem.restartTime);
+
+                  return (
+                    <div className="bg-slate-900 text-white rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 text-xs shadow-inner">
+                      <div className="flex flex-wrap items-center gap-5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 text-[11px]">Thời gian chờ (T_wait):</span>
+                          <span className="font-mono font-bold text-amber-400 text-sm">
+                            {waitHrs !== null ? `${waitHrs} giờ` : '---'}
+                          </span>
+                        </div>
+                        <div className="w-px h-5 bg-slate-700 hidden sm:block"></div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 text-[11px]">Sửa chữa thực tế (T_rep):</span>
+                          <span className="font-mono font-bold text-emerald-400 text-sm">
+                            {repairHrs !== null ? `${repairHrs} giờ` : '---'}
+                          </span>
+                        </div>
+                        <div className="w-px h-5 bg-slate-700 hidden sm:block"></div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 text-[11px]">Kiểm tra chạy lại:</span>
+                          <span className="font-mono font-bold text-blue-400 text-sm">
+                            {restartHrs !== null ? `${restartHrs} giờ` : '---'}
+                          </span>
+                        </div>
+                        <div className="w-px h-5 bg-slate-700 hidden sm:block"></div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 text-[11px]">Tổng dừng máy (Total DT):</span>
+                          <span className="font-mono font-black text-rose-400 text-sm">
+                            {totalDtHrs !== null ? `${totalDtHrs} giờ` : '---'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {waitHrs !== null && repairHrs !== null && waitHrs > repairHrs && (
+                        <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          ⚠️ MWT ({waitHrs}h) &gt; MTTR ({repairHrs}h) - Cần tối ưu kho vật tư & khâu lập kế hoạch
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -3270,7 +3637,7 @@ export const PmpPmCmWorkOrderPermitManager: React.FC<Props> = ({
                   if (activeItem.id) {
                     await onSaveWorkOrder(activeItem as WorkOrderItem, true);
                     setIsEdit23ColsModalOpen(false);
-                    setActionNotice(`Đã cập nhật chi tiết 23 Cột cho [${activeItem.id}] thành công!`);
+                    setActionNotice(`Đã cập nhật chi tiết cho [${activeItem.id}] thành công!`);
                     setTimeout(() => setActionNotice(null), 4000);
                   }
                 }}

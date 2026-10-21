@@ -185,7 +185,7 @@ export const NameplateScannerModal: React.FC<Props> = ({
                 <span className="text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 px-2 py-0.5 rounded">
                   AI VISION OCR
                 </span>
-                <span className="text-xs text-amber-200/80">Gemini 3.8 Flash Multimodal</span>
+                <span className="text-xs text-amber-200/80">Nhận Diện Quang Học Tự Động (OCR Multimodal)</span>
               </div>
               <h2 className="text-base sm:text-lg font-bold">
                 Quét Nhãn Mác Nameplate Máy Biến Áp Bằng Camera

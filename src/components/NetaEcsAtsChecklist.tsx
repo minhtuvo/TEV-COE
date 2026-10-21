@@ -27,7 +27,8 @@ import {
   Clock,
   Sliders,
   Cable,
-  Power
+  Power,
+  FileText
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -37,6 +38,9 @@ import {
   performDeterministicEcsAtsAnalysis,
   ECS_ATS_SYSTEM_INSTRUCTION
 } from '../../server/netaEcsAtsAnalyzer';
+import { CustomerSelectDropdown } from './CustomerSelectDropdown';
+import { ProjectSelectDropdown } from './ProjectSelectDropdown';
+import { FseEngineerDropdown } from './FseEngineerDropdown';
 
 interface Props {
   onSaveReport?: (reportData: any) => void;
@@ -169,6 +173,7 @@ export const NetaEcsAtsChecklist: React.FC<Props> = ({
   const isVi = lang === 'vi';
 
   // Header metadata
+  const [customerName, setCustomerName] = useState('Công ty Cổ phần Năng lượng TEV');
   const [projectName, setProjectName] = useState('Toa Nha Trung Tam Du Lieu TEV Data Center');
   const [systemTag, setSystemTag] = useState('ATS-CRITICAL-LOAD-01 (400V 800A 4-Pole ATS)');
   const [voltageRatingV, setVoltageRatingV] = useState<number>(400);
@@ -721,6 +726,70 @@ export const NetaEcsAtsChecklist: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* 2.5 PROJECT, CUSTOMER & COMMISSIONING ENGINEER SELECTION (MASTER DROPDOWNS) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center font-bold text-xs">
+              <Sliders size={15} />
+            </div>
+            <h3 className="font-black text-sm text-slate-900">
+              {isVi ? 'THÔNG TIN DỰ ÁN, KHÁCH HÀNG & KỸ SƯ NGHIỆM THU (MASTER)' : 'PROJECT, CUSTOMER & COMMISSIONING ENGINEER'}
+            </h3>
+          </div>
+          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">
+            NETA ECS-2024 Sec 8.3
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+          <div>
+            <CustomerSelectDropdown
+              label={isVi ? 'Tên Khách Hàng (Master)' : 'Customer Name (Master)'}
+              value={customerName}
+              onChange={(cName) => setCustomerName(cName)}
+              placeholder={isVi ? 'Chọn hoặc thêm Khách Hàng mới...' : 'Select or add customer...'}
+            />
+          </div>
+
+          <div>
+            <ProjectSelectDropdown
+              label={isVi ? 'Tên Dự Án / Nhà Máy' : 'Project / Plant Name'}
+              value={projectName}
+              customerName={customerName}
+              onCustomerAutoSelect={(cName) => {
+                if (!customerName) setCustomerName(cName);
+              }}
+              onChange={(pName) => setProjectName(pName)}
+              placeholder={isVi ? 'Chọn hoặc thêm Dự Án / Nhà Máy...' : 'Select or add project...'}
+              standard="ecs"
+            />
+          </div>
+
+          <div>
+            <label className="block text-slate-600 font-semibold mb-1">
+              {isVi ? 'Kỹ Sư Nghiệm Thu FSE (NETA III)' : 'Commissioning FSE Engineer'}
+            </label>
+            <FseEngineerDropdown
+              value={fseName}
+              onChange={(eng) => setFseName(eng)}
+            />
+          </div>
+
+          <div>
+            <label className="block text-slate-600 font-semibold mb-1">
+              {isVi ? 'Mã Định Danh Tủ ATS (Tag)' : 'ATS System Tag'}
+            </label>
+            <input
+              type="text"
+              value={systemTag}
+              onChange={(e) => setSystemTag(e.target.value)}
+              className="w-full text-xs font-bold px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-teal-500"
+            />
+          </div>
+        </div>
+      </div>
+
       {/* 3. INPUT FORMS (3 GIAI ĐOẠN ĐÓNG ĐIỆN & CHUYỂN NGUỒN) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* PHASE 1: PRE-ENERGIZATION (NETA ECS 8.3.A) */}
@@ -1134,8 +1203,8 @@ export const NetaEcsAtsChecklist: React.FC<Props> = ({
               disabled={isAnalyzing}
               className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 shadow-md shadow-blue-500/20"
             >
-              <Sparkles size={14} className="text-amber-300" />
-              <span>{isAnalyzing ? (isVi ? 'AI Đang Thẩm Định...' : 'AI Evaluating...') : (isVi ? 'Phân Tích Gemini AI Chuyên Sâu' : 'Run Gemini AI Specialist')}</span>
+              <ShieldCheck size={14} className="text-amber-300" />
+              <span>{isAnalyzing ? (isVi ? 'Đang Thẩm Định...' : 'Evaluating...') : (isVi ? 'Thẩm Định Kỹ Thuật NETA ECS Chuyên Sâu' : 'Run Technical Specialist Evaluation')}</span>
             </button>
           </div>
         </div>
@@ -1225,8 +1294,8 @@ export const NetaEcsAtsChecklist: React.FC<Props> = ({
                   activeResultTab === 'ai-markdown' ? 'bg-blue-600 text-white font-black shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Sparkles size={12} className="text-amber-300" />
-                <span>{isVi ? 'Báo Cáo Gemini AI' : 'Gemini AI Report'}</span>
+                <FileText size={12} className="text-amber-300" />
+                <span>{isVi ? 'Báo Cáo Thẩm Định Kỹ Thuật' : 'Technical Evaluation Report'}</span>
               </button>
             )}
           </div>

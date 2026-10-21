@@ -21,10 +21,11 @@ import {
   Cable,
   Power,
   ChevronDown,
-  LayoutGrid
+  LayoutGrid,
+  Gauge
 } from 'lucide-react';
 
-export type MtsChecklistMode = 'transformer' | 'thermography' | 'switchgear' | 'cables' | 'grounding' | 'relays' | 'motors';
+export type MtsChecklistMode = 'transformer' | 'instrument_ct' | 'instrument_vt' | 'instrument_ccvt' | 'busway' | 'thermography' | 'switchgear' | 'cables' | 'grounding' | 'relays' | 'motors';
 
 export interface MtsEquipmentItem {
   id: MtsChecklistMode;
@@ -72,6 +73,78 @@ export const MTS_EQUIPMENT_CATALOG: MtsEquipmentItem[] = [
     ]
   },
   {
+    id: 'instrument_ct',
+    category: 'transformers',
+    title: 'Biến Dòng Điện Đo Lường & Bảo Vệ (Current Transformers - CT)',
+    titleEn: 'Instrument Transformers: Current Transformers (CT)',
+    shortTitle: 'Biến Dòng CT',
+    shortTitleEn: 'Current Transformers',
+    subtitle: 'NETA MTS Sec 7.10.1 • Bảng 100.5, 100.9, 100.12, 100.18 • IEEE C57.13 • Cực Tính • Knee-point • Nối Đất 1 Điểm',
+    scope: 'Biến dòng trung thế 15kV/24kV/35kV, biến dòng cao thế 110kV/220kV, tủ máy cắt, ngăn lộ xuất tuyến',
+    standardCode: 'ANSI/NETA MTS-2023 Mục 7.10.1',
+    standardName: 'NETA MTS-2023 Sec 7.10.1 & IEEE C57.13 / C57.13.1 / C57.13.3',
+    aiEngine: 'Instrument CT MTS AI Specialist (NETA MTS 7.10.1)',
+    icon: Gauge,
+    colorGradient: 'from-indigo-600 via-indigo-700 to-slate-900',
+    borderColor: 'hover:border-indigo-400 focus:border-indigo-500',
+    tagColor: 'bg-indigo-500/20 text-indigo-800 border-indigo-300',
+    status: 'active',
+    features: [
+      'Đo Điện Trở Cách Điện Cuộn Sơ & Thứ Cấp (NETA Table 100.5)',
+      'Thử Cực Tính H1-X1 & Sai Số Tỉ Số Biến Dòng (IEEE C57.13)',
+      'Đường Cong Từ Hóa Excitation & Điện Áp Knee-Point (IEEE C57.13.1)',
+      'Xác Nhận DUY NHẤT 1 Điểm Nối Đất Mạch Thứ Cấp (IEEE C57.13.3)'
+    ]
+  },
+  {
+    id: 'instrument_vt',
+    category: 'transformers',
+    title: 'Biến Điện Áp Đo Lường & Bảo Vệ (Voltage Transformers - VT/PT)',
+    titleEn: 'Instrument Transformers: Voltage Transformers (VT/PT)',
+    shortTitle: 'Biến Điện Áp (VT/PT)',
+    shortTitleEn: 'Voltage Transformers',
+    subtitle: 'NETA MTS Sec 7.10.2 • Bảng 100.5, 100.9, 100.12, 100.18 • IEEE C57.13 • Tỉ Số Vòng Dây • Cực Tính • Cầu Chì Sơ Cấp',
+    scope: 'Biến điện áp trung thế 15kV/22kV/35kV, biến điện áp tụ CVT cao thế 110kV/220kV/500kV',
+    standardCode: 'ANSI/NETA MTS-2023 Mục 7.10.2',
+    standardName: 'NETA MTS-2023 Sec 7.10.2 & IEEE C57.13 / C57.13.1 / C57.13.3',
+    aiEngine: 'Instrument VT/PT MTS AI Specialist (NETA MTS 7.10.2)',
+    icon: Zap,
+    colorGradient: 'from-sky-600 via-sky-700 to-slate-900',
+    borderColor: 'hover:border-sky-400 focus:border-sky-500',
+    tagColor: 'bg-sky-500/20 text-sky-800 border-sky-300',
+    status: 'active',
+    features: [
+      'Đo Điện Trở Cách Điện Cuộn Sơ & Thứ Cấp (NETA Table 100.5)',
+      'Thử Nghiệm Tỉ Số Biến Turns-Ratio & Cực Tính H1-X1 (IEEE C57.13)',
+      'Kiểm Tra Cầu Chì Sơ Cấp Current-Limiting & Tiếp Điểm Ngàm',
+      'Xác Nhận DUY NHẤT 1 Điểm Nối Đất Mạch Thứ Cấp (IEEE C57.13.3)'
+    ]
+  },
+  {
+    id: 'instrument_ccvt',
+    category: 'transformers',
+    title: 'Biến Điện Áp Kiểu Tụ (Coupling-Capacitor Voltage Transformers - CCVT)',
+    titleEn: 'Instrument Transformers: Coupling-Capacitor Voltage Transformers (CCVT)',
+    shortTitle: 'Biến Điện Áp Tụ (CCVT)',
+    shortTitleEn: 'Capacitor Voltage Transformers',
+    subtitle: 'NETA MTS Sec 7.10.3 • Bảng 100.5, 100.9, 100.12, 100.18 • IEEE C93.1 • Đo C1/C2 (≤ ±5%) • Tan Delta (≤ 0.5%) • Bẫy Sóng PLC',
+    scope: 'Trạm biến áp cao thế & siêu cao thế 110kV/220kV/500kV, xuất tuyến đường dây truyền tải, ghép tín hiệu truyền thông PLC',
+    standardCode: 'ANSI/NETA MTS-2023 Mục 7.10.3',
+    standardName: 'NETA MTS-2023 Sec 7.10.3 & IEEE C93.1 / C57.13.3',
+    aiEngine: 'CCVT MTS AI Specialist (NETA MTS 7.10.3 & IEEE C93.1)',
+    icon: Radio,
+    colorGradient: 'from-violet-600 via-purple-700 to-slate-900',
+    borderColor: 'hover:border-purple-400 focus:border-purple-500',
+    tagColor: 'bg-purple-500/20 text-purple-800 border-purple-300',
+    status: 'active',
+    features: [
+      'Đo Điện Dung Tầng Tụ C1 & C2 (Dung Sai ≤ ±5% Giá Trị Danh Định, IEEE C93.1)',
+      'Tổn Hao Cách Điện Power Factor Tan Delta C1/C2/IVT (≤ 0.5% ở 20°C)',
+      'Kiểm Tra Cơ Học Dao Tiếp Địa CCVT & Cuộn Cản Xả Bẫy Sóng PLC (Drain Coil)',
+      'Xác Nhận DUY NHẤT 1 Điểm Nối Đất Mạch Thứ Cấp (IEEE C57.13.3)'
+    ]
+  },
+  {
     id: 'thermography',
     category: 'thermography',
     title: 'Khảo Sát & Kiểm Tra Hồng Ngoại Thiết Bị Điện (Thermographic Survey)',
@@ -116,6 +189,30 @@ export const MTS_EQUIPMENT_CATALOG: MtsEquipmentItem[] = [
       'Điện Trở Tiếp Xúc Mối Nối DLRO Micro-ohm (NETA Table 100.12)',
       'Điện Trở Cách Điện Megohm Thanh Cái & Cực Tiếp Điểm',
       'Đặc Tuyến Thời Gian Đóng Cắt (Open/Close/Trip Timing per Table 100.7)'
+    ]
+  },
+  {
+    id: 'busway',
+    category: 'switchgear',
+    title: 'Thanh Cái Dẫn Điện Vỏ Kim Loại (Metal-Enclosed Busways - LV/MV)',
+    titleEn: 'Metal-Enclosed Busways (Low- & Medium-Voltage, < 1 kV & 1-35 kV)',
+    shortTitle: 'Thanh Cái Busway',
+    shortTitleEn: 'Busways (LV/MV)',
+    subtitle: 'NETA MTS Sec 7.4 • Bảng 100.1, 100.12, 100.17, 100.18, 100.23 • Điện Trở Mối Nối Joint (≤ 50%) • Thử Cao Áp Hi-Pot • Khảo Sát PD Online',
+    scope: 'Tuyến Busway hạ thế MSB < 1kV, Busway trung thế 1kV - 35kV (15kV/24kV), trục đứng riser tòa nhà, xuất tuyến máy biến áp',
+    standardCode: 'ANSI/NETA MTS-2023 Mục 7.4',
+    standardName: 'NETA MTS-2023 Sec 7.4, IEEE C37.23, NEMA BU1',
+    aiEngine: 'Metal-Enclosed Busways MTS AI Specialist (NETA MTS 7.4)',
+    icon: Layers,
+    colorGradient: 'from-teal-600 via-teal-700 to-slate-900',
+    borderColor: 'hover:border-teal-400 focus:border-teal-500',
+    tagColor: 'bg-teal-500/20 text-teal-800 border-teal-300',
+    status: 'active',
+    features: [
+      'Đo Điện Trở Mối Nối Bus Joint Bằng Micro-ohmmeter Dòng Cao (Độ Lệch ≤ 50%, NETA MTS 7.4.D.1)',
+      'Đo Điện Trở Cách Điện Megohm (NETA Table 100.1, Min ≥ 1,000 MΩ cho Hệ 15kV)',
+      'Thử Nghiệm Chịu Đựng Điện Áp Tăng Cao Hi-Pot AC/DC 1 Phút (NETA Table 100.17)',
+      'Khảo Sát Phóng Điện Cục Bộ Online TEV / Acoustic Mối Nối Bus Joint (NETA Table 100.23)'
     ]
   },
   {
@@ -245,9 +342,9 @@ export const MtsEquipmentChecklistSelector: React.FC<Props> = ({
 
   const categories = [
     { id: 'all', label: isVi ? 'Tất cả thiết bị MTS' : 'All MTS Equipment', count: MTS_EQUIPMENT_CATALOG.length },
-    { id: 'transformers', label: isVi ? 'Máy Biến Áp' : 'Transformers', count: 1 },
+    { id: 'transformers', label: isVi ? 'Biến Áp, Biến Dòng, VT & Tụ CCVT' : 'Transformers, CTs, VTs & CCVTs', count: 4 },
     { id: 'thermography', label: isVi ? 'Khảo Sát Nhiệt IR' : 'Thermography', count: 1 },
-    { id: 'switchgear', label: isVi ? 'Đóng Cắt & Máy Cắt' : 'Switchgear', count: 1 },
+    { id: 'switchgear', label: isVi ? 'Đóng Cắt & Busway' : 'Switchgear & Busways', count: 2 },
     { id: 'cables', label: isVi ? 'Cáp Điện Lực' : 'Power Cables', count: 1 },
     { id: 'grounding', label: isVi ? 'Tiếp Địa Trạm' : 'Grounding', count: 1 },
     { id: 'relays', label: isVi ? 'Rơ-le Bảo Vệ' : 'Relays', count: 1 },
